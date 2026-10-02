@@ -27,6 +27,7 @@ from .character_campaign_options import (
     collect_mechanic_effect_legacy_keys,
     normalize_campaign_mechanic_effects,
 )
+from .character_page_companion import blocks_page_companion_heuristics
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
@@ -174,6 +175,8 @@ __all__ = [
 def _extract_character_effect_keys(features: list[dict[str, Any]] | None) -> list[str]:
     results: list[str] = []
     for feature in list(features or []):
+        if not isinstance(feature, dict) or feature.get("mechanics_suppressed"):
+            continue
         results.extend(_effect_keys_for_feature(feature))
     return _dedupe_preserve_order(results)
 
@@ -220,6 +223,8 @@ def _character_mechanic_effect_rows(
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for feature in list(features or []):
+        if not isinstance(feature, dict) or feature.get("mechanics_suppressed"):
+            continue
         rows.extend(
             _feature_mechanic_effect_rows(
                 dict(feature or {}),
@@ -986,6 +991,12 @@ def _resolve_item_entry(
 ) -> SystemsEntryRecord | None:
     if isinstance(item, dict) and item.get("mechanics_suppressed"):
         return None
+    if isinstance(item, dict):
+        from .committed_publication import active
+
+        activated = active()
+    else:
+        activated = False
     if not item_catalog:
         return None
     by_entry_key = item_catalog.get("by_entry_key") or {}
@@ -999,11 +1010,18 @@ def _resolve_item_entry(
             entry = by_entry_key.get(entry_key)
             if isinstance(entry, SystemsEntryRecord):
                 return entry
+            if activated:
+                return None
         slug = str(systems_ref.get("slug") or "").strip()
         if slug:
             entry = by_slug.get(slug)
             if isinstance(entry, SystemsEntryRecord):
                 return entry
+            if activated:
+                return None
+        if activated:
+            # A saved title is a discovery hint, never current source authority.
+            return None
         candidate_titles.extend(
             [
                 str(systems_ref.get("title") or "").strip(),
@@ -1128,6 +1146,7 @@ def describe_equipment_state_support(
     *,
     item_catalog: dict[str, Any] | None = None,
     entry: SystemsEntryRecord | None = None,
+    trusted_source: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     if bool(dict(item or {}).get("is_currency_only")):
         return {
@@ -1142,6 +1161,46 @@ def describe_equipment_state_support(
     resolved_catalog = dict(item_catalog or {})
     resolved_entry = entry if isinstance(entry, SystemsEntryRecord) else _resolve_item_entry(item, resolved_catalog)
     campaign_item_support = _resolve_campaign_item_page_support(item, resolved_catalog)
+    trusted_kind = ""
+    if trusted_source is not None:
+        trusted_kind, trusted_identity = trusted_source
+        systems_ref = dict(item.get("systems_ref") or {})
+        page_ref = _extract_campaign_page_ref(item.get("page_ref"))
+        source_kind = str(item.get("source_kind") or "").strip()
+        source_is_valid = False
+        if trusted_kind == "page":
+            source_is_valid = bool(
+                page_ref == trusted_identity and not systems_ref
+                and isinstance(campaign_item_support, dict)
+                and str(campaign_item_support.get("page_ref") or "").strip() == trusted_identity
+            )
+            resolved_entry = None
+        elif trusted_kind in {"systems_key", "systems_slug"}:
+            reference_key = "entry_key" if trusted_kind == "systems_key" else "slug"
+            source_is_valid = bool(
+                not page_ref and systems_ref.get(reference_key) == trusted_identity
+                and isinstance(resolved_entry, SystemsEntryRecord)
+                and getattr(resolved_entry, reference_key, None) == trusted_identity
+            )
+            campaign_item_support = None
+        elif trusted_kind == "intrinsic":
+            source_is_valid = bool(
+                not page_ref and not systems_ref and not source_kind
+                and normalize_lookup(str(item.get("name") or "")) == trusted_identity
+            )
+            resolved_entry = None
+            campaign_item_support = None
+        if not source_is_valid:
+            return {
+                "supports_equipped_state": False,
+                "supports_attunement": False,
+                "requires_attunement": False,
+                "is_weapon": False,
+                "is_armor": False,
+                "is_magic_item": False,
+                "supports_weapon_wield_mode": False,
+                "weapon_wield_modes": [],
+            }
     metadata = _resolve_item_support_metadata(
         item,
         resolved_catalog,
@@ -1153,12 +1212,14 @@ def describe_equipment_state_support(
         resolved_catalog,
         entry=resolved_entry,
         metadata=metadata,
+        trusted_source_kind=trusted_kind,
     )
     armor_profile = _resolve_armor_profile(
         item,
         resolved_catalog,
         entry=resolved_entry,
         metadata=metadata,
+        trusted_source_kind=trusted_kind,
     )
     requires_attunement = _metadata_requires_attunement(metadata.get("attunement"))
     is_magic_item = _metadata_is_magic_item(metadata)
@@ -1749,7 +1810,7 @@ def _effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
     campaign_option = dict(feature.get("campaign_option") or {})
     feature_name = str(feature.get("name") or systems_ref.get("title") or "").strip()
     effect_keys: list[str] = []
-    if feature_name:
+    if feature_name and not blocks_page_companion_heuristics(feature):
         effect_keys.append(feature_name)
         normalized_name = normalize_lookup(feature_name)
         normalized_slug = normalize_lookup(str(systems_ref.get("slug") or "").strip())
@@ -1979,8 +2040,12 @@ def _build_weapon_attack_contexts(
                 ),
                 "attack_name": attack_name,
                 "ability_key": ability_key,
+                "ability_dependencies": (["str", "dex"] if "F" in set(profile.get("properties") or [])
+                                         else [ability_key]),
                 "ability_modifier": _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)),
                 "is_proficient": _is_proficient_with_weapon(profile, weapon_proficiencies, attack_name),
+                "proficiency_matches": _matching_weapon_proficiencies(
+                    profile, weapon_proficiencies, attack_name),
                 "quantity": max(int(item.get("default_quantity") or 1), 1),
                 "item_attack_bonus": _active_weapon_profile_bonus(item, profile, key="item_attack_bonus"),
                 "item_damage_bonus": _active_weapon_profile_bonus(item, profile, key="item_damage_bonus"),
@@ -2026,6 +2091,9 @@ def _build_weapon_attack_payload(
         "systems_ref": dict(dict(context.get("item") or {}).get("systems_ref") or {}) or None,
         "page_ref": dict(raw_page_ref) if isinstance(raw_page_ref, dict) else raw_page_ref or None,
         "equipment_refs": [equipment_ref] if equipment_ref else [],
+        "authority_ability_dependencies": list(context.get("ability_dependencies") or []),
+        "authority_requires_proficiency_bonus": bool(context.get("is_proficient")),
+        "authority_weapon_proficiencies": list(context.get("proficiency_matches") or []),
     }
     if clean_mode_key:
         payload["mode_key"] = clean_mode_key
@@ -2126,6 +2194,7 @@ def _resolve_weapon_profile(
     *,
     entry: SystemsEntryRecord | None | object = _UNRESOLVED_ITEM_ENTRY,
     metadata: dict[str, Any] | None = None,
+    trusted_source_kind: str = "",
 ) -> dict[str, Any] | None:
     resolved_entry = (
         _resolve_item_entry(item, item_catalog)
@@ -2137,12 +2206,21 @@ def _resolve_weapon_profile(
         if metadata is not None
         else _resolve_item_support_metadata(item, item_catalog, entry=resolved_entry)
     )
-    systems_ref = dict(item.get("systems_ref") or {})
-    candidate_titles = [
-        str(systems_ref.get("title") or "").strip(),
-        str(item.get("name") or "").strip(),
-        str(resolved_metadata.get("base_item") or "").split("|", 1)[0].strip(),
-    ]
+    base_item = str(resolved_metadata.get("base_item") or "").split("|", 1)[0].strip()
+    if trusted_source_kind in {"page", "systems_key", "systems_slug"}:
+        candidate_titles = [base_item]
+        current_type = str(resolved_metadata.get("type") or "").split("|", 1)[0].strip().upper()
+        if trusted_source_kind != "page" and current_type in {"M", "R"}:
+            candidate_titles.append(str(getattr(resolved_entry, "title", "") or "").strip())
+    elif trusted_source_kind == "intrinsic":
+        candidate_titles = [str(item.get("name") or "").strip()]
+    else:
+        systems_ref = dict(item.get("systems_ref") or {})
+        candidate_titles = [
+            str(systems_ref.get("title") or "").strip(),
+            str(item.get("name") or "").strip(),
+            base_item,
+        ]
     profiles_by_norm = item_catalog.get("phb_weapon_profiles_normalized")
     if profiles_by_norm is None:
         profiles = item_catalog.get("phb_weapon_profiles") or _load_phb_weapon_profiles()
@@ -2176,6 +2254,14 @@ def _resolve_campaign_item_page_support(
     item: Any,
     item_catalog: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
+    if isinstance(item, dict) and item.get("mechanics_suppressed"):
+        return None
+    if isinstance(item, dict):
+        from .committed_publication import active
+
+        activated = active()
+    else:
+        activated = False
     if not item_catalog:
         return None
     by_page_ref = item_catalog.get("campaign_item_support_by_page_ref") or {}
@@ -2186,6 +2272,10 @@ def _resolve_campaign_item_page_support(
             support = by_page_ref.get(page_ref)
             if isinstance(support, dict):
                 return dict(support)
+            if activated:
+                return None
+        if activated:
+            return None
         candidate_titles = [
             str(dict(item).get("name") or "").strip(),
             str(dict(dict(item).get("systems_ref") or {}).get("title") or "").strip(),
@@ -2236,6 +2326,13 @@ def _item_effect_metadata(
     spell_support = [dict(item or {}) for item in list(payload.get("spell_support") or []) if isinstance(item, dict)]
     if spell_support:
         effect_payload["spell_support"] = spell_support
+    raw_spellcasting_modifiers = payload.get("spellcasting_modifiers")
+    spellcasting_modifiers = deepcopy(
+        raw_spellcasting_modifiers if isinstance(raw_spellcasting_modifiers, list)
+        else [raw_spellcasting_modifiers] if raw_spellcasting_modifiers is not None else []
+    )
+    if spellcasting_modifiers:
+        effect_payload["spellcasting_modifiers"] = spellcasting_modifiers
     ability_score_minimums = {
         normalize_lookup(ability_key): int(minimum)
         for ability_key, minimum in dict(payload.get("ability_score_minimums") or {}).items()
@@ -2464,6 +2561,7 @@ def _resolve_armor_profile(
     *,
     entry: SystemsEntryRecord | None | object = _UNRESOLVED_ITEM_ENTRY,
     metadata: dict[str, Any] | None = None,
+    trusted_source_kind: str = "",
 ) -> dict[str, Any] | None:
     infusion_bonus_ac = active_infusion_armor_class_bonus(item)
     resolved_entry = (
@@ -2494,17 +2592,20 @@ def _resolve_armor_profile(
         )
     )
     bonus_ac = _parse_optional_int_value(resolved_metadata.get("bonus_ac")) or 0
-    candidate_titles = []
     base_item = str(resolved_metadata.get("base_item") or "").split("|", 1)[0].strip()
-    if base_item:
-        candidate_titles.append(base_item)
-    systems_ref = dict(item.get("systems_ref") or {})
-    candidate_titles.extend(
-        [
-            str(systems_ref.get("title") or "").strip(),
-            str(item.get("name") or "").strip(),
-        ]
-    )
+    if trusted_source_kind in {"page", "systems_key", "systems_slug"}:
+        candidate_titles = [base_item]
+    elif trusted_source_kind == "intrinsic":
+        candidate_titles = [str(item.get("name") or "").strip()]
+    else:
+        candidate_titles = [base_item] if base_item else []
+        systems_ref = dict(item.get("systems_ref") or {})
+        candidate_titles.extend(
+            [
+                str(systems_ref.get("title") or "").strip(),
+                str(item.get("name") or "").strip(),
+            ]
+        )
     seen_candidates: set[str] = set()
     for raw_title in candidate_titles:
         base_title, parsed_bonus = _split_magic_item_name(raw_title)
@@ -2554,6 +2655,8 @@ def _resolved_armor_profiles(
 def _character_has_named_feature(features: list[dict[str, Any]] | None, *feature_values: str) -> bool:
     normalized_targets = {normalize_lookup(value) for value in feature_values if str(value or "").strip()}
     for feature in list(features or []):
+        if blocks_page_companion_heuristics(feature):
+            continue
         systems_ref = dict(feature.get("systems_ref") or {})
         candidates = (
             str(feature.get("name") or "").strip(),
@@ -2774,22 +2877,25 @@ def _is_proficient_with_weapon(
     weapon_proficiencies: list[str],
     attack_name: str,
 ) -> bool:
-    normalized_proficiencies: set[str] = set()
-    for value in weapon_proficiencies:
-        normalized_proficiencies.update(_weapon_proficiency_name_candidates(value))
+    return bool(_matching_weapon_proficiencies(profile, weapon_proficiencies, attack_name))
+
+
+def _matching_weapon_proficiencies(
+    profile: dict[str, Any], weapon_proficiencies: list[str], attack_name: str,
+) -> list[str]:
+    matching: list[str] = []
     normalized_attack_names = _weapon_proficiency_name_candidates(attack_name)
     normalized_attack_names.update(_weapon_proficiency_name_candidates(profile.get("title")))
     weapon_category = str(profile.get("weapon_category") or "").strip().lower()
-    if normalized_attack_names & normalized_proficiencies:
-        return True
-    if weapon_category == "simple" and normalize_lookup("Simple Weapons") in normalized_proficiencies:
-        return True
-    if weapon_category == "martial" and normalize_lookup("Martial Weapons") in normalized_proficiencies:
-        return True
-    if _weapon_uses_firearm_proficiency(profile, attack_name=attack_name):
-        return normalize_lookup("Firearms") in normalized_proficiencies
-    return False
-
+    for value in weapon_proficiencies:
+        candidates = _weapon_proficiency_name_candidates(value)
+        if (normalized_attack_names & candidates
+                or weapon_category == "simple" and normalize_lookup("Simple Weapons") in candidates
+                or weapon_category == "martial" and normalize_lookup("Martial Weapons") in candidates
+                or _weapon_uses_firearm_proficiency(profile, attack_name=attack_name)
+                and normalize_lookup("Firearms") in candidates):
+            matching.append(str(value))
+    return matching
 
 def _weapon_proficiency_name_candidates(value: Any) -> set[str]:
     base_name, _parsed_bonus = _split_magic_item_name(value)
@@ -2947,6 +3053,10 @@ def _build_unarmed_attack_payload(
         "damage_type": "Bludgeoning",
         "notes": "Tavern Brawler enhanced unarmed strike.",
         "systems_ref": None,
+        "authority_ability_dependencies": ["str"],
+        "authority_requires_proficiency_bonus": True,
+        "authority_weapon_proficiencies": [],
+        "authority_unarmed": True,
     }
 
 
@@ -3329,6 +3439,7 @@ def _normalize_equipment_payloads(
     equipment_payloads: list[dict[str, Any]] | None,
     *,
     item_catalog: dict[str, Any] | None = None,
+    trusted_source: tuple[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     normalized_equipment: list[dict[str, Any]] = []
     index_by_key: dict[tuple[str, str, str, str, bool], int] = {}
@@ -3367,6 +3478,7 @@ def _normalize_equipment_payloads(
         equipment_support = describe_equipment_state_support(
             payload,
             item_catalog=item_catalog,
+            trusted_source=trusted_source,
         )
         explicit_wield_mode = explicit_weapon_wield_mode(
             payload,

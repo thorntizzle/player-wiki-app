@@ -1294,6 +1294,7 @@ _CAMPAIGN_ITEM_PAGE_SUPPORT_METADATA_KEYS = (
     "rarity",
     "resource_template_bonuses",
     "spell_support",
+    "spellcasting_modifiers",
 )
 
 

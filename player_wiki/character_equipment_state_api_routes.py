@@ -24,7 +24,6 @@ def register_character_equipment_state_api_route(
         character_slug: str,
         item_id: str,
     ):
-        item_catalog = dependencies.build_character_item_catalog(campaign_slug)
         return dependencies.run_character_definition_mutation(
             campaign_slug,
             character_slug,
@@ -32,7 +31,7 @@ def register_character_equipment_state_api_route(
                 campaign_slug,
                 record,
                 item_id,
-                item_catalog=item_catalog,
+                item_catalog=dependencies.build_character_item_catalog(campaign_slug),
                 systems_service=current_app.extensions["systems_service"],
                 values={
                     "is_equipped": payload.get("is_equipped", False),
@@ -41,6 +40,7 @@ def register_character_equipment_state_api_route(
                 },
             ),
             equipment_activation=True,
+            equipment_item_id=item_id,
         )
 
     api.add_url_rule(

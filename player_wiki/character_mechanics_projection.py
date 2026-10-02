@@ -7,6 +7,7 @@ import json
 import re
 from threading import Event, RLock
 from typing import Any
+from .character_page_companion import blocks_page_companion_heuristics
 
 from .divine_avatar_forms import (
     active_divine_avatar_transient_effects,
@@ -31,6 +32,9 @@ from .character_builder import (
     resolve_item_equipped_state,
 )
 from .campaign_item_mechanics import campaign_item_character_metadata, is_campaign_item_mechanics_metadata
+from .character_builder_equipment import _active_item_effect_entries
+from .character_spell_effects import project_spellcasting_item_effects
+from .character_source_authority import build_source_authority
 from .character_builder_catalogs import (
     _bind_revision_key,
     _cache_key_is_current,
@@ -148,8 +152,8 @@ def _character_definition_digest(definition: CharacterDefinition) -> str:
     return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
 
 
-def _normalization_page_records(campaign_page_records: list[Any] | None) -> list[Any]:
-    relevant_sections = {CAMPAIGN_MECHANICS_SECTION, CAMPAIGN_ITEMS_SECTION}
+def _normalization_page_records(campaign_page_records: list[Any] | None, *, campaign: Campaign | None = None) -> list[Any]:
+    relevant_sections = {CAMPAIGN_MECHANICS_SECTION, CAMPAIGN_ITEMS_SECTION, "Spells"}
     records: list[Any] = []
     for record in list(campaign_page_records or []):
         page = record.get("page") if isinstance(record, dict) else getattr(record, "page", None)
@@ -159,6 +163,12 @@ def _normalization_page_records(campaign_page_records: list[Any] | None) -> list
             section = str(getattr(page, "section", "") or "").strip()
         if not section and isinstance(record, dict):
             section = str(record.get("section") or "").strip()
+        published = page.get("published") if isinstance(page, dict) else getattr(page, "published", False)
+        if not bool(published):
+            continue
+        reveal_after = page.get("reveal_after_session") if isinstance(page, dict) else getattr(page, "reveal_after_session", 0)
+        if campaign is not None and int(reveal_after or 0) > int(campaign.current_session or 0):
+            continue
         # Preserve unknown record adapters for compatibility; real campaign
         # records always expose their section and are narrowed here.
         if not section or section in relevant_sections:
@@ -168,6 +178,7 @@ def _normalization_page_records(campaign_page_records: list[Any] | None) -> list
 
 def _normalized_definition_cache_key(
     *,
+    activated: bool,
     campaign_slug: str,
     definition: CharacterDefinition,
     systems_service: Any,
@@ -186,6 +197,7 @@ def _normalized_definition_cache_key(
         return None
     return _bind_revision_key((
         "normalized-character-definition",
+        activated,
         _builder_service_cache_identity(systems_service),
         campaign_slug,
         _character_definition_digest(definition),
@@ -273,6 +285,7 @@ def build_effective_character_values(
     campaign: Campaign,
     definition: CharacterDefinition,
     state: dict[str, Any],
+    state_revision: int | None,
     systems_service: Any | None,
     campaign_page_records: list[Any] | None,
     selected_components: frozenset[str],
@@ -285,13 +298,52 @@ def build_effective_character_values(
     transient form pass uses the normalized base but never becomes a saved
     definition or a normalized-definition cache entry.
     """
+    from .committed_publication import active
+    activated = active()
+    if (activated and systems_service is not None
+            and not is_xianxia_system(getattr(definition, "system", ""))
+            and state_revision is None):
+        raise ValueError("A durable state revision is required for DND character mechanics projection")
     projected_definition, activation_warnings = effective_definition(definition, state)
-    projected_definition, source_warnings = suppress_unresolved_linked_sources(
-        projected_definition, campaign.slug, systems_service, campaign_page_records
-    )
+    if not activated:
+        projected_definition, legacy_warnings = suppress_unresolved_linked_sources(
+            projected_definition, campaign.slug, systems_service, campaign_page_records
+        )
+        activation_warnings = list(activation_warnings) + list(legacy_warnings)
+    normalization_page_records = _normalization_page_records(campaign_page_records, campaign=campaign)
+    source_authority = None
+    source_warnings: list[dict[str, str]] = []
+    if activated and not is_xianxia_system(projected_definition.system):
+        try:
+            from . import character_source_repair
+
+            verified_manual_actions = character_source_repair.load_verified_manual_actions(
+                campaign.slug, projected_definition.character_slug
+            )
+            load_numeric = getattr(character_source_repair, "load_verified_numeric_actions", None)
+            verified_numeric_actions = (
+                load_numeric(campaign.slug, projected_definition.character_slug)
+                if callable(load_numeric) else ()
+            )
+        except (RuntimeError, TypeError, ValueError):
+            # Offline renderers have no trusted audit reader. MANUAL fails closed.
+            verified_manual_actions = ()
+            verified_numeric_actions = ()
+        source_authority = build_source_authority(
+            definition=projected_definition,
+            state=state,
+            systems_service=systems_service,
+            campaign_page_records=normalization_page_records,
+            verified_manual_actions=tuple(verified_manual_actions),
+            verified_numeric_actions=tuple(verified_numeric_actions),
+            state_revision=state_revision,
+        )
+        source_warnings = [
+            {"code": code, "message": message}
+            for code, message in source_authority.warnings
+        ]
     projected_state = deepcopy(state or {})
     projection_warnings: list[dict[str, str]] = list(activation_warnings) + source_warnings
-    normalization_page_records = _normalization_page_records(campaign_page_records)
     uses_scoped_catalogs = (
         selected_catalogs != FULL_CHARACTER_MECHANICS_CATALOGS
         or selected_derivation_components != FULL_DND_DERIVATION_COMPONENTS
@@ -368,6 +420,7 @@ def build_effective_character_values(
         try:
             cache_key = (
                 _normalized_definition_cache_key(
+                    activated=activated,
                     campaign_slug=campaign.slug,
                     definition=projected_definition,
                     systems_service=systems_service,
@@ -388,6 +441,7 @@ def build_effective_character_values(
                 normalization_kwargs: dict[str, Any] = {
                     "systems_service": systems_service,
                     "campaign_page_records": normalization_page_records,
+                    "source_authority": source_authority,
                 }
                 if uses_scoped_catalogs:
                     _ensure_scoped_catalogs()
@@ -400,6 +454,7 @@ def build_effective_character_values(
                     )
                 return normalize_definition_to_native_model(
                     projected_definition,
+                    mode="effective" if activated else "historical",
                     **normalization_kwargs,
                 )
 
@@ -412,12 +467,18 @@ def build_effective_character_values(
                 if cache_key is not None
                 else _normalize_definition()
             )
-            projected_state = merge_state_with_definition(projected_definition, projected_state)
+            projected_state = merge_state_with_definition(
+                projected_definition, projected_state,
+                source_authority=source_authority,
+            )
         except (CharacterBuildError, TypeError, ValueError) as exc:
             projected_definition, _ = effective_definition(definition, state)
-            projected_definition, _ = suppress_unresolved_linked_sources(
-                projected_definition, campaign.slug, systems_service, campaign_page_records
-            )
+            if source_authority is not None:
+                projected_definition = source_authority.effective_definition(projected_definition)
+            else:
+                projected_definition, _ = suppress_unresolved_linked_sources(
+                    projected_definition, campaign.slug, systems_service, campaign_page_records
+                )
             projected_state = deepcopy(state or {})
             projection_warnings.append(
                 {
@@ -437,6 +498,7 @@ def build_effective_character_values(
                 transient_kwargs: dict[str, Any] = {
                     "systems_service": systems_service,
                     "campaign_page_records": normalization_page_records,
+                    "source_authority": source_authority,
                 }
                 if uses_scoped_catalogs:
                     transient_kwargs.update(
@@ -458,10 +520,15 @@ def build_effective_character_values(
                     "message": str(exc) or exc.__class__.__name__,
                 }
             )
+    if source_authority is not None:
+        projected_definition.spellcasting = source_authority.annotate_spellcasting(
+            dict(projected_definition.spellcasting or {}), definition=definition,
+        )
     return {
         "definition": projected_definition,
         "state": projected_state,
         "projection_warnings": projection_warnings,
+        "source_authority": source_authority,
     }
 
 
@@ -470,12 +537,18 @@ def build_character_mechanics_projection(
     campaign: Campaign,
     definition: Any,
     state: dict[str, Any],
+    state_revision: int | None = None,
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
     components: frozenset[str] | None = None,
     catalog_components: frozenset[str] | None = None,
     derivation_components: frozenset[str] | None = None,
 ) -> dict[str, Any]:
+    from .committed_publication import active
+    if (active() and systems_service is not None
+            and not is_xianxia_system(getattr(definition, "system", ""))
+            and state_revision is None):
+        raise ValueError("A durable state revision is required for DND character mechanics projection")
     selected_components = (
         FULL_CHARACTER_MECHANICS_COMPONENTS
         if components is None
@@ -516,6 +589,7 @@ def build_character_mechanics_projection(
         campaign=campaign,
         definition=definition,
         state=state,
+        state_revision=state_revision,
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
         selected_components=selected_components,
@@ -525,6 +599,24 @@ def build_character_mechanics_projection(
     projected_definition = effective_values["definition"]
     projected_state = effective_values["state"]
     projection_warnings = effective_values["projection_warnings"]
+    source_authority = effective_values["source_authority"]
+    if (
+        not is_xianxia_system(projected_definition.system)
+        and selected_derivation_components & {"spellcasting", "spellcasting_math"}
+    ):
+        spell_item_entries = (
+            source_authority.active_item_effect_entries(projected_definition)
+            if source_authority is not None else []
+        )
+        transient_spell_adjustments = dict(
+            active_divine_avatar_transient_effects(projected_definition, projected_state)
+            .get("spellcasting_adjustments") or {}
+        ) if "divine_avatar" in selected_components else {}
+        projected_definition.spellcasting, spell_item_warnings = project_spellcasting_item_effects(
+            dict(projected_definition.spellcasting or {}), spell_item_entries,
+            transient_adjustments=transient_spell_adjustments,
+        )
+        projection_warnings.extend(spell_item_warnings)
     divine_avatar_projection_errors = [
         (
             "Divine Avatar mechanics could not be safely projected: "
@@ -622,6 +714,28 @@ def build_character_mechanics_projection(
         else []
     )
 
+    if source_authority is not None:
+        source_authority = source_authority.bind_projected_numbers(projected_definition)
+        projected_definition = source_authority.suppress_unknown_numbers(projected_definition)
+        suppressed_attacks = []
+        for projected_attack in attack_visibility:
+            attack = projected_attack.get("attack") if isinstance(projected_attack, dict) else None
+            if isinstance(attack, dict) and not source_authority.attack_inputs_effective(attack, definition):
+                suppressed_attacks.append(attack)
+                attack["authority_status"] = "NEEDS REPAIR"
+                attack["mechanics_suppressed"] = True
+                for key in ("attack_bonus", "attack_roll_bonus", "to_hit_bonus",
+                            "damage_bonus", "save_dc", "damage_formula", "damage"):
+                    if key in attack:
+                        attack[key] = None
+        if suppressed_attacks:
+            projection_warnings.append({
+                "code": "numeric_authority_unknown",
+                "message": "Some character totals need manager verification; raw values remain for table reference.",
+            })
+        if not source_authority.field_status("stats.armor_class").is_effective:
+            defensive_rules = []
+
     return {
         "definition": projected_definition,
         "state": projected_state,
@@ -636,6 +750,8 @@ def build_character_mechanics_projection(
         "defensive_rules": defensive_rules,
         "item_use_actions": item_use_actions,
         "projection_warnings": projection_warnings,
+        "source_authority": source_authority,
+        "source_authority_identity": source_authority.identity if source_authority is not None else "",
         "xianxia": xianxia_projection,
     }
 
@@ -645,6 +761,7 @@ def validate_divine_avatar_proposed_state_projection(
     campaign: Campaign,
     definition: Any,
     state: dict[str, Any],
+    state_revision: int,
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
 ) -> None:
@@ -653,6 +770,7 @@ def validate_divine_avatar_proposed_state_projection(
         campaign=campaign,
         definition=definition,
         state=state,
+        state_revision=state_revision,
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
     )
@@ -1388,7 +1506,7 @@ def character_has_feature(definition: Any, feature_name: str) -> bool:
     return any(
         normalize_feature_name(feature.get("name")) == target
         for feature in list(getattr(definition, "features", []) or [])
-        if isinstance(feature, dict)
+        if isinstance(feature, dict) and not blocks_page_companion_heuristics(feature)
     )
 
 

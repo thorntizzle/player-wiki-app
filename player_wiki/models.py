@@ -133,6 +133,8 @@ class Page:
     backlinks: list[str] = field(default_factory=list)
     content_loaded: bool = False
     html_loaded: bool = False
+    committed_revision: int | None = None
+    committed_config_revision: int | None = None
 
     @property
     def is_deprecated_wiki_overview(self) -> bool:

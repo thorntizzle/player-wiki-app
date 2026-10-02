@@ -299,6 +299,7 @@ class SourceHealthInventoryPage:
     character_definitions: Mapping[str, Mapping[str, object]] = field(
         default_factory=dict
     )
+    character_epoch: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -858,7 +859,7 @@ AuthorizationAdapter = Callable[[str], SourceHealthAccessContext | None]
 
 _ADAPTER_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,47}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
-_CURSOR_VERSION = 1
+_CURSOR_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -905,11 +906,13 @@ class _CompositeCursorState:
     window: _CursorWindowState | None = None
     saw_any_consumer: bool = False
     saw_nonhealthy: bool = False
+    character_epoch: str | None = None
 
     def to_payload(self) -> dict[str, object]:
         return {
             "adapters": [adapter.to_payload() for adapter in self.adapters],
             "campaign": self.campaign_slug,
+            "character_epoch": self.character_epoch,
             "outcome": {
                 "saw_any_consumer": self.saw_any_consumer,
                 "saw_nonhealthy": self.saw_nonhealthy,
@@ -941,7 +944,7 @@ def _require_int(value: object) -> int:
 def _parse_composite_cursor_state(payload: object) -> _CompositeCursorState:
     root = _require_exact_keys(
         payload,
-        {"adapters", "campaign", "outcome", "roster", "version", "window"},
+        {"adapters", "campaign", "character_epoch", "outcome", "roster", "version", "window"},
     )
     if _require_int(root["version"]) != _CURSOR_VERSION:
         raise SourceHealthCursorError("Unsupported cursor version.")
@@ -1049,6 +1052,13 @@ def _parse_composite_cursor_state(payload: object) -> _CompositeCursorState:
     saw_nonhealthy = _require_bool(outcome["saw_nonhealthy"])
     if saw_nonhealthy and not saw_any_consumer:
         raise SourceHealthCursorError("Invalid cumulative cursor outcome.")
+    character_epoch = root["character_epoch"]
+    if (character_epoch is not None
+            and (type(character_epoch) is not str or _DIGEST_RE.fullmatch(character_epoch) is None)):
+        raise SourceHealthCursorError("Invalid Character inventory epoch.")
+    if character_epoch is not None and "characters" in roster:
+        if not adapters[roster.index("characters")].exhausted:
+            raise SourceHealthCursorError("Unexpected Character inventory epoch.")
     return _CompositeCursorState(
         campaign_slug=campaign_slug,
         roster=tuple(roster),
@@ -1056,6 +1066,7 @@ def _parse_composite_cursor_state(payload: object) -> _CompositeCursorState:
         window=window,
         saw_any_consumer=saw_any_consumer,
         saw_nonhealthy=saw_nonhealthy,
+        character_epoch=character_epoch,
     )
 
 
@@ -1170,6 +1181,7 @@ class SourceHealthService:
         resolver: ResolutionAdapter,
         character_resolver: CharacterResolutionAdapter,
         cursor_codec: SourceHealthCursorCodec,
+        character_epoch_reader: Callable[[str], str] | None = None,
         fingerprint_resolver: FingerprintResolutionAdapter | None = None,
         character_fingerprint_resolver: CharacterFingerprintAdapter | None = None,
     ) -> None:
@@ -1205,6 +1217,17 @@ class SourceHealthService:
             raise ValueError("Invalid Character fingerprint resolution adapter.")
         self._character_fingerprint_resolver = character_fingerprint_resolver
         self._cursor_codec = cursor_codec
+        if character_epoch_reader is not None and not callable(character_epoch_reader):
+            raise ValueError("Invalid Character inventory epoch reader.")
+        self._character_epoch_reader = character_epoch_reader
+
+    def _read_character_epoch(self, campaign_slug: str) -> str:
+        if self._character_epoch_reader is None:
+            raise ValueError("Character inventory epoch reader is unavailable.")
+        epoch = self._character_epoch_reader(campaign_slug)
+        if type(epoch) is not str or _DIGEST_RE.fullmatch(epoch) is None:
+            raise ValueError("Invalid Character inventory epoch.")
+        return epoch
 
     def _initial_cursor_state(self, campaign_slug: str) -> _CompositeCursorState:
         return _CompositeCursorState(
@@ -1229,6 +1252,10 @@ class SourceHealthService:
             raise SourceHealthCursorError("Cursor campaign changed.")
         if state.roster != self._adapter_ids:
             raise SourceHealthCursorError("Cursor adapter roster changed.")
+        if self._character_epoch_reader is not None and "characters" in state.roster:
+            exhausted = state.adapters[state.roster.index("characters")].exhausted
+            if exhausted != (state.character_epoch is not None):
+                raise SourceHealthCursorError("Invalid Character inventory epoch state.")
         return state
 
     @staticmethod
@@ -1535,6 +1562,7 @@ class SourceHealthService:
             )
 
             transitioned_adapters: list[_CursorAdapterState] = []
+            character_epoch = state.character_epoch
             for adapter_id in self._adapter_ids:
                 adapter_state = state_by_id[adapter_id]
                 if adapter_state.exhausted:
@@ -1562,6 +1590,11 @@ class SourceHealthService:
                     )
                     continue
                 next_cursor = _text(page.continuation)
+                if adapter_id == "characters" and not next_cursor and self._character_epoch_reader is not None:
+                    epoch = page.character_epoch
+                    if type(epoch) is not str or _DIGEST_RE.fullmatch(epoch) is None:
+                        raise ValueError("Invalid Character inventory epoch.")
+                    character_epoch = epoch
                 transitioned_adapters.append(
                     _CursorAdapterState(
                         adapter_id=adapter_id,
@@ -1588,7 +1621,11 @@ class SourceHealthService:
                     adapters=tuple(transitioned_adapters),
                     saw_any_consumer=saw_any_consumer,
                     saw_nonhealthy=saw_nonhealthy,
+                    character_epoch=character_epoch,
                 )
+            if character_epoch is not None:
+                if self._read_character_epoch(context.campaign_slug) != character_epoch:
+                    raise ValueError("Character inventory changed.")
             complete = not window_remaining and all(
                 adapter.exhausted for adapter in transitioned_adapters
             )

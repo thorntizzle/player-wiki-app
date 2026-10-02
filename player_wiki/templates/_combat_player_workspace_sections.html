@@ -1,5 +1,6 @@
 {% if selected_combat_character and combat_workspace_sections %}
   {% set projection_warnings = selected_combat_character.projection_warnings %}
+  {% set historical_numeric_rows = selected_combat_character.historical_numeric_rows %}
   {% include "_character_projection_warnings.html" %}
   {% set combat_workspace_return_view = (
     "dm" if combat_return_view == "dm" else "combat" if combat_subpage == "combat" else "character" if combat_subpage == "character" else "status"
@@ -65,7 +66,7 @@
     </div>
   {% endmacro %}
   {% macro combat_spell_fallback_details(spell, dialog_id) %}
-    {% if spell.description_html or spell.href %}
+    {% if spell.description_html or spell.href or spell.authority_note %}
       <details
         class="item-description-detail spell-card__fallback"
         id="{{ dialog_id }}-fallback"
@@ -397,6 +398,7 @@
                       | Attack {{ primary_section.spell_attack_bonus if primary_section else section.spellcasting.spell_attack_bonus }}
                     {% endif %}
                   </p>
+                  {% for note in (primary_section.spell_metric_notes if primary_section else section.spellcasting.spell_metric_notes) or [] %}<p class="meta">{{ note }}</p>{% endfor %}
                 </div>
               {% endif %}
             </div>
@@ -409,6 +411,7 @@
                     <h3 class="{% if slot_pool_title_is_generic %}visually-hidden {% endif %}spell-slot-pool-title">{{ slot_pool_title }}</h3>
                     <div class="spell-slot-editor-list spell-slot-editor-list--compact combat-spell-slot-list">
                       {% for slot in slot_pool.slots %}
+                        {% if slot.can_edit %}
                         <form
                           class="detail-card combat-spell-slot-row"
                           data-character-autosubmit
@@ -432,6 +435,12 @@
                             <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
                           </label>
                         </form>
+                        {% else %}
+                          <div class="detail-card combat-spell-slot-row">
+                            <strong>{{ slot.label }}</strong>
+                            <span class="meta">Raw {{ slot.used }} used / {{ slot.raw_max }} · {{ slot.authority_status }}</span>
+                          </div>
+                        {% endif %}
                       {% endfor %}
                     </div>
                   </section>
@@ -442,7 +451,7 @@
                       {% for slot in slot_pool.slots %}
                         <li>
                           <span>{{ slot.label }}</span>
-                          <strong>{{ slot.available }} available / {{ slot.max }}</strong>
+                          <strong>{% if slot.can_edit %}{{ slot.available }} available / {{ slot.max }}{% else %}Raw {{ slot.used }} used / {{ slot.raw_max }} · {{ slot.authority_status }}{% endif %}</strong>
                         </li>
                       {% endfor %}
                     </ul>
@@ -467,6 +476,9 @@
                 </div>
               {% endif %}
               {% set spell_section_loop_index = loop.index %}
+              {% if not duplicates_primary_summary %}
+                {% for note in spell_section.spell_metric_notes or [] %}<p class="meta">{{ note }}</p>{% endfor %}
+              {% endif %}
               {% if spell_section.counts %}
                 <dl class="spellcasting-count-grid combat-spellcasting-count-grid" aria-label="{{ spell_section.title }} spell counts">
                   {% for count in spell_section.counts %}
@@ -521,7 +533,7 @@
           <div class="resource-grid">
             {% for resource in section.resources %}
               <article class="resource-card">
-                {% if can_edit_combat_character_state and selected_combatant_id %}
+                {% if can_edit_combat_character_state and selected_combatant_id and resource.can_edit %}
                   <form
                     class="session-inline-form combat-resource-state-form"
                     data-character-autosubmit
@@ -805,6 +817,7 @@
                 {% if item.tags %}
                   <p class="meta">{{ item.tags | join(", ") }}</p>
                 {% endif %}
+                {% if item.charges_label %}<p class="meta">Charges: {{ item.charges_label }}</p>{% endif %}
                 {{ combat_item_description_details(item, item_dialog_id) }}
               </article>
             {% endfor %}

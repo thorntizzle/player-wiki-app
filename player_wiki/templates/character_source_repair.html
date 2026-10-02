@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Repair Character source | {{ character.name }}{% endblock %}
+
+{% block content %}
+  <div class="character-update-preview page-stack">
+    <header class="card">
+      <p class="eyebrow">DND-5E Character manager</p>
+      <h1>Repair source for {{ character.name }}</h1>
+      <p>Select one exact Character instance and one current source. The preview shows effective grants gained and lost before applying.</p>
+      <a class="ghost-button" href="{{ url_for('character_update_preview_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Back to Character Update</a>
+    </header>
+
+    {% if outcome %}
+      <section class="callout" role="status"><p>{{ outcome }}</p></section>
+    {% endif %}
+
+    {% if review %}
+      <section class="card" aria-labelledby="repair-review-heading">
+        <h2 id="repair-review-heading">Review exact manager action</h2>
+        <p>{{ review.summary }}</p>
+        {% if review.effects.gained is defined %}
+          <h3>Effective effects gained</h3>
+          {% if review.effects.gained %}<ul>{% for effect in review.effects.gained %}<li>{{ effect }}</li>{% endfor %}</ul>{% else %}<p>None.</p>{% endif %}
+          <h3>Effective effects lost</h3>
+          {% if review.effects.lost %}<ul>{% for effect in review.effects.lost %}<li>{{ effect }}</li>{% endfor %}</ul>{% else %}<p>None.</p>{% endif %}
+          {% if review.effects.statuses is defined %}
+            <h3>Raw and safe status changes</h3>
+            {% if review.effects.statuses %}
+              <ul>{% for change in review.effects.statuses %}
+                <li><strong>{{ change.path }}</strong>: {{ change.before }} → {{ change.after }}. Raw: {{ change.raw }}. Effective: {{ change.effective }}.</li>
+              {% endfor %}</ul>
+            {% else %}<p>No effective status changed.</p>{% endif %}
+          {% endif %}
+        {% else %}
+          <p>This action will mark only the selected spell or source-row metric as manager-authorized MANUAL. It does not add automatic source effects.</p>
+        {% endif %}
+        <p>Character state remains at its current revision. Applying requires this exact definition, state, and source catalog.</p>
+        <form method="post">
+          {{ csrf_input() }}
+          <input type="hidden" name="review_token" value="{{ review.token }}">
+          <button type="submit" name="intent" value="apply">Apply this review once</button>
+        </form>
+      </section>
+    {% else %}
+      <section class="card" aria-labelledby="repair-link-heading">
+        <h2 id="repair-link-heading">Relink one item, feature, or spell</h2>
+        <p>Choose a source by its exact identity. Names are shown only for orientation.</p>
+        <form method="post">
+          {{ csrf_input() }}
+          <input type="hidden" name="action" value="relink">
+          <div class="field">
+            <label for="repair-family">Instance family</label>
+            <select id="repair-family" name="family" required>
+              <option value="item">Item</option><option value="feature">Feature</option><option value="spell">Spell</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="repair-target">Character instance</label>
+            <select id="repair-target" name="target_id" required>
+              <option value="">Choose an instance</option>
+              {% for target in targets %}<option value="{{ target.target_id }}">{{ target.family }}: {{ target.label }} ({{ target.target_id }})</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="repair-source">Current source</label>
+            <select id="repair-source" name="source" required>
+              <option value="">Choose an exact source</option>
+              {% for source in sources %}<option value="{{ source.value }}">{{ source.family }}: {{ source.label }} — {{ source.kind }} {{ source.identity }}</option>{% endfor %}
+            </select>
+          </div>
+          <button type="submit" name="intent" value="review">Preview source repair</button>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="manual-heading">
+        <h2 id="manual-heading">Authorize one manual spell metric</h2>
+        <p>A manager action creates a durable audit witness. Historical imports and generic manual labels cannot authorize this metric.</p>
+        <form method="post">
+          {{ csrf_input() }}
+          <input type="hidden" name="action" value="manual_authorize">
+          <div class="field"><label for="manual-kind">Target kind</label><select id="manual-kind" name="target_kind"><option value="spell">Spell</option><option value="source_row">Source row</option></select></div>
+          <div class="field"><label for="manual-target">Target</label><select id="manual-target" name="target_id" required><option value="">Choose a target</option>{% for target in manual_targets %}<option value="{{ target.id }}">{{ target.kind }}: {{ target.label }} ({{ target.id }})</option>{% endfor %}</select></div>
+          <div class="field"><label for="manual-metric">Metric</label><select id="manual-metric" name="metric">{% for metric in metrics %}<option value="{{ metric }}">{{ metric | replace('_', ' ') }}</option>{% endfor %}</select></div>
+          <button type="submit" name="intent" value="review">Preview manual authorization</button>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="numeric-heading">
+        <h2 id="numeric-heading">Confirm one independent stat or resource owner</h2>
+        <p>Inspect the Character's raw value and its current source before confirming a baseline, final value, proficiency grant, or resource owner/reset rule. This action attests only the selected exact target. A missing ability base can be entered explicitly below.</p>
+        <form method="post">
+          {{ csrf_input() }}
+          <input type="hidden" name="action" value="numeric_attest">
+          <div class="field"><label for="numeric-kind">Target kind</label><select id="numeric-kind" name="target_kind"><option value="field">Field</option><option value="proficiency">Proficiency</option><option value="resource">Resource</option></select></div>
+          <div class="field"><label for="numeric-target">Exact target</label><select id="numeric-target" name="target_id" required><option value="">Choose a target</option>{% for target in numeric_targets %}<option value="{{ target.id }}">{{ target.kind }}: {{ target.label }}</option>{% endfor %}</select></div>
+          <div class="field"><label for="numeric-metric">Attestation type</label><select id="numeric-metric" name="metric"><option value="base">Confirmed ability base</option><option value="final">Independent final value</option><option value="grant">Proficiency grant</option><option value="owner_reset">Resource owner/reset</option></select></div>
+          <div class="field"><label for="confirmed-score">Confirmed pre-bonus ability base (base only)</label><input id="confirmed-score" name="confirmed_score" type="number" min="0" max="30" step="1"></div>
+          <div class="field"><label for="confirmed-fixed-bonus">Separately confirmed fixed bonus (base only; enter 0 if none)</label><input id="confirmed-fixed-bonus" name="confirmed_fixed_bonus" type="number" min="-30" max="30" step="1"></div>
+          <div class="field"><label><input type="checkbox" name="confirm_value" value="yes" required> I independently checked this exact source and raw value or entered baseline.</label></div>
+          <button type="submit" name="intent" value="review">Preview stat or resource attestation</button>
+        </form>
+      </section>
+    {% endif %}
+  </div>
+{% endblock %}

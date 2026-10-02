@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,6 +20,63 @@ class CharacterStateConflictError(RuntimeError):
 
 class CharacterStateUnavailableError(CharacterStateConflictError):
     """The target was missing or protected at the refused mutation boundary."""
+
+
+_source_writer_connection: ContextVar[sqlite3.Connection | None] = ContextVar(
+    "character_source_writer_connection", default=None,
+)
+
+
+@contextmanager
+def source_write_transaction():
+    """Keep activated source proof and its dependent CAS in one writer view."""
+    connection = get_db()
+    if connection.in_transaction:
+        if _source_writer_connection.get() is not connection:
+            raise CharacterStateConflictError("Character source writer reservation is unavailable.")
+        yield connection
+        return
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError as exc:
+        if any(word in str(exc).lower() for word in ("locked", "busy")):
+            raise CharacterStateConflictError(
+                "Character source is busy. Refresh and retry the action."
+            ) from exc
+        raise
+    token = _source_writer_connection.set(connection)
+    try:
+        yield connection
+        connection.commit()
+    except BaseException:
+        if connection.in_transaction:
+            connection.rollback()
+        raise
+    finally:
+        _source_writer_connection.reset(token)
+
+
+@contextmanager
+def publication_source_write_transaction():
+    """Bind a committed-publication reservation to dependent state writes."""
+    from .committed_publication import _reserve
+
+    connection = get_db()
+    _reserve(connection)
+    token = _source_writer_connection.set(connection)
+    try:
+        yield connection
+        connection.commit()
+    except BaseException:
+        if connection.in_transaction:
+            connection.rollback()
+        raise
+    finally:
+        _source_writer_connection.reset(token)
+
+
+def source_writer_reserved(connection: sqlite3.Connection) -> bool:
+    return connection.in_transaction and _source_writer_connection.get() is connection
 
 
 _UNPROTECTED_STATE_WRITE = """
@@ -61,8 +120,13 @@ class CharacterStateStore:
     def prepare_initial_state(
         definition: CharacterDefinition,
         state: dict[str, Any],
+        *, source_authority: Any | None = None,
+        previous_state: dict[str, Any] | None = None,
     ) -> PreparedCharacterState:
-        validated = validate_state(definition, state)
+        validated = validate_state(
+            definition, state, source_authority=source_authority,
+            previous_state=previous_state,
+        )
         return PreparedCharacterState(
             validated_state=validated,
             state_json=json.dumps(
@@ -233,6 +297,11 @@ class CharacterStateStore:
         *,
         updated_by_user_id: int | None = None,
     ) -> CharacterStateWriteResult:
+        from .committed_publication import active
+        if active():
+            raise CharacterStateUnavailableError(
+                "Committed Character state can only be created with its definition publication."
+            )
         existing = self.get_state(definition.campaign_slug, definition.character_slug)
         if existing is not None:
             return CharacterStateWriteResult(record=existing, created=False)
@@ -274,6 +343,10 @@ class CharacterStateStore:
     ) -> CharacterStateRecord:
         """Linearize a mutation no-op without writing or changing transaction ownership."""
 
+        from .committed_publication import active
+        if active() and not source_writer_reserved(get_db()):
+            raise CharacterStateConflictError("Character source writer reservation is unavailable.")
+
         row = get_db().execute(
             f"""
             SELECT campaign_slug, character_slug, revision, state_json,
@@ -303,8 +376,16 @@ class CharacterStateStore:
         expected_revision: int,
         updated_by_user_id: int | None = None,
         commit: bool = True,
+        source_authority: Any | None = None,
+        previous_state: dict[str, Any] | None = None,
     ) -> CharacterStateRecord:
-        validated = validate_state(definition, state)
+        from .committed_publication import active
+        if active() and not source_writer_reserved(get_db()):
+            raise CharacterStateConflictError("Character source writer reservation is unavailable.")
+        validated = validate_state(
+            definition, state, source_authority=source_authority,
+            previous_state=previous_state,
+        )
         connection = get_db()
         updated_at = isoformat(utcnow())
         cursor = connection.execute(
@@ -364,6 +445,11 @@ class CharacterStateStore:
         return record
 
     def delete_state(self, campaign_slug: str, character_slug: str) -> CharacterStateRecord | None:
+        from .committed_publication import active
+        if active():
+            raise CharacterStateUnavailableError(
+                "Committed Character state can only be deleted with its definition publication."
+            )
         existing = self.get_state(campaign_slug, character_slug)
         if existing is None:
             return None

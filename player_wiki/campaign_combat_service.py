@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 import re
 import threading
 import time
@@ -19,7 +20,9 @@ from .character_repository import (
     CharacterRepository,
     CharacterSnapshotSourceFileToken,
 )
-from .character_store import CharacterStateConflictError
+from .character_store import (
+    CharacterStateConflictError, source_write_transaction, source_writer_reserved,
+)
 from .character_state_service import CharacterStateService
 from .combat_models import (
     COMBAT_SOURCE_KIND_CHARACTER,
@@ -88,6 +91,7 @@ class _PlayerCharacterSnapshotDatabaseToken:
 class _PlayerCharacterSnapshotSourceToken:
     database: tuple[_PlayerCharacterSnapshotDatabaseToken, ...]
     files: CharacterSnapshotSourceFileToken
+    authorities: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +103,15 @@ class _PlayerCharacterSnapshotFullSyncResult:
 
 class CampaignCombatValidationError(ValueError):
     pass
+
+
+@contextmanager
+def _combat_source_write_transaction():
+    try:
+        with source_write_transaction():
+            yield
+    except CharacterStateConflictError as exc:
+        raise CampaignCombatValidationError(str(exc)) from exc
 
 
 def parse_combat_movement_total(value: Any | None) -> int:
@@ -156,16 +169,53 @@ def build_character_combat_seed(definition: object) -> dict[str, int | str]:
     }
 
 
-def build_character_combat_snapshot(record: object) -> dict[str, int | str]:
+def build_character_combat_snapshot(record: object, *, source_authority: Any | None = None) -> dict[str, int | str]:
     definition = getattr(record, "definition", None)
-    seed = build_character_combat_seed(definition)
+    from .committed_publication import active
+    from .system_policy import is_xianxia_system
+    activated = active()
+    if not activated or is_xianxia_system(getattr(definition, "system", "")):
+        seed = build_character_combat_seed(definition)
+        state_record = getattr(record, "state_record", None)
+        state = dict(getattr(state_record, "state", {}) or {})
+        vitals = dict(state.get("vitals") or {})
+        return {
+            **seed,
+            "current_hp": int(vitals.get("current_hp") or 0),
+            "temp_hp": int(vitals.get("temp_hp") or 0),
+        }
+    if source_authority is None:
+        raise CampaignCombatValidationError("Character numeric authority is unavailable for Combat.")
+    required = {
+        "initiative_bonus": "stats.initiative_bonus",
+        "dexterity_modifier": "stats.ability_scores.dex.modifier",
+        "max_hp": "stats.max_hp",
+        "movement_total": "stats.speed",
+    }
+    values: dict[str, int] = {}
+    for label, path in required.items():
+        status = source_authority.field_status(path)
+        if not status.is_effective:
+            raise CampaignCombatValidationError("Character numeric values need manager repair before Combat automation.")
+        if label == "movement_total":
+            if MOVEMENT_VALUE_PATTERN.search(str(status.effective or "")) is None:
+                raise CampaignCombatValidationError("Movement speed needs manager repair before Combat automation.")
+            values[label] = parse_combat_movement_total(status.effective)
+        else:
+            values[label] = int(status.effective)
     state_record = getattr(record, "state_record", None)
     state = dict(getattr(state_record, "state", {}) or {})
     vitals = dict(state.get("vitals") or {})
+    current_hp = int(vitals.get("current_hp") or 0)
+    temp_hp = int(vitals.get("temp_hp") or 0)
+    if current_hp < 0 or current_hp > values["max_hp"] or temp_hp < 0:
+        raise CampaignCombatValidationError("Character HP needs review before Combat automation.")
     return {
-        **seed,
-        "current_hp": int(vitals.get("current_hp") or 0),
-        "temp_hp": int(vitals.get("temp_hp") or 0),
+        "source_ref": str(getattr(definition, "character_slug", "") or ""),
+        "display_name": str(getattr(definition, "name", "") or ""),
+        **values,
+        "current_hp": current_hp,
+        "temp_hp": temp_hp,
     }
 
 
@@ -295,6 +345,7 @@ class CampaignCombatService:
         self.character_repository = character_repository
         self.character_state_service = character_state_service
         self.session_revision_callback = session_revision_callback
+        self.source_resolver = None
         self.player_snapshot_sync_interval_seconds = max(
             0.0,
             float(player_snapshot_sync_interval_seconds),
@@ -400,11 +451,26 @@ class CampaignCombatService:
         initiative_priority: Any | None = None,
         created_by_user_id: int | None = None,
     ) -> CampaignCombatantRecord:
-        record = self.character_repository.get_visible_character(campaign_slug, character_slug)
+        from .committed_publication import active
+        if active() and not source_writer_reserved(get_db()):
+            # Reject malformed request values before waiting for a writer.
+            if turn_value is not None and str(turn_value).strip():
+                self._parse_int(turn_value, label="Turn value", default=None, minimum=None)
+            self._parse_initiative_priority(initiative_priority, default=1)
+            with _combat_source_write_transaction():
+                return self.add_player_character(
+                    campaign_slug, character_slug=character_slug, turn_value=turn_value,
+                    initiative_priority=initiative_priority, created_by_user_id=created_by_user_id,
+                )
+        record = (self._load_current_player_character(campaign_slug, character_slug)
+                  if active() else self.character_repository.get_visible_character(campaign_slug, character_slug))
         if record is None:
             raise CampaignCombatValidationError("Choose a valid player character to add to the tracker.")
 
-        snapshot = self._build_player_character_snapshot(record)
+        try:
+            snapshot = self._build_player_character_snapshot(record)
+        except ValueError as exc:
+            raise CampaignCombatValidationError(str(exc)) from exc
         normalized_turn_value = self._parse_int(
             turn_value,
             label="Turn value",
@@ -469,6 +535,8 @@ class CampaignCombatService:
         movement_total: Any | None = 0,
         source_kind: str = COMBAT_SOURCE_KIND_MANUAL_NPC,
         source_ref: str = "",
+        display_name_is_override: bool = False,
+        turn_value_is_override: bool = False,
         resource_counter_seeds: list[object] | None = None,
         resource_note_seeds: list[object] | None = None,
         created_by_user_id: int | None = None,
@@ -521,6 +589,55 @@ class CampaignCombatService:
         if normalized_source_kind == COMBAT_SOURCE_KIND_MANUAL_NPC:
             normalized_counter_seeds = []
             normalized_note_seeds = []
+
+        from .committed_publication import active
+        if active() and normalized_source_kind != COMBAT_SOURCE_KIND_MANUAL_NPC:
+            if self.source_resolver is None:
+                raise CampaignCombatValidationError("Combat source resolver is unavailable.")
+            try:
+                if not source_writer_reserved(get_db()):
+                    basis = self.source_resolver.resolve_source_for_action(
+                        campaign_slug, normalized_source_kind, normalized_source_ref,
+                        require_reservation=False,
+                    )
+                    with _combat_source_write_transaction():
+                        locked = self.source_resolver.resolve_source_for_action(
+                            campaign_slug, normalized_source_kind, normalized_source_ref,
+                        )
+                        if locked.source_version != basis.source_version:
+                            raise CampaignCombatValidationError("NPC source changed. Refresh before adding it.")
+                        return self.add_npc_combatant(
+                            campaign_slug, display_name=display_name, turn_value=turn_value,
+                            initiative_bonus=initiative_bonus,
+                            dexterity_modifier=dexterity_modifier,
+                            initiative_priority=initiative_priority, current_hp=current_hp,
+                            max_hp=max_hp, temp_hp=temp_hp, movement_total=movement_total,
+                            source_kind=source_kind, source_ref=source_ref,
+                            display_name_is_override=display_name_is_override,
+                            turn_value_is_override=turn_value_is_override,
+                            resource_counter_seeds=resource_counter_seeds,
+                            resource_note_seeds=resource_note_seeds,
+                            created_by_user_id=created_by_user_id,
+                        )
+                locked = self.source_resolver.resolve_source_for_action(
+                    campaign_slug, normalized_source_kind, normalized_source_ref,
+                )
+            except ValueError as exc:
+                raise CampaignCombatValidationError(str(exc)) from exc
+            if (
+                (not display_name_is_override and normalized_name != locked.display_name)
+                or (not turn_value_is_override and normalized_turn_value != locked.initiative_bonus)
+                or
+                normalized_initiative_bonus != locked.initiative_bonus
+                or normalized_dexterity_modifier != locked.dexterity_modifier
+                or normalized_max_hp != locked.max_hp
+                or normalized_current_hp != locked.current_hp
+                or normalized_temp_hp != locked.temp_hp
+                or normalized_movement_total != locked.movement_total
+                or tuple(normalized_counter_seeds) != locked.resource_counter_seeds
+                or tuple(normalized_note_seeds) != locked.resource_note_seeds
+            ):
+                raise CampaignCombatValidationError("NPC source changed. Refresh before adding it.")
 
         with get_db() as connection:
             self.store.ensure_tracker(
@@ -683,16 +800,39 @@ class CampaignCombatService:
         hit_dice_current: dict[int, Any] | None = None,
         updated_by_user_id: int | None = None,
     ) -> CampaignCombatantRecord:
+        from .committed_publication import active
+        if active() and not source_writer_reserved(get_db()):
+            with _combat_source_write_transaction():
+                return self.update_player_character_vitals(
+                    campaign_slug, combatant_id, expected_revision=expected_revision,
+                    current_hp=current_hp, temp_hp=temp_hp,
+                    hit_dice_current=hit_dice_current, updated_by_user_id=updated_by_user_id,
+                )
         combatant = self._require_combatant(campaign_slug, combatant_id)
         if not combatant.is_player_character or not combatant.character_slug:
             raise CampaignCombatValidationError("Only player-character vitals can be edited here.")
 
-        record = self.character_repository.get_visible_character(campaign_slug, combatant.character_slug)
+        record = (self._load_current_player_character(campaign_slug, combatant.character_slug)
+                  if active() else self.character_repository.get_visible_character(
+                      campaign_slug, combatant.character_slug))
         if record is None:
             raise CampaignCombatValidationError("That player character could not be loaded from the campaign data.")
 
-        movement_total = self._parse_movement_total(record.definition.stats.get("speed"))
-        max_hp = int(record.definition.stats.get("max_hp") or 0)
+        activated = active(get_db())
+        try:
+            authority = self.character_state_service.current_authority(record) if activated else None
+        except ValueError as exc:
+            raise CampaignCombatValidationError(str(exc)) from exc
+        max_hp_status = authority.field_status("stats.max_hp") if authority is not None else None
+        hp_edit = current_hp is not None or temp_hp is not None
+        from .system_policy import is_xianxia_system
+        dnd_authority_required = activated and not is_xianxia_system(record.definition.system)
+        if dnd_authority_required and hp_edit and (max_hp_status is None or not max_hp_status.is_effective):
+            raise CampaignCombatValidationError("Character HP needs manager repair before Combat automation.")
+        if dnd_authority_required:
+            max_hp = int(max_hp_status.effective) if hp_edit else None
+        else:
+            max_hp = int(record.definition.stats.get("max_hp") or 0)
         try:
             with get_db() as connection:
                 state_record = self.character_state_service.update_vitals(
@@ -704,26 +844,33 @@ class CampaignCombatService:
                     updated_by_user_id=updated_by_user_id,
                     commit=False,
                 )
-                # The protected Character CAS now holds the writer reservation.
-                # Preserve movement committed before it, without reusing the
-                # combatant snapshot captured before that reservation.
+                # The Character CAS now holds the writer reservation. The
+                # activated path keeps unresolved encounter fields as table
+                # state; the closed path refreshes the legacy saved seed.
                 current_combatant = self._require_combatant(campaign_slug, combatant_id)
                 if (
                     not current_combatant.is_player_character
                     or current_combatant.character_slug != combatant.character_slug
                 ):
                     raise CampaignCombatValidationError("Only player-character vitals can be edited here.")
+                legacy_snapshot = (build_character_combat_seed(record.definition)
+                                   if not dnd_authority_required else None)
                 updated_combatant = self.store.update_combatant(
                     campaign_slug,
                     combatant_id,
-                    display_name=record.definition.name,
-                    initiative_bonus=int(record.definition.stats.get("initiative_bonus") or 0),
-                    dexterity_modifier=self._extract_dexterity_modifier(record.definition.stats),
-                    current_hp=int((state_record.state.get("vitals") or {}).get("current_hp") or 0),
+                    display_name=legacy_snapshot["display_name"] if legacy_snapshot is not None else None,
+                    initiative_bonus=legacy_snapshot["initiative_bonus"] if legacy_snapshot is not None else None,
+                    dexterity_modifier=legacy_snapshot["dexterity_modifier"] if legacy_snapshot is not None else None,
+                    current_hp=(int((state_record.state.get("vitals") or {}).get("current_hp") or 0)
+                                if hp_edit or not dnd_authority_required else None),
                     max_hp=max_hp,
-                    temp_hp=int((state_record.state.get("vitals") or {}).get("temp_hp") or 0),
-                    movement_total=movement_total,
-                    movement_remaining=min(current_combatant.movement_remaining, movement_total),
+                    temp_hp=(int((state_record.state.get("vitals") or {}).get("temp_hp") or 0)
+                             if hp_edit or not dnd_authority_required else None),
+                    movement_total=legacy_snapshot["movement_total"] if legacy_snapshot is not None else None,
+                    movement_remaining=(min(current_combatant.movement_remaining,
+                                            legacy_snapshot["movement_total"])
+                                        if legacy_snapshot is not None else None),
+                    expected_revision=current_combatant.revision,
                     updated_by_user_id=updated_by_user_id,
                     commit=False,
                 )
@@ -748,30 +895,99 @@ class CampaignCombatService:
         combatant_id: int,
         *,
         expected_revision: int | None = None,
-        has_action: bool,
-        has_bonus_action: bool,
-        has_reaction: bool,
-        movement_remaining: Any | None,
+        has_action: bool | None = None,
+        has_bonus_action: bool | None = None,
+        has_reaction: bool | None = None,
+        movement_remaining: Any | None = None,
         updated_by_user_id: int | None = None,
     ) -> CampaignCombatantRecord:
+        from .committed_publication import active
+        if active() and not source_writer_reserved(get_db()):
+            with _combat_source_write_transaction():
+                return self.update_resources(
+                    campaign_slug, combatant_id, expected_revision=expected_revision,
+                    has_action=has_action, has_bonus_action=has_bonus_action,
+                    has_reaction=has_reaction, movement_remaining=movement_remaining,
+                    updated_by_user_id=updated_by_user_id,
+                )
         combatant = self._require_combatant(campaign_slug, combatant_id)
+        activated = active()
+        if activated and combatant.is_player_character and combatant.character_slug:
+            if (type(expected_revision) is not int or expected_revision < 1
+                    or combatant.revision != expected_revision):
+                raise CampaignCombatRevisionConflictError(
+                    "This combatant changed in another combat view. Refresh and try again."
+                )
         normalized_movement_remaining = self._parse_int(
             movement_remaining,
             label="Remaining movement",
             default=combatant.movement_remaining,
             minimum=0,
         )
-        if normalized_movement_remaining > combatant.movement_total:
+        movement_total_for_write = None
+        movement_authority_identity = None
+        legacy_movement_limit = not activated
+        if (combatant.is_player_character and combatant.character_slug
+                and (movement_remaining is not None if activated else
+                     normalized_movement_remaining != combatant.movement_remaining)):
+            character_record = (self._load_current_player_character(
+                campaign_slug, combatant.character_slug,
+            ) if activated else self.character_repository.get_combat_seed_character(
+                campaign_slug, combatant.character_slug,
+            ))
+            if character_record is None:
+                raise CampaignCombatValidationError("Character movement source is unavailable.")
+            try:
+                movement_authority = self.character_state_service.current_authority(character_record)
+            except ValueError as exc:
+                raise CampaignCombatValidationError("Character movement source is unavailable.") from exc
+            if (movement_authority is not None
+                    and not movement_authority.field_status("stats.speed").is_effective):
+                raise CampaignCombatValidationError("Movement speed needs manager repair before it can change.")
+            from .system_policy import is_xianxia_system
+            legacy_movement_limit = legacy_movement_limit or is_xianxia_system(
+                character_record.definition.system
+            )
+            if activated and not is_xianxia_system(character_record.definition.system):
+                if movement_authority is None:
+                    raise CampaignCombatValidationError("Movement speed needs manager repair before it can change.")
+                movement_total_for_write = parse_combat_movement_total(
+                    movement_authority.field_status("stats.speed").effective,
+                )
+                if MOVEMENT_VALUE_PATTERN.search(
+                    str(movement_authority.field_status("stats.speed").effective or "")
+                ) is None:
+                    raise CampaignCombatValidationError("Movement speed needs manager repair before it can change.")
+                if normalized_movement_remaining > movement_total_for_write:
+                    raise CampaignCombatValidationError("Remaining movement cannot exceed current speed.")
+            movement_authority_identity = movement_authority.identity if movement_authority is not None else None
+        if legacy_movement_limit and normalized_movement_remaining > combatant.movement_total:
             raise CampaignCombatValidationError("Remaining movement cannot exceed total movement.")
 
         try:
             with get_db() as connection:
+                if movement_authority_identity is not None:
+                    refreshed_record = (self._load_current_player_character(
+                        campaign_slug, combatant.character_slug,
+                    ) if activated else self.character_repository.get_combat_seed_character(
+                        campaign_slug, combatant.character_slug,
+                    ))
+                    try:
+                        refreshed_authority = (self.character_state_service.current_authority(refreshed_record)
+                                               if refreshed_record is not None else None)
+                    except ValueError as exc:
+                        raise CampaignCombatValidationError("Character movement source changed. Refresh before saving.") from exc
+                    if (refreshed_authority is None
+                            or refreshed_authority.identity != movement_authority_identity):
+                        raise CampaignCombatValidationError("Character movement source changed. Refresh before saving.")
                 updated_combatant = self.store.update_combatant(
                     campaign_slug,
                     combatant_id,
-                    has_action=has_action,
-                    has_bonus_action=has_bonus_action,
-                    has_reaction=has_reaction,
+                    has_action=combatant.has_action if has_action is None else has_action,
+                    has_bonus_action=(combatant.has_bonus_action if has_bonus_action is None
+                                      else has_bonus_action),
+                    has_reaction=combatant.has_reaction if has_reaction is None else has_reaction,
+                    movement_total=movement_total_for_write,
                     movement_remaining=normalized_movement_remaining,
                     expected_revision=expected_revision,
                     updated_by_user_id=updated_by_user_id,
@@ -1017,6 +1233,12 @@ class CampaignCombatService:
         *,
         updated_by_user_id: int | None = None,
     ) -> CampaignCombatTrackerRecord:
+        from .committed_publication import active
+        if active() and not source_writer_reserved(get_db()):
+            with _combat_source_write_transaction():
+                return self.set_current_turn(
+                    campaign_slug, combatant_id, updated_by_user_id=updated_by_user_id,
+                )
         try:
             with get_db() as connection:
                 tracker = self.store.ensure_tracker(
@@ -1056,6 +1278,10 @@ class CampaignCombatService:
         *,
         updated_by_user_id: int | None = None,
     ) -> CampaignCombatTrackerRecord:
+        from .committed_publication import active
+        if active() and not source_writer_reserved(get_db()):
+            with _combat_source_write_transaction():
+                return self.advance_turn(campaign_slug, updated_by_user_id=updated_by_user_id)
         try:
             with get_db() as connection:
                 tracker = self.store.ensure_tracker(
@@ -1117,10 +1343,10 @@ class CampaignCombatService:
         if not combatant.is_player_character or not combatant.character_slug:
             return
 
-        record = self.character_repository.get_visible_character(
-            campaign_slug,
-            combatant.character_slug,
-        )
+        from .committed_publication import active
+        record = (self._load_current_player_character(campaign_slug, combatant.character_slug)
+                  if active() else self.character_repository.get_visible_character(
+                      campaign_slug, combatant.character_slug))
         if record is None:
             raise CampaignCombatValidationError(
                 "The current player character could not be loaded, so the turn was not updated."
@@ -1164,6 +1390,11 @@ class CampaignCombatService:
         *,
         blocking: bool = True,
     ) -> PlayerCharacterSnapshotSyncMetrics:
+        from .committed_publication import active
+        if active():
+            return self._sync_activated_player_character_snapshots(
+                campaign_slug, blocking=blocking,
+            )
         sync_interval_seconds = self.player_snapshot_sync_interval_seconds
         metrics = PlayerCharacterSnapshotSyncMetrics(status=SNAPSHOT_SYNC_STATUS_SYNCED)
 
@@ -1246,6 +1477,101 @@ class CampaignCombatService:
                 self._player_snapshot_sync_lock.release()
 
         return metrics
+
+    def _sync_activated_player_character_snapshots(
+        self, campaign_slug: str, *, blocking: bool,
+    ) -> PlayerCharacterSnapshotSyncMetrics:
+        """Refresh only from committed rows while holding the writer reservation."""
+        metrics = PlayerCharacterSnapshotSyncMetrics(status=SNAPSHOT_SYNC_STATUS_SYNCED)
+        last_synced_at = self._player_snapshot_sync_completed_at.get(campaign_slug)
+        if (self.player_snapshot_sync_interval_seconds > 0
+                and last_synced_at is not None
+                and time.monotonic() - last_synced_at < self.player_snapshot_sync_interval_seconds):
+            metrics.status = SNAPSHOT_SYNC_STATUS_PRE_LOCK_THROTTLED
+            return metrics
+        started = time.perf_counter()
+        acquired = self._player_snapshot_sync_lock.acquire(blocking=blocking)
+        if not acquired:
+            metrics.status = SNAPSHOT_SYNC_STATUS_LOCK_HELD
+            return metrics
+        metrics.lock_acquired = True
+        metrics.lock_wait_ms = (time.perf_counter() - started) * 1000
+        from .committed_publication import CommittedSourceConflict
+        try:
+            if get_db().in_transaction:
+                metrics.status = SNAPSHOT_SYNC_STATUS_DEFERRED
+                return metrics
+            last_synced_at = self._player_snapshot_sync_completed_at.get(campaign_slug)
+            if (self.player_snapshot_sync_interval_seconds > 0
+                    and last_synced_at is not None
+                    and time.monotonic() - last_synced_at < self.player_snapshot_sync_interval_seconds):
+                metrics.status = SNAPSHOT_SYNC_STATUS_POST_LOCK_THROTTLED
+                return metrics
+            changed = False
+            deferred = False
+            pending: list[tuple[CampaignCombatantRecord, object, dict[str, int], int]] = []
+            with source_write_transaction():
+                for combatant in self.store.list_combatants(campaign_slug):
+                    if not combatant.is_player_character or not combatant.character_slug:
+                        continue
+                    try:
+                        record = self.character_repository.get_combat_seed_character(
+                            campaign_slug, combatant.character_slug,
+                        )
+                    except (CommittedSourceConflict, CharacterStateConflictError,
+                            OSError, TypeError, ValueError, YAMLError):
+                        deferred = True
+                        continue
+                    if record is None:
+                        deferred = True
+                        continue
+                    try:
+                        snapshot = self._build_player_character_snapshot(record)
+                    except (CampaignCombatValidationError, CommittedSourceConflict,
+                            CharacterStateConflictError, ValueError):
+                        deferred = True
+                        continue
+                    remaining = min(combatant.movement_remaining, snapshot["movement_total"])
+                    if (
+                        combatant.display_name == record.definition.name
+                        and combatant.initiative_bonus == snapshot["initiative_bonus"]
+                        and combatant.dexterity_modifier == snapshot["dexterity_modifier"]
+                        and combatant.current_hp == snapshot["current_hp"]
+                        and combatant.max_hp == snapshot["max_hp"]
+                        and combatant.temp_hp == snapshot["temp_hp"]
+                        and combatant.movement_total == snapshot["movement_total"]
+                        and combatant.movement_remaining == remaining
+                    ):
+                        continue
+                    pending.append((combatant, record, snapshot, remaining))
+                if not deferred:
+                    for combatant, record, snapshot, remaining in pending:
+                        self.store.update_combatant(
+                            campaign_slug, combatant.id,
+                            display_name=record.definition.name,
+                            initiative_bonus=snapshot["initiative_bonus"],
+                            dexterity_modifier=snapshot["dexterity_modifier"],
+                            current_hp=snapshot["current_hp"], max_hp=snapshot["max_hp"],
+                            temp_hp=snapshot["temp_hp"],
+                            movement_total=snapshot["movement_total"],
+                            movement_remaining=remaining,
+                            expected_revision=combatant.revision, commit=False,
+                        )
+                        changed = True
+                    if changed:
+                        self.store.bump_tracker_revision(campaign_slug, commit=False)
+            metrics.sync_changed = changed
+            metrics.sync_ran = True
+            metrics.status = SNAPSHOT_SYNC_STATUS_DEFERRED if deferred else SNAPSHOT_SYNC_STATUS_SYNCED
+            self._player_snapshot_sync_completed_at[campaign_slug] = time.monotonic()
+            self._player_snapshot_sync_source_tokens.pop(campaign_slug, None)
+            return metrics
+        except CharacterStateConflictError:
+            metrics.status = SNAPSHOT_SYNC_STATUS_DEFERRED
+            return metrics
+        finally:
+            metrics.sync_elapsed_ms = (time.perf_counter() - started) * 1000
+            self._player_snapshot_sync_lock.release()
 
     def _read_player_character_snapshot_source_token(
         self,
@@ -1339,12 +1665,29 @@ class CampaignCombatService:
             )
             if file_token is None:
                 return None
+            # A policy or page revision can change effective Character numbers
+            # without touching either the definition file or SQLite state.
+            # Bind the skip token to the same current SourceAuthority used by
+            # snapshot construction, including its source snapshot digest.
+            authority_tokens: list[tuple[str, str]] = []
+            for item in database_token:
+                if item.character_state_revision is None or item.reconciliation_protected:
+                    continue
+                record = self.character_repository.get_combat_seed_character(
+                    campaign_slug, item.character_slug,
+                )
+                if record is None or record.state_record.revision != item.character_state_revision:
+                    return None
+                authority = self.character_state_service.current_authority(record)
+                authority_tokens.append((item.character_slug,
+                                         authority.identity if authority is not None else "xianxia"))
         except Exception:
             return None
 
         return _PlayerCharacterSnapshotSourceToken(
             database=database_token,
             files=file_token,
+            authorities=tuple(authority_tokens),
         )
 
     @staticmethod
@@ -1475,7 +1818,12 @@ class CampaignCombatService:
             if record is None or record.state_record.revision != source.character_state_revision:
                 return None, frozenset()
             loaded_character_slugs.add(combatant.character_slug)
-            snapshot = self._build_player_character_snapshot(record)
+            try:
+                snapshot = self._build_player_character_snapshot(record)
+            except (CampaignCombatValidationError, ValueError):
+                # Keep the numeric encounter snapshot as historical table state;
+                # unrelated combatants can still refresh.
+                continue
             movement_remaining = min(combatant.movement_remaining, snapshot["movement_total"])
             if (
                 combatant.display_name == record.definition.name
@@ -1501,13 +1849,37 @@ class CampaignCombatService:
         commit: bool = True,
     ) -> CampaignCombatantRecord:
         combatant = self._require_combatant(campaign_slug, combatant_id)
+        movement_total = combatant.movement_total
+        from .committed_publication import active
+        if active() and combatant.is_player_character:
+            if not source_writer_reserved(get_db()) or not combatant.character_slug:
+                raise CampaignCombatValidationError("Character movement source reservation is unavailable.")
+            record = self._load_current_player_character(
+                campaign_slug, combatant.character_slug,
+            )
+            if record is None:
+                raise CampaignCombatValidationError("Character movement source is unavailable.")
+            try:
+                authority = self.character_state_service.current_authority(record)
+            except ValueError as exc:
+                raise CampaignCombatValidationError("Character movement source is unavailable.") from exc
+            from .system_policy import is_xianxia_system
+            if not is_xianxia_system(record.definition.system):
+                status = authority.field_status("stats.speed") if authority is not None else None
+                if (status is None or not status.is_effective
+                        or MOVEMENT_VALUE_PATTERN.search(str(status.effective or "")) is None):
+                    raise CampaignCombatValidationError(
+                        "Movement speed needs manager repair before automatic turn refill."
+                    )
+                movement_total = parse_combat_movement_total(status.effective)
         return self.store.update_combatant(
             campaign_slug,
             combatant_id,
             has_action=True,
             has_bonus_action=True,
             has_reaction=True,
-            movement_remaining=combatant.movement_total,
+            movement_total=movement_total,
+            movement_remaining=movement_total,
             updated_by_user_id=updated_by_user_id,
             commit=commit,
         )
@@ -1518,8 +1890,23 @@ class CampaignCombatService:
             raise CampaignCombatValidationError("That combatant could not be found.")
         return combatant
 
+    def _load_current_player_character(self, campaign_slug: str, character_slug: str):
+        try:
+            return self.character_repository.get_combat_seed_character(
+                campaign_slug, character_slug,
+            )
+        except (CharacterStateConflictError, ValueError) as exc:
+            raise CampaignCombatValidationError(
+                "Character source is unavailable. Refresh and retry."
+            ) from exc
+
     def _build_player_character_snapshot(self, record) -> dict[str, int]:
-        seed = build_character_combat_snapshot(record)
+        from .committed_publication import active
+        seed = build_character_combat_snapshot(
+            record,
+            source_authority=(self.character_state_service.current_authority(record)
+                              if active(get_db()) else None),
+        )
         return {
             "initiative_bonus": int(seed["initiative_bonus"]),
             "dexterity_modifier": int(seed["dexterity_modifier"]),

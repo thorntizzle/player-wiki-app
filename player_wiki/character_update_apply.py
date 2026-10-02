@@ -12,10 +12,11 @@ import json
 from pathlib import Path
 import time
 from typing import Any, Callable, Mapping, Sequence
+import yaml
 
-from .character_models import CharacterDefinition, CharacterRecord
+from .character_models import CharacterDefinition, CharacterImportMetadata, CharacterRecord
 from .character_path_safety import resolve_character_definition_import_paths
-from .character_reconciliation import CharacterPublicationCoordinator
+from .character_reconciliation import CharacterPublicationCoordinator, PendingReviewedSourceProof
 from .incident_diagnostics import diagnose_operation
 from .character_repository import load_campaign_character_config
 from .character_store import CharacterStateStore, ExactCharacterState
@@ -60,6 +61,8 @@ _PAYLOAD_KEYS = frozenset(
         "operations",
         "definition_digest",
         "import_digest",
+        "publication_mode",
+        "committed_revision",
         "state_revision",
         "state_digest",
         "state_updated_at",
@@ -100,6 +103,8 @@ class CharacterUpdateReviewClaims:
     operations: tuple[Mapping[str, Any], ...]
     definition_digest: str
     import_digest: str
+    publication_mode: str
+    committed_revision: int | None
     state_revision: int
     state_digest: str
     state_updated_at: str
@@ -123,6 +128,10 @@ class CharacterUpdateRecompute:
     policy_digest: str
     native_digest: str
     readback_semantic_rows: Callable[[CharacterRecord], Sequence[object]]
+    reviewed_authority: Any | None = None
+    reviewed_config_revision: int | None = None
+    pending_page_feature_markers: tuple[dict[str, Any], ...] = ()
+    refresh_review_basis: Callable[[], tuple[str, str]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,6 +254,14 @@ def _claims_payload(claims: CharacterUpdateReviewClaims) -> dict[str, Any]:
     state_impact = _bounded_text(claims.state_impact)
     if state_impact not in _STATE_IMPACTS:
         raise CharacterUpdateTokenError("Character update review token is invalid.")
+    if claims.publication_mode not in {"closed", "committed"}:
+        raise CharacterUpdateTokenError("Character update review token is invalid.")
+    if claims.publication_mode == "committed":
+        committed_revision = _positive_integer(claims.committed_revision)
+    elif claims.committed_revision is None:
+        committed_revision = None
+    else:
+        raise CharacterUpdateTokenError("Character update review token is invalid.")
     return {
         "version": 1,
         "actor_user_id": actor_user_id,
@@ -253,6 +270,8 @@ def _claims_payload(claims: CharacterUpdateReviewClaims) -> dict[str, Any]:
         "operations": list(operations),
         "definition_digest": _digest(claims.definition_digest),
         "import_digest": _digest(claims.import_digest),
+        "publication_mode": claims.publication_mode,
+        "committed_revision": committed_revision,
         "state_revision": state_revision,
         "state_digest": _digest(claims.state_digest),
         "state_updated_at": _bounded_text(claims.state_updated_at, maximum=64),
@@ -285,6 +304,8 @@ def _claims_from_payload(payload: Any) -> CharacterUpdateReviewClaims:
         operations=tuple(operations_value),
         definition_digest=payload.get("definition_digest"),
         import_digest=payload.get("import_digest"),
+        publication_mode=payload.get("publication_mode"),
+        committed_revision=payload.get("committed_revision"),
         state_revision=payload.get("state_revision"),
         state_digest=payload.get("state_digest"),
         state_updated_at=payload.get("state_updated_at"),
@@ -552,7 +573,12 @@ class CharacterUpdateApplyEngine:
             if evidence.claims != reviewed:
                 raise CharacterUpdateStaleError("Reviewed inputs changed.")
             desired_state = _validated_desired_state(current)
-            candidate_payload = current.plan.candidate_definition
+            from .committed_publication import active
+            derived = current.plan.derived_character
+            candidate_payload = (
+                derived.get("definition") if active() and isinstance(derived, Mapping)
+                else current.plan.candidate_definition
+            )
             if not isinstance(candidate_payload, Mapping):
                 raise ValueError("Character update candidate is unavailable.")
             desired_definition = CharacterDefinition.from_dict(dict(candidate_payload))
@@ -561,6 +587,17 @@ class CharacterUpdateApplyEngine:
             review_digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
             if self._audit_rows(review_digest):
                 raise CharacterUpdateStaleError("Reviewed update was already used.")
+            reviewed_source_proof = (
+                PendingReviewedSourceProof.capture(
+                    current.record, desired_definition, desired_state,
+                    current.reviewed_authority,
+                    config_revision=current.reviewed_config_revision,
+                    page_feature_markers=current.pending_page_feature_markers,
+                    source_digest=current.source_digest,
+                    policy_digest=current.policy_digest,
+                    refresh_review_basis=current.refresh_review_basis,
+                ) if active() else None
+            )
         except CharacterUpdateStaleError:
             return CharacterUpdateApplyResult(
                 CharacterUpdateApplyClassification.REFUSED_STALE
@@ -590,6 +627,7 @@ class CharacterUpdateApplyEngine:
                 audit_event_type="character_update_applied",
                 audit_actor_user_id=actor_user_id,
                 audit_metadata=audit_metadata,
+                reviewed_source_proof=reviewed_source_proof,
             )
         except BaseException:
             return CharacterUpdateApplyResult(
@@ -627,21 +665,45 @@ class CharacterUpdateApplyEngine:
         record = recompute.record
         campaign_slug = record.definition.campaign_slug
         character_slug = record.definition.character_slug
-        exact_state = self.state_store.get_exact_state(campaign_slug, character_slug)
-        if exact_state is None:
-            raise CharacterUpdateStaleError("Character state is unavailable.")
-        if (
-            exact_state.revision != record.state_record.revision
-            or exact_state.state != record.state_record.state
-        ):
-            raise CharacterUpdateStaleError("Character state changed.")
-        config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
-        definition_path, import_path = resolve_character_definition_import_paths(
-            config.characters_dir,
-            character_slug,
-        )
-        definition_bytes = definition_path.read_bytes()
-        import_bytes = import_path.read_bytes()
+        from .committed_publication import active
+        connection = get_db()
+        owned_snapshot = not connection.in_transaction
+        if owned_snapshot:
+            connection.execute("BEGIN")
+        try:
+            committed_mode = active(connection)
+            exact_state = self.state_store.get_exact_state(campaign_slug, character_slug)
+            if exact_state is None:
+                raise CharacterUpdateStaleError("Character state is unavailable.")
+            if (
+                exact_state.revision != record.state_record.revision
+                or exact_state.state != record.state_record.state
+            ):
+                raise CharacterUpdateStaleError("Character state changed.")
+            if committed_mode:
+                from .committed_character_publication import exact_character
+                source = exact_character(campaign_slug, character_slug, connection=connection)
+                if source is None or source["tombstone"] or record.committed_revision != source["revision"]:
+                    raise CharacterUpdateStaleError("Committed Character changed.")
+                definition_bytes = bytes(source["primary_bytes"])
+                import_bytes = bytes(source["secondary_bytes"])
+                if (CharacterDefinition.from_dict(yaml.safe_load(definition_bytes.decode("utf-8"))).to_dict()
+                        != record.definition.to_dict()
+                        or CharacterImportMetadata.from_dict(yaml.safe_load(import_bytes.decode("utf-8"))).to_dict()
+                        != record.import_metadata.to_dict()):
+                    raise CharacterUpdateStaleError("Committed Character changed.")
+                committed_revision = int(source["revision"])
+            else:
+                config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
+                definition_path, import_path = resolve_character_definition_import_paths(
+                    config.characters_dir, character_slug,
+                )
+                definition_bytes = definition_path.read_bytes()
+                import_bytes = import_path.read_bytes()
+                committed_revision = None
+        finally:
+            if owned_snapshot:
+                connection.rollback()
         plan = recompute.plan
         candidate_digest = str(plan.digest or "")
         semantic_digest = canonical_digest(_semantic_rows_payload(plan.semantic_diff))
@@ -652,6 +714,8 @@ class CharacterUpdateApplyEngine:
             operations=tuple(dict(item) for item in recompute.operations),
             definition_digest=hashlib.sha256(definition_bytes).hexdigest(),
             import_digest=hashlib.sha256(import_bytes).hexdigest(),
+            publication_mode="committed" if committed_mode else "closed",
+            committed_revision=committed_revision,
             state_revision=exact_state.revision,
             state_digest=exact_state.state_digest,
             state_updated_at=exact_state.updated_at,
@@ -693,8 +757,14 @@ class CharacterUpdateApplyEngine:
         actor_user_id: int,
     ) -> bool:
         plan = recompute.plan
+        from .committed_publication import active
+        derived = plan.derived_character
+        reviewed_definition = (
+            derived.get("definition") if active() and isinstance(derived, Mapping)
+            else plan.candidate_definition
+        )
         if (
-            not _same(result_record.definition.to_dict(), plan.candidate_definition)
+            not _same(result_record.definition.to_dict(), reviewed_definition)
             or not _same(
                 result_record.import_metadata.to_dict(),
                 recompute.record.import_metadata.to_dict(),
@@ -725,6 +795,27 @@ class CharacterUpdateApplyEngine:
             or str(audit["character_slug"]) != result_record.definition.character_slug
         ):
             return False
+        if recompute.pending_page_feature_markers:
+            from .character_source_repair import load_verified_numeric_actions
+            witnesses = load_verified_numeric_actions(
+                result_record.definition.campaign_slug,
+                result_record.definition.character_slug,
+            )
+            expected = tuple({"authorization": marker,
+                              "source_basis_digest": marker["source_basis_digest"]}
+                             for marker in recompute.pending_page_feature_markers)
+            if any(witness not in witnesses for witness in expected):
+                return False
+            # The postcommit source must independently make each exact row effective.
+            current_authority = self.coordinator.numeric_authority_provider(
+                result_record, result_record.definition,
+            )
+            if current_authority is None or any(
+                not current_authority.resource_status(
+                    "resource", marker["target_id"].removeprefix("resource:")
+                ).is_effective for marker in recompute.pending_page_feature_markers
+            ):
+                return False
         readback_rows = tuple(recompute.readback_semantic_rows(result_record))
         return canonical_digest(_semantic_rows_payload(readback_rows)) == canonical_digest(
             _semantic_rows_payload(plan.semantic_diff)

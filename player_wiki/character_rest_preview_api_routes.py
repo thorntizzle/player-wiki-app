@@ -52,6 +52,8 @@ def register_character_rest_preview_api_route(
                         }
                         for change in preview.changes
                     ],
+                    "skipped": list(preview.skipped),
+                    "can_apply": preview.can_apply,
                     "adjustments": preview.adjustments,
                 },
             }

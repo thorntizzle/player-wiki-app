@@ -5,6 +5,7 @@ from typing import Any, Callable
 from .character_builder_constants import DEFAULT_ABILITY_SCORE
 from .managed_resource_registry import resolve_managed_resource_family_and_member
 from .repository import normalize_lookup
+from .character_page_companion import blocks_page_companion_heuristics
 
 
 def _proficiency_bonus_for_level(level: int) -> int:
@@ -127,6 +128,8 @@ def build_feature_tracker_template(
     managed_resource_member: dict[str, Any] | None = None,
     feat_effect_keys_for_feature: Callable[[dict[str, Any]], list[str]],
 ) -> dict[str, Any] | None:
+    if blocks_page_companion_heuristics(feature_payload):
+        return None
     if managed_resource_member is not None:
         managed_template = build_managed_resource_tracker_template(
             dict(managed_resource_member),

@@ -1,5 +1,6 @@
 {% set active_session_character_panel = character_subpage if character_subpage else "overview" %}
 {% set projection_warnings = character.projection_warnings %}
+{% set historical_numeric_rows = character.historical_numeric_rows %}
 {% include "_character_projection_warnings.html" %}
 <template data-session-character-presentation-dialog-scope></template>
 {% macro session_character_item_description_details(item, dialog_id) %}
@@ -423,6 +424,7 @@
           {% if item.tags %}
             <p class="meta">{{ item.tags | join(", ") }}</p>
           {% endif %}
+          {% if item.charges_label %}<p class="meta">Charges: {{ item.charges_label }}</p>{% endif %}
           {{ session_character_item_description_details(item, item_dialog_id) }}
           {{ session_character_item_fallback_details(item) }}
         </article>

@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import re
 from typing import Any
+from flask import has_app_context
 
 from .character_builder_constants import (
     CAMPAIGN_PAGE_SOURCE_ID,
@@ -27,6 +28,7 @@ from .character_feature_trackers import (
     feature_has_effect as _feature_has_effect_impl,
 )
 from .character_models import CharacterDefinition
+from .character_page_companion import blocks_page_companion_heuristics
 from .character_profile import ensure_profile_class_rows
 from .character_source_matrix import PHB_SOURCE_ID
 from .repository import normalize_lookup, slugify
@@ -218,7 +220,7 @@ def _build_feature_payload(
             "category": "species_trait",
             "source": page_ref or (systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else ""),
             "description_markdown": str(feature_entry.get("description_markdown") or "").strip(),
-            "activation_type": "passive",
+            "activation_type": str(campaign_option.get("activation_type") or "passive").strip() or "passive",
             "tracker_ref": None,
             "systems_ref": _systems_ref_from_entry(systems_entry) if isinstance(systems_entry, SystemsEntryRecord) else None,
         }
@@ -246,7 +248,7 @@ def _build_feature_payload(
             "category": "background_feature",
             "source": page_ref or (systems_entry.source_id if isinstance(systems_entry, SystemsEntryRecord) else ""),
             "description_markdown": str(feature_entry.get("description_markdown") or "").strip(),
-            "activation_type": "passive",
+            "activation_type": str(campaign_option.get("activation_type") or "passive").strip() or "passive",
             "tracker_ref": None,
             "systems_ref": _systems_ref_from_entry(systems_entry) if isinstance(systems_entry, SystemsEntryRecord) else None,
         }
@@ -377,16 +379,20 @@ def _apply_tracker_templates_to_feature_payloads(
     updated_features: list[dict[str, Any]] = []
     resource_templates: list[dict[str, Any]] = []
     seen_template_ids: set[str] = set()
+    activated = _activated_committed_character_mode()
     feature_payloads_by_identity: dict[tuple[str, str], dict[str, Any]] = {}
     for feature_payload in base_features:
+        if activated and (
+            _unproved_effective_feature(feature_payload)
+            or blocks_page_companion_heuristics(feature_payload)
+        ):
+            # A derived tracker with the same display name cannot enrich a
+            # suppressed history row or a proved page-choice projection.
+            continue
         feature_identity = _feature_identity_key(feature_payload)
         if feature_identity[0]:
             feature_payloads_by_identity.setdefault(feature_identity, feature_payload)
-    seen_feature_identities = {
-        feature_identity
-        for feature_identity in (_feature_identity_key(feature) for feature in base_features)
-        if feature_identity[0]
-    }
+    seen_feature_identities = set(feature_payloads_by_identity)
     display_order = 0
 
     def append_tracker_template(feature_payload: dict[str, Any], tracker_template: dict[str, Any]) -> None:
@@ -411,6 +417,13 @@ def _apply_tracker_templates_to_feature_payloads(
             display_order += 1
 
     for feature_payload in base_features:
+        if activated and _unproved_effective_feature(feature_payload):
+            # Keep the historical label in the effective view, but no raw
+            # action or tracker can survive into a usable projection.
+            feature_payload["activation_type"] = "passive"
+            feature_payload.pop("tracker_ref", None)
+            updated_features.append(feature_payload)
+            continue
         managed_resource_family, managed_resource_member = _apply_managed_resource_member_defaults(feature_payload)
         feature_current_level = _feature_tracker_current_level(
             feature_payload,
@@ -733,6 +746,8 @@ def _merge_resource_templates(
 def _extract_existing_feature_choice_map(definition: CharacterDefinition) -> dict[str, list[str]]:
     values: list[str] = []
     for feature in list(definition.features or []):
+        if blocks_page_companion_heuristics(feature):
+            continue
         feature_name = str(feature.get("name") or "").strip()
         if feature_name:
             values.append(feature_name)
@@ -813,12 +828,31 @@ def _is_legacy_detached_action_summary_feature(feature_payload: dict[str, Any]) 
     token_count = len(re.findall(r"[A-Za-z0-9]+", name))
     return token_count >= 12 or len(name) >= 80 or name[-1:] in {".", "!", "?"}
 
+def _activated_committed_character_mode() -> bool:
+    if not has_app_context():
+        return False
+    from .committed_publication import active
+    return active()
+
+
+def _unproved_effective_feature(feature_payload: dict[str, Any]) -> bool:
+    status = str(feature_payload.get("authority_status") or "").strip().upper()
+    return bool(feature_payload.get("mechanics_suppressed") or status and status != "VERIFIED")
+
+
 def _merge_legacy_detached_action_summary_features(
     normalized_features: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    activated = _activated_committed_character_mode()
     targets_by_description: dict[str, list[dict[str, Any]]] = {}
     for feature_payload in normalized_features:
         if _is_legacy_detached_action_summary_feature(feature_payload):
+            continue
+        if activated and (
+            _unproved_effective_feature(feature_payload)
+            or str(feature_payload.get("authority_status") or "").strip()
+            or blocks_page_companion_heuristics(feature_payload)
+        ):
             continue
         description_key = normalize_lookup(str(feature_payload.get("description_markdown") or ""))
         if description_key:
@@ -827,6 +861,12 @@ def _merge_legacy_detached_action_summary_features(
     compacted_features: list[dict[str, Any]] = []
     for feature_payload in normalized_features:
         if _is_legacy_detached_action_summary_feature(feature_payload):
+            if activated and (
+                _unproved_effective_feature(feature_payload)
+                or str(feature_payload.get("authority_status") or "").strip()
+            ):
+                compacted_features.append(feature_payload)
+                continue
             summary_key = normalize_lookup(str(feature_payload.get("name") or ""))
             targets = targets_by_description.get(summary_key) or []
             if len(targets) == 1:

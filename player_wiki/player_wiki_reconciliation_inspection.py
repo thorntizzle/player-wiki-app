@@ -163,6 +163,9 @@ def _collect_snapshot(
     campaigns_root: Path,
     filters: InspectionFilters,
 ) -> _Snapshot:
+    from .committed_publication import active
+    if active(connection):
+        raise ReconciliationInspectionError("legacy_reconciliation_blocked_by_committed_authority")
     try:
         ledger = inspect_migration_ledger(connection)
     except MigrationError as exc:

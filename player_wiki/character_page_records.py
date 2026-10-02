@@ -10,6 +10,40 @@ def _normalized_sections(sections: Iterable[str] | None) -> frozenset[str]:
     return frozenset(str(section or "").strip() for section in sections or () if str(section or "").strip())
 
 
+def _committed_visible_records(page_store: Any, campaign_slug: str, *, include_body: bool) -> list[Any]:
+    """Select config, page proofs, and projections in one short SQLite read view."""
+    from .committed_publication import (
+        CommittedSourceConflict, config, current, page_rows, read_snapshot,
+    )
+    from .models import page_sort_key
+
+    mapper = getattr(page_store, "_map_record", None)
+    if not callable(mapper):
+        mapper = getattr(getattr(page_store, "page_store", None), "_map_record", None)
+    if not callable(mapper):
+        raise CommittedSourceConflict("Committed Character page projection is unavailable.")
+
+    @read_snapshot
+    def select() -> list[Any]:
+        settings_source, settings = config(campaign_slug)
+        records = []
+        for row in page_rows(campaign_slug):
+            record = mapper(row, include_body=include_body)
+            page = getattr(record, "page", None)
+            if (page is None or not page.published or page.is_deprecated_wiki_overview
+                    or page.reveal_after_session > int(settings["current_session"])):
+                continue
+            source = current(campaign_slug, "page", record.page_ref)
+            if source is None:
+                continue
+            page.committed_revision = int(source["revision"])
+            page.committed_config_revision = int(settings_source["revision"])
+            records.append(record)
+        return sorted(records, key=lambda record: (*page_sort_key(record.page), record.page_ref))
+
+    return select()
+
+
 def list_builder_campaign_page_records(
     page_store: Any,
     campaign_slug: str,
@@ -17,7 +51,12 @@ def list_builder_campaign_page_records(
     *,
     relevant_sections: Iterable[str],
 ) -> list[object]:
+    from .committed_publication import active
+
     allowed_sections = _normalized_sections(relevant_sections)
+    if active():
+        return [record for record in _committed_visible_records(page_store, campaign_slug, include_body=False)
+                if str(record.page.section or "").strip() in allowed_sections]
     return [
         page_record
         for page_record in page_store.list_page_records(campaign_slug)
@@ -34,7 +73,12 @@ def list_visible_character_page_records(
     include_body: bool = True,
     excluded_sections: Iterable[str] | None = None,
 ) -> list[object]:
+    from .committed_publication import active
+
     ignored_sections = _normalized_sections(excluded_sections)
+    if active():
+        return [record for record in _committed_visible_records(page_store, campaign_slug, include_body=include_body)
+                if str(record.page.section or "").strip() not in ignored_sections]
     return [
         page_record
         for page_record in page_store.list_page_records(campaign_slug, include_body=include_body)
@@ -234,6 +278,42 @@ def materialize_dnd_character_read_page_records(
     selecting an arbitrary campaign body.
     """
 
+    from .committed_publication import active, config, current, page_row, read_snapshot
+
+    if active():
+        @read_snapshot
+        def materialize_committed() -> list[object]:
+            settings_source, settings = config(campaign_slug)
+            for record in campaign_page_records:
+                page = getattr(record, "page", None)
+                if (page is None or page.committed_config_revision != settings_source["revision"]
+                        or not page.committed_revision or not page.published
+                        or page.is_deprecated_wiki_overview
+                        or page.reveal_after_session > int(settings["current_session"])):
+                    return []
+                proved = page_row(campaign_slug, record.page_ref)
+                source = current(campaign_slug, "page", record.page_ref)
+                if (proved is None or source is None or source["revision"] != page.committed_revision):
+                    return []
+            return _materialize_dnd_character_read_page_records(
+                page_store, campaign_slug, campaign_page_records, definition, state,
+                section=section, campaign=None, committed=True,
+            )
+
+        return materialize_committed()
+    return _materialize_dnd_character_read_page_records(
+        page_store, campaign_slug, campaign_page_records, definition, state,
+        section=section, campaign=campaign, committed=False,
+    )
+
+
+def _materialize_dnd_character_read_page_records(
+    page_store: Any, campaign_slug: str, campaign_page_records: list[Any],
+    definition: Any, state: dict[str, Any] | None, *, section: str,
+    campaign: Any | None, committed: bool,
+) -> list[object]:
+    from .committed_publication import current
+
     normalized_section = str(section or "").strip().lower()
     refs: set[str] = set()
     selected_items: list[dict[str, Any]] = []
@@ -278,12 +358,17 @@ def materialize_dnd_character_read_page_records(
             canonical_ref,
             include_body=True,
         )
+        full_source = current(campaign_slug, "page", canonical_ref) if committed else None
         if (
             full_record is not None
             and _normalized_page_ref(getattr(full_record, "page_ref", ""))
             == _normalized_page_ref(canonical_ref)
             and str(getattr(full_record, "updated_at", "") or "").strip()
             == str(getattr(metadata_record, "updated_at", "") or "").strip()
+            and (not committed or (
+                full_source is not None
+                and full_source["revision"] == getattr(metadata_page, "committed_revision", None)
+            ))
             and (
                 campaign is None
                 or (
@@ -292,6 +377,9 @@ def materialize_dnd_character_read_page_records(
                 )
             )
         ):
+            if committed:
+                full_record.page.committed_revision = metadata_page.committed_revision
+                full_record.page.committed_config_revision = metadata_page.committed_config_revision
             materialized_by_index[index] = full_record
 
     return [

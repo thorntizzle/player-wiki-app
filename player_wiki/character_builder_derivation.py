@@ -82,6 +82,7 @@ from .character_campaign_options import (
     collect_campaign_option_stat_adjustments,
 )
 from .character_models import CharacterDefinition
+from .character_spell_effects import METRICS, metric_provenance, reconcile_formula_row
 from .character_profile import (
     ensure_profile_class_rows,
     profile_primary_class_name,
@@ -668,8 +669,13 @@ def _infer_definition_save_proficiencies(
     ability_scores: dict[str, int],
     proficiency_bonus: int,
     selected_class: SystemsEntryRecord | None = None,
+    source_authority: Any | None = None,
 ) -> set[str]:
     save_proficiencies = set(_class_save_proficiencies(selected_class))
+    if source_authority is not None:
+        # A saved bonus numerically matching PB does not prove who granted it.
+        # Current class/feature metadata is considered separately below.
+        return save_proficiencies
     if proficiency_bonus <= 0:
         return save_proficiencies
     ability_payloads = dict((definition.stats or {}).get("ability_scores") or {})
@@ -1058,6 +1064,7 @@ def _derive_definition_skills(
     ability_scores: dict[str, int],
     proficiency_bonus: int,
     proficiency_ability_scores: dict[str, int] | None = None,
+    source_authority: Any | None = None,
 ) -> list[dict[str, Any]]:
     existing_rows = [dict(row or {}) for row in list(definition.skills or [])]
     if not existing_rows:
@@ -1066,8 +1073,16 @@ def _derive_definition_skills(
     feat_selected_choices = _campaign_option_feat_selected_choices_from_features(
         list(definition.features or [])
     )
+    owned_rows = (
+        existing_rows if source_authority is None else [
+            row for row in existing_rows
+            if source_authority.field_status(
+                f"skills.{normalize_lookup(row.get('name'))}"
+            ).is_effective
+        ]
+    )
     proficiency_levels = _skill_proficiency_levels_from_rows(
-        existing_rows,
+        owned_rows,
         ability_scores=dict(proficiency_ability_scores or ability_scores),
         proficiency_bonus=proficiency_bonus,
     )
@@ -1120,12 +1135,15 @@ def _derive_definition_stats(
     selected_class: SystemsEntryRecord | None = None,
     selected_species: SystemsEntryRecord | None = None,
     proficiency_ability_scores: dict[str, int] | None = None,
+    historical_option_payloads: list[dict[str, Any]] | None = None,
+    source_authority: Any | None = None,
 ) -> dict[str, Any]:
     stats, manual_adjustments = strip_manual_stat_adjustments(dict(definition.stats or {}))
     stats, recoverable_penalties = strip_recoverable_stat_penalties(stats)
     existing_ability_scores = dict(stats.get("ability_scores") or {})
     campaign_option_adjustments = collect_campaign_option_stat_adjustments(
-        _campaign_option_payloads_from_definition(definition)
+        historical_option_payloads if historical_option_payloads is not None
+        else _campaign_option_payloads_from_definition(definition)
     )
     if campaign_option_adjustments:
         stats = apply_stat_adjustments(
@@ -1139,6 +1157,7 @@ def _derive_definition_stats(
         ability_scores=dict(proficiency_ability_scores or ability_scores),
         proficiency_bonus=proficiency_bonus,
         selected_class=selected_class,
+        source_authority=source_authority,
     )
     save_proficiencies.update(
         _extract_feat_saving_throw_proficiencies(campaign_feat_selections, feat_selected_choices)
@@ -1227,6 +1246,98 @@ def _derive_definition_stats(
     stats = apply_recoverable_stat_penalties(stats, recoverable_penalties, adjust_ability_scores=False)
     return apply_manual_stat_adjustments(stats, manual_adjustments)
 
+def _current_spell_source_rows(
+    spellcasting: dict[str, Any],
+    *,
+    features: list[dict[str, Any]],
+    ability_scores: dict[str, int],
+    proficiency_bonus: int,
+) -> list[dict[str, Any]]:
+    """Use current grants and managers, never a saved row alone, as source liveness."""
+    saved = {
+        str(row.get("source_row_id") or "").strip(): row
+        for row in list(spellcasting.get("source_rows") or [])
+        if isinstance(row, dict) and str(row.get("source_row_id") or "").strip()
+    }
+    current = _derive_spell_source_rows(
+        list(spellcasting.get("spells") or []),
+        ability_scores=ability_scores,
+        proficiency_bonus=proficiency_bonus,
+    )
+    current_ids = {str(row.get("source_row_id") or "").strip() for row in current}
+    from .committed_publication import active
+    closed_legacy = not active()
+    rows = [
+        reconcile_formula_row(
+            saved.get(str(row.get("source_row_id") or "").strip()), row,
+            prefer_calculated_unmarked=closed_legacy,
+        )
+        for row in current
+    ]
+    manual_authorizations: dict[str, str] = {}
+    for feature in features:
+        if not isinstance(feature, dict):
+            continue
+        raw_authorization = feature.get("spell_source_authorization")
+        if isinstance(raw_authorization, dict) and set(raw_authorization) == {"kind", "source_row_id", "source"}:
+            manual_id = raw_authorization.get("source_row_id")
+            source = raw_authorization.get("source")
+            if (
+                raw_authorization.get("kind") == "independent_manual"
+                and isinstance(manual_id, str)
+                and manual_id.startswith("manual:")
+                and isinstance(source, str)
+                and source.strip()
+            ):
+                manual_authorizations[manual_id] = source.strip()
+        manager = feature.get("spell_manager") if isinstance(feature, dict) else None
+        if not isinstance(manager, dict) or not str(manager.get("mode") or "").strip():
+            continue
+        row_id = str(manager.get("source_row_id") or "").strip()
+        if not row_id or row_id in current_ids:
+            continue
+        ability_key = normalize_lookup(str(manager.get("spellcasting_ability_key") or ""))
+        if ability_key not in ABILITY_LABELS:
+            continue
+        modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE))
+        manager_row = {
+            "source_row_id": row_id,
+            "source_row_kind": str(manager.get("source_row_kind") or "source").strip() or "source",
+            "title": str(manager.get("title") or "Feature spells").strip(),
+            "spell_mode": str(manager.get("mode") or "").strip(),
+            "spell_list_class_name": str(manager.get("spell_list_class_name") or "").strip(),
+            "spellcasting_ability": ABILITY_LABELS[ability_key],
+            "spell_save_dc": 8 + proficiency_bonus + modifier,
+            "spell_attack_bonus": proficiency_bonus + modifier,
+        }
+        rows.append(reconcile_formula_row(
+            saved.get(row_id), manager_row,
+            prefer_calculated_unmarked=closed_legacy,
+        ))
+        current_ids.add(row_id)
+    for row_id, row in saved.items():
+        if (
+            row_id in current_ids
+            or not row_id.startswith("manual:")
+            or str(row.get("source_row_kind") or "").strip() != "manual"
+        ):
+            continue
+        if row_id not in manual_authorizations or not any(row.get(metric) is not None for metric in METRICS):
+            continue
+        metric_records = row.get("spell_metric_provenance")
+        if any(
+            row.get(metric) is not None and (
+                not isinstance(metric_records, dict)
+                or not isinstance(metric_records.get(metric), dict)
+                or metric_records[metric].get("kind") != "manual_total"
+            )
+            for metric in METRICS
+        ):
+            continue
+        rows.append(reconcile_formula_row(row, row))
+    return rows
+
+
 def _derive_definition_spellcasting(
     definition: CharacterDefinition,
     *,
@@ -1257,42 +1368,9 @@ def _derive_definition_spellcasting(
         for index, row in enumerate(list(spellcasting.get("class_rows") or []), start=1)
         if isinstance(row, dict)
     ]
-    baseline_scores = dict(baseline_ability_scores or ability_scores)
-    fallback_saved_ability = (
-        str(spellcasting.get("spellcasting_ability") or "").strip()
-        if len(saved_spellcasting_rows) == 1
-        else ""
-    )
-    for row in saved_spellcasting_rows:
-        ability_name = str(
-            row.get("spellcasting_ability") or fallback_saved_ability
-        ).strip()
-        normalized_ability = normalize_lookup(ability_name)
-        ability_key = next(
-            (
-                key
-                for key, label in ABILITY_LABELS.items()
-                if normalized_ability in {normalize_lookup(key), normalize_lookup(label)}
-            ),
-            "",
-        )
-        if not ability_key:
-            continue
-        modifier_delta = _ability_modifier(
-            ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)
-        ) - _ability_modifier(
-            baseline_scores.get(ability_key, DEFAULT_ABILITY_SCORE)
-        )
-        if not modifier_delta:
-            continue
-        for field in ("spell_save_dc", "spell_attack_bonus"):
-            raw_value = row.get(field)
-            if raw_value in (None, ""):
-                continue
-            try:
-                row[field] = int(raw_value) + modifier_delta
-            except (TypeError, ValueError):
-                continue
+    saved_by_id = {str(row.get("class_row_id") or ""): row for row in saved_spellcasting_rows}
+    from .committed_publication import active
+    closed_legacy = not active()
     saved_slot_lanes = (
         spell_slot_lanes_from_spellcasting(spellcasting)
         if saved_spellcasting_rows or list(spellcasting.get("slot_lanes") or [])
@@ -1323,7 +1401,14 @@ def _derive_definition_spellcasting(
             ),
         )
         if row_payload is not None:
-            spellcasting_rows.append(row_payload)
+            prior = saved_by_id.get(str(row_payload.get("class_row_id") or ""))
+            if prior is None and len(saved_spellcasting_rows) == 0 and len(row_contexts) == 1:
+                # Legacy single-row imports may carry only a top-level final value.
+                prior = spellcasting
+            spellcasting_rows.append(reconcile_formula_row(
+                prior, row_payload,
+                prefer_calculated_unmarked=closed_legacy,
+            ))
     total_class_rows = len(ensure_profile_class_rows(definition.profile))
     spellcasting_rows, slot_lanes = _spell_slot_lanes_for_rows(
         spellcasting_rows,
@@ -1337,8 +1422,11 @@ def _derive_definition_spellcasting(
             shared_multiclass_slot_progression
         ),
     )
-    if saved_spellcasting_rows and len(spellcasting_rows) < len(saved_spellcasting_rows):
-        spellcasting_rows = saved_spellcasting_rows
+    if saved_spellcasting_rows and (
+        len(spellcasting_rows) < len(saved_spellcasting_rows)
+        or any(str(row.get("class_row_id") or "") not in saved_by_id for row in spellcasting_rows)
+    ):
+        spellcasting_rows = [reconcile_formula_row(row, row) for row in saved_spellcasting_rows]
         slot_lanes = saved_slot_lanes
     elif not spellcasting_rows and saved_slot_lanes:
         slot_lanes = saved_slot_lanes
@@ -1347,8 +1435,9 @@ def _derive_definition_spellcasting(
         list(spellcasting.get("spells") or []),
         spellcasting_rows=spellcasting_rows,
     )
-    spellcasting["source_rows"] = _derive_spell_source_rows(
-        list(spellcasting.get("spells") or []),
+    spellcasting["source_rows"] = _current_spell_source_rows(
+        spellcasting,
+        features=list(definition.features or []),
         ability_scores=ability_scores,
         proficiency_bonus=proficiency_bonus,
     )
@@ -1365,10 +1454,24 @@ def _derive_definition_spellcasting(
             (key for key, label in ABILITY_LABELS.items() if label == fallback_ability_name),
             "",
         )
+        records = spellcasting.get("spell_metric_provenance")
+        records = records if isinstance(records, dict) else {}
         if fallback_ability_key:
             modifier = _ability_modifier(ability_scores.get(fallback_ability_key, DEFAULT_ABILITY_SCORE))
-            spellcasting["spell_save_dc"] = 8 + proficiency_bonus + modifier
-            spellcasting["spell_attack_bonus"] = proficiency_bonus + modifier
+            formula = {
+                "spell_save_dc": 8 + proficiency_bonus + modifier,
+                "spell_attack_bonus": proficiency_bonus + modifier,
+            }
+            for metric in METRICS:
+                if spellcasting.get(metric) in (None, ""):
+                    spellcasting[metric] = formula[metric]
+                    records[metric] = {"kind": "formula"}
+                elif metric_provenance(spellcasting, metric)["kind"] == "formula":
+                    spellcasting[metric] = formula[metric]
+                elif closed_legacy and metric not in records:
+                    spellcasting[metric] = formula[metric]
+            if records:
+                spellcasting["spell_metric_provenance"] = records
         return spellcasting
 
     if len(spellcasting_rows) == 1:
@@ -1379,6 +1482,7 @@ def _derive_definition_spellcasting(
         spellcasting["spellcasting_ability"] = str(row_payload.get("spellcasting_ability") or "").strip()
         spellcasting["spell_save_dc"] = row_payload.get("spell_save_dc")
         spellcasting["spell_attack_bonus"] = row_payload.get("spell_attack_bonus")
+        spellcasting["spell_metric_provenance"] = deepcopy(row_payload.get("spell_metric_provenance") or {})
         spellcasting["slot_progression"] = slot_progression
         return spellcasting
 
@@ -1394,6 +1498,7 @@ def _derive_definition_spellcasting(
     spellcasting["spellcasting_ability"] = ""
     spellcasting["spell_save_dc"] = None
     spellcasting["spell_attack_bonus"] = None
+    spellcasting.pop("spell_metric_provenance", None)
     return spellcasting
 
 
@@ -1411,8 +1516,8 @@ def _derive_definition_spellcasting_math(
         dict(definition.stats or {}).get("proficiency_bonus")
         or _proficiency_bonus_for_level(_resolve_native_character_level(definition))
     )
-    proficiency_delta = proficiency_bonus - baseline_proficiency_bonus
-
+    from .committed_publication import active
+    closed_legacy = not active()
     def ability_key(value: Any) -> str:
         normalized = normalize_lookup(str(value or ""))
         for key, label in ABILITY_LABELS.items():
@@ -1427,27 +1532,32 @@ def _derive_definition_spellcasting_math(
         modifier = _ability_modifier(
             ability_scores.get(key, DEFAULT_ABILITY_SCORE)
         )
-        math_delta = proficiency_delta + _ability_modifier(
-            ability_scores.get(key, DEFAULT_ABILITY_SCORE)
-        ) - _ability_modifier(
-            baseline_scores.get(key, DEFAULT_ABILITY_SCORE)
-        )
         adjusted = dict(payload)
         derived_values = {
             "spell_save_dc": 8 + proficiency_bonus + modifier,
             "spell_attack_bonus": proficiency_bonus + modifier,
         }
+        math_delta = (
+            0 if not closed_legacy else
+            proficiency_bonus - baseline_proficiency_bonus
+            + modifier - _ability_modifier(baseline_scores.get(key, DEFAULT_ABILITY_SCORE))
+        )
+        records = adjusted.get("spell_metric_provenance")
+        records = records if isinstance(records, dict) else {}
         for field, derived_value in derived_values.items():
-            raw_value = adjusted.get(field)
-            if raw_value in (None, ""):
+            provenance = metric_provenance(adjusted, field)
+            if field not in records and adjusted.get(field) in (None, "") and closed_legacy:
                 adjusted[field] = derived_value
-                continue
-            if not math_delta:
-                continue
-            try:
-                adjusted[field] = int(raw_value) + math_delta
-            except (TypeError, ValueError):
-                continue
+                records[field] = {"kind": "formula"}
+            elif field not in records and closed_legacy:
+                try:
+                    adjusted[field] = int(adjusted[field]) + math_delta
+                except (TypeError, ValueError):
+                    pass
+            elif provenance["kind"] == "formula":
+                adjusted[field] = derived_value
+        if records:
+            adjusted["spell_metric_provenance"] = records
         return adjusted
 
     stored_class_rows = [
@@ -1484,10 +1594,21 @@ def _derive_definition_spellcasting_math(
     if not top_level_ability and len(class_rows) == 1:
         top_level_ability = class_rows[0].get("spellcasting_ability")
     spellcasting = adjust_math(spellcasting, top_level_ability)
-    return _apply_transient_spellcasting_adjustments(
+    spellcasting = _apply_transient_spellcasting_adjustments(
         spellcasting,
         transient_spellcasting_adjustments,
     )
+    if len(class_rows) == 1:
+        for metric in METRICS:
+            spellcasting[metric] = spellcasting["class_rows"][0].get(metric)
+        spellcasting["spell_metric_provenance"] = deepcopy(
+            spellcasting["class_rows"][0].get("spell_metric_provenance") or {}
+        )
+    elif len(class_rows) > 1:
+        for metric in METRICS:
+            spellcasting[metric] = None
+        spellcasting.pop("spell_metric_provenance", None)
+    return spellcasting
 
 def _transient_ability_score_overrides(value: Any) -> dict[str, int]:
     payload = dict(value or {}) if isinstance(value, dict) else {}
@@ -1564,6 +1685,7 @@ def _derive_definition_core_sheet_payloads(
     effective_spell_catalog_for_definition_func: Callable[..., dict[str, Any]] | None = None,
     automatic_prepared_spell_flags_func: Callable[..., list[dict[str, Any]]] | None = None,
     transient_effects: dict[str, Any] | None = None,
+    source_authority: Any | None = None,
 ) -> dict[str, Any]:
     selected_derivation_components = (
         FULL_DND_DERIVATION_COMPONENTS
@@ -1593,10 +1715,18 @@ def _derive_definition_core_sheet_payloads(
             resolved_species=resolved_species,
             resolved_background=resolved_background,
         )
-    sanitized_definition = _strip_definition_campaign_feat_effects(
-        definition,
-        selected_class=resolved_entries.get("selected_class"),
-    )
+    if source_authority is None:
+        historical_option_payloads = _campaign_option_payloads_from_definition(definition)
+        sanitized_definition = _strip_definition_campaign_feat_effects(
+            definition,
+            selected_class=resolved_entries.get("selected_class"),
+        )
+    else:
+        # No numeric inverse can assign an old aggregate to a current owner.
+        # Current approved grants are rebuilt from exact links; saved option
+        # copies remain raw evidence for manager repair only.
+        historical_option_payloads = []
+        sanitized_definition = source_authority.effective_definition(definition)
     effective_item_catalog = (
         effective_item_catalog_for_definition_func(
             sanitized_definition,
@@ -1664,6 +1794,8 @@ def _derive_definition_core_sheet_payloads(
         ability_scores = apply_recoverable_ability_score_penalties(pre_penalty_scores, recoverable_penalties)
         for key, row in ability_inputs.items():
             if row["stage"] == "unresolved":
+                # A placeholder may be needed inside the legacy formula pass;
+                # SourceAuthority suppresses every dependent public value.
                 ability_scores[key] = effective_scores(dict(definition.stats or {}))[key]
     else:
         # Profile-only scopes omit item mechanics. Keep the recorded values
@@ -1697,6 +1829,7 @@ def _derive_definition_core_sheet_payloads(
         ability_scores=ability_scores,
         proficiency_bonus=proficiency_bonus,
         proficiency_ability_scores=durable_ability_scores,
+        source_authority=source_authority,
     )
     stats = _derive_definition_stats(
         normalized_definition,
@@ -1708,6 +1841,8 @@ def _derive_definition_core_sheet_payloads(
         selected_class=resolved_entries.get("selected_class"),
         selected_species=resolved_entries.get("selected_species"),
         proficiency_ability_scores=durable_ability_scores,
+        historical_option_payloads=historical_option_payloads,
+        source_authority=source_authority,
     )
     if complete_ability_layers:
         write_inputs(stats, ability_inputs)
@@ -1774,8 +1909,14 @@ def _derive_definition_core_sheet_payloads(
             spell_catalog=effective_spell_catalog,
             spellcasting_rows=list(derived_spellcasting.get("class_rows") or []),
         )
-        derived_spellcasting["source_rows"] = _derive_spell_source_rows(
-            list(derived_spellcasting.get("spells") or []),
+        # Item grants are regenerated after the first spellcasting pass. Match
+        # their current rows against original provenance, not that interim pass.
+        derived_spellcasting["source_rows"] = deepcopy(
+            list((sanitized_definition.spellcasting or {}).get("source_rows") or [])
+        )
+        derived_spellcasting["source_rows"] = _current_spell_source_rows(
+            derived_spellcasting,
+            features=normalized_features,
             ability_scores=ability_scores,
             proficiency_bonus=proficiency_bonus,
         )

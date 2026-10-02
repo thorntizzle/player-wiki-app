@@ -23,6 +23,18 @@
       {% else %}
         <p>No modeled state changes will be applied by this {{ rest_preview.label.lower() }}.</p>
       {% endif %}
+      {% if rest_preview.skipped %}
+        <div class="rest-preview-skipped">
+          <h3>Effects skipped pending manager repair</h3>
+          <p class="meta">These historical table values remain for table reference. Their automatic recovery or manual adjustment is unavailable until reviewed.</p>
+          <ul class="plain-list rest-preview-list">
+            {% for skipped_label in rest_preview.skipped %}
+              <li>{{ skipped_label }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+      {% if rest_preview.can_apply %}
       <form
         class="session-vitals-form"
         method="post"
@@ -39,6 +51,7 @@
         {% if native_character_tools_supported and not character.xianxia_read and rest_preview.adjustments %}
           <p class="meta">Set your HP and remaining Hit Dice after resting. These values are saved when you confirm.</p>
           <div class="session-vitals-form__group">
+            {% if character.hp_edit_allowed %}
             <label class="session-field">
               <span>HP after resting</span>
               <div class="session-number-inline">
@@ -53,11 +66,13 @@
                 <span>/ {{ character.max_hp }}</span>
               </div>
             </label>
-            {% if rest_preview.adjustments.hit_dice and rest_preview.adjustments.hit_dice.pools %}
+            {% endif %}
+            {% if character.hit_dice_edit_allowed and rest_preview.adjustments.hit_dice and rest_preview.adjustments.hit_dice.pools %}
               <div class="session-field">
                 <span>Remaining Hit Dice</span>
                 <div class="hit-dice-pool-list" aria-label="Remaining Hit Dice">
                   {% for pool in rest_preview.adjustments.hit_dice.pools %}
+                    {% if pool.can_edit | default(true) %}
                     <label class="hit-dice-pool">
                       <span>{{ pool.label }}</span>
                       <input
@@ -71,6 +86,7 @@
                       >
                       <span>/ {{ pool.max }}</span>
                     </label>
+                    {% endif %}
                   {% endfor %}
                 </div>
               </div>
@@ -84,6 +100,14 @@
           </a>
         </div>
       </form>
+      {% else %}
+        <p class="meta">No verified rest change can be applied yet. The skipped values remain available as table references.</p>
+        <div class="hero-actions">
+          <a class="ghost-button" href="{% if session_return_view == 'session-character' %}{{ session_surface_return_url }}{% else %}{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug, mode='session', page=character_subpage) }}{% endif %}">
+            Return to Character
+          </a>
+        </div>
+      {% endif %}
     </section>
   {% endif %}
 
@@ -95,6 +119,7 @@
       <div class="resource-grid{% if session_character_compact_controls %} resource-grid--editable{% endif %} resource-grid--compact">
         {% for resource in character.resources %}
           <article class="resource-card session-resource-card {% if session_character_compact_controls %}session-resource-card--compact{% endif %} {% if resource.is_manual %}session-resource-card--manual{% endif %}">
+            {% if resource.can_edit %}
             <form
               class="session-inline-form{% if session_character_compact_controls %} session-inline-form--compact-resource{% endif %}"
               data-character-sheet-edit-form="resource"
@@ -133,6 +158,13 @@
                 <p class="meta">{{ resource.notes }}</p>
               {% endif %}
             </form>
+            {% else %}
+              <div class="session-resource-row__summary">
+                <h3>{{ resource.label }}</h3>
+                <p class="resource-card__value">{{ resource.value }}</p>
+                <p class="meta">Historical table value · {{ resource.authority_status }}</p>
+              </div>
+            {% endif %}
           </article>
         {% endfor %}
       </div>
@@ -158,6 +190,7 @@
           <div class="spell-slot-editor-list spell-slot-editor-list--compact">
             {% for slot in slot_pool.slots %}
               <article class="detail-card">
+                {% if slot.can_edit %}
                 <form
                   class="session-inline-form"
                   data-character-sheet-edit-form="spell-slot"
@@ -184,6 +217,12 @@
                     <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
                   </label>
                 </form>
+                {% else %}
+                  <div class="section-heading">
+                    <h3>{{ slot.label }}</h3>
+                    <span class="meta">Raw {{ slot.used }} used / {{ slot.raw_max }} · {{ slot.authority_status }}</span>
+                  </div>
+                {% endif %}
               </article>
             {% endfor %}
           </div>
@@ -228,6 +267,7 @@
                 <span>Quantity</span>
                 <input type="number" name="quantity" value="{{ item.quantity }}" min="0">
               </label>
+              {% if item.charges_label %}<p class="meta">Charges: {{ item.charges_label }}</p>{% endif %}
               {% set item_detail_dialog_id = session_character_item_dialog_id_prefix ~ "-inventory-form-item-detail-" ~ loop.index %}
               {% if session_character_item_detail_macro %}
                 {{ session_character_item_detail_macro(item, item_detail_dialog_id) }}

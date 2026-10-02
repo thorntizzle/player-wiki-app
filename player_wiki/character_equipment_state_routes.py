@@ -23,24 +23,20 @@ def register_character_equipment_state_route(
     def character_equipment_state_update(
         campaign_slug: str, character_slug: str, item_id: str
     ):
-        item_catalog = dependencies.build_character_item_catalog(campaign_slug)
-
-        def _action(record):
-            return dependencies.build_shared_equipment_state_update_result(
-                campaign_slug,
-                record,
-                item_id,
-                item_catalog=item_catalog,
-                systems_service=dependencies.get_systems_service(),
-                values=dependencies.build_equipment_state_form_values(),
-            )
+        values = dependencies.build_equipment_state_form_values()
 
         return dependencies.run_character_definition_mutation(
             campaign_slug,
             character_slug,
             anchor="character-equipment-state",
             success_message="Equipment state updated.",
-            action=_action,
+            action=lambda record: dependencies.build_shared_equipment_state_update_result(
+                campaign_slug, record, item_id,
+                item_catalog=dependencies.build_character_item_catalog(campaign_slug),
+                systems_service=dependencies.get_systems_service(), values=values,
+            ),
+            equipment_item_id=item_id,
+            equipment_values=values,
         )
 
     scope_required = campaign_scope_access_required("characters", own_character=True)

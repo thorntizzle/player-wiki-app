@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 import json
+import sqlite3
 from typing import Any
 
 from .auth_store import AuthStore
@@ -158,6 +159,22 @@ class CampaignCombatPresetService:
         connection = get_db()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            from .committed_publication import active
+            if active(connection):
+                locked_context = self._authorize(campaign_slug, mutation=True)
+                if locked_context.actor_user_id != context.actor_user_id:
+                    raise CampaignCombatPresetAuthorizationError(
+                        "Encounter preset access changed before saving."
+                    )
+                self._require_source_access(locked_context, normalized_entries)
+                context = locked_context
+                locked_entries = self.source_resolver.prepare_entries_for_save(
+                    campaign_slug, normalized_entries,
+                )
+                if locked_entries != normalized_entries:
+                    raise CampaignCombatPresetConflictError(
+                        "Encounter source changed before the preset was saved."
+                    )
             created = self.store.create_preset(
                 campaign_slug,
                 name=normalized_name,
@@ -177,8 +194,16 @@ class CampaignCombatPresetService:
                 commit=False,
             )
             connection.commit()
-        except BaseException:
+        except BaseException as exc:
             connection.rollback()
+            if isinstance(exc, sqlite3.OperationalError) and any(
+                word in str(exc).lower() for word in ("locked", "busy")
+            ):
+                from .committed_publication import active
+                if active(connection):
+                    raise CampaignCombatPresetConflictError(
+                        "Encounter source is busy. Refresh and review before saving."
+                    ) from exc
             raise
         return created
 
@@ -215,6 +240,22 @@ class CampaignCombatPresetService:
         connection = get_db()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            from .committed_publication import active
+            if active(connection):
+                locked_context = self._authorize(campaign_slug, mutation=True)
+                if locked_context.actor_user_id != context.actor_user_id:
+                    raise CampaignCombatPresetAuthorizationError(
+                        "Encounter preset access changed before saving."
+                    )
+                self._require_source_access(locked_context, normalized_entries)
+                context = locked_context
+                locked_entries = self.source_resolver.prepare_entries_for_save(
+                    campaign_slug, normalized_entries,
+                )
+                if locked_entries != normalized_entries:
+                    raise CampaignCombatPresetConflictError(
+                        "Encounter source changed before the preset was saved."
+                    )
             updated = self.store.update_preset(
                 campaign_slug,
                 parsed_preset_id,
@@ -237,8 +278,16 @@ class CampaignCombatPresetService:
                 commit=False,
             )
             connection.commit()
-        except BaseException:
+        except BaseException as exc:
             connection.rollback()
+            if isinstance(exc, sqlite3.OperationalError) and any(
+                word in str(exc).lower() for word in ("locked", "busy")
+            ):
+                from .committed_publication import active
+                if active(connection):
+                    raise CampaignCombatPresetConflictError(
+                        "Encounter source is busy. Refresh and review before saving."
+                    ) from exc
             raise
         return updated
 
@@ -315,6 +364,14 @@ class CampaignCombatPresetService:
         tracker_revision = 0
         try:
             connection.execute("BEGIN IMMEDIATE")
+            from .committed_publication import active
+            if active(connection):
+                locked_context = self._authorize(campaign_slug, mutation=True)
+                if locked_context.actor_user_id != context.actor_user_id:
+                    raise CampaignCombatPresetAuthorizationError(
+                        "Encounter preset access changed before applying."
+                    )
+                context = locked_context
             review = self._build_apply_review(context, campaign_slug, parsed_preset_id)
             if not hmac.compare_digest(parsed_digest, review.confirmation_digest):
                 raise CampaignCombatPresetApplyConflictError(
@@ -399,8 +456,16 @@ class CampaignCombatPresetService:
                 raise CampaignCombatPresetApplyOutcomeUnconfirmedError(
                     "The saved encounter commit completed without a confirmed acknowledgment."
                 ) from exc
-        except BaseException:
+        except BaseException as exc:
             connection.rollback()
+            if isinstance(exc, sqlite3.OperationalError) and any(
+                word in str(exc).lower() for word in ("locked", "busy")
+            ):
+                from .committed_publication import active
+                if active(connection):
+                    raise CampaignCombatPresetApplyConflictError(
+                        "Encounter source is busy. Refresh before a fresh apply review."
+                    ) from exc
             raise
 
         assert preset is not None

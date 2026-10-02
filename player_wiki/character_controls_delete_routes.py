@@ -36,19 +36,44 @@ def character_controls_delete(campaign_slug: str, character_slug: str):
         flash(f"Type {character_slug} to confirm deletion.", "error")
         return dependencies.redirect_to_character_controls(campaign_slug, character_slug)
 
+    from .committed_publication import active
+    activated = active()
+    expected_definition_revision = expected_state_revision = None
+    if activated:
+        raw_definition = request.form.get("expected_definition_revision", "")
+        raw_state = request.form.get("expected_state_revision", "")
+        if (not raw_definition.isascii() or not raw_definition.isdecimal()
+                or not raw_state.isascii() or not raw_state.isdecimal()
+                or len(raw_definition) > 19 or len(raw_state) > 19
+                or int(raw_definition) < 1 or int(raw_state) < 1
+                or int(raw_definition) > 9223372036854775807
+                or int(raw_state) > 9223372036854775807):
+            flash("Character deletion confirmation expired. Reload Controls and try again.", "error")
+            return dependencies.redirect_to_character_controls(campaign_slug, character_slug)
+        expected_definition_revision = int(raw_definition)
+        expected_state_revision = int(raw_state)
+
     store = dependencies.get_auth_store()
     actor = dependencies.get_current_user()
-    deleted = dependencies.delete_campaign_character_file(
-        current_app.config["CAMPAIGNS_DIR"],
-        campaign_slug,
-        character_slug,
-        state_store=current_app.extensions["character_state_store"],
-        auth_store=store,
-        coordinator=current_app.extensions["character_deletion_coordinator"],
-        operation_kind="character_controls",
-        actor_user_id=actor.id if actor is not None else None,
-        audit_source="character_controls",
-    )
+    try:
+        deleted = dependencies.delete_campaign_character_file(
+            current_app.config["CAMPAIGNS_DIR"],
+            campaign_slug,
+            character_slug,
+            state_store=current_app.extensions["character_state_store"],
+            auth_store=store,
+            coordinator=current_app.extensions["character_deletion_coordinator"],
+            operation_kind="character_controls",
+            actor_user_id=actor.id if actor is not None else None,
+            audit_source="character_controls",
+            expected_definition_revision=expected_definition_revision,
+            expected_state_revision=expected_state_revision,
+        )
+    except ValueError as exc:
+        if not activated:
+            raise
+        flash(str(exc), "error")
+        return dependencies.redirect_to_character_controls(campaign_slug, character_slug)
     if deleted is None:
         flash("That character no longer exists.", "error")
         return redirect(url_for("character_roster_view", campaign_slug=campaign.slug))

@@ -675,6 +675,8 @@ def _export_characters(
             systems_service=systems_service,
             campaign_page_records=campaign_page_records,
         )
+        if presented.get("state_revision") != record.state_record.revision:
+            raise CampaignPackageExportError("Presented character state revision changed during export.")
         _write_json(structured_dir / "presented.json", _json_ready(presented))
 
         markdown_path = ""
@@ -685,6 +687,7 @@ def _export_characters(
                     record,
                     systems_service=systems_service,
                     campaign_page_records=campaign_page_records,
+                    presented_character=presented,
                 )
             except CharacterMarkdownExportError:
                 markdown = ""
@@ -1103,7 +1106,7 @@ It contains both source-shaped data and presentation-shaped data:
 - `campaign/` has page metadata, Markdown, rendered HTML, navigation, visibility, and presentation rules.
 - `systems/` has the campaign Systems library, sources, source policy, overrides, entries, body JSON, and rendered HTML.
 - `characters/` has character definitions, imports, Fly/local state, presented JSON, Markdown sheets when supported, and per-character resolved Systems entries.
-  DND `structured/definition.yaml` is historical raw source; `state.json` owns effective equip, attune, and wield choices. `presented.json` and Markdown sheets show effective activation and warnings.
+  DND `structured/definition.yaml` is historical raw source; `state.json` owns effective equip, attune, and wield choices. `presented.json` and Markdown sheets share one revisioned projection, label unverified numeric and charge values as historical table references, and show source warnings.
 - `assets/` has metadata-only image associations and asset locations. Binary images are intentionally not copied.
 - `state/sqlite-tables/` has campaign-scoped SQLite rows useful for rebuilding live/session/combat/DM-content state without auth secrets.
 - `audit/` records dangling or intentionally unresolved references.

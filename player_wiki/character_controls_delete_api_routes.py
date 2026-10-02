@@ -49,19 +49,51 @@ def register_character_controls_delete_api_route(
                 code="validation_error",
             )
 
+        from .committed_publication import active
+        activated = active()
+        expected_definition_revision = expected_state_revision = None
+        if activated:
+            expected_definition_revision = record.committed_revision
+            expected_state_revision = record.state_record.revision
+            if (type(expected_definition_revision) is not int or expected_definition_revision < 1
+                    or type(expected_state_revision) is not int or expected_state_revision < 1):
+                return dependencies.json_error("Character committed proof needs manager repair.", 409,
+                                               code="state_conflict")
+            for name, observed in (
+                ("expected_definition_revision", expected_definition_revision),
+                ("expected_state_revision", expected_state_revision),
+                ("revision", expected_state_revision),
+            ):
+                if name not in payload:
+                    continue
+                supplied = payload[name]
+                if type(supplied) is not int or supplied < 1:
+                    return dependencies.json_error(f"{name} must be a positive integer.", 400,
+                                                   code="validation_error")
+                if supplied != observed:
+                    return dependencies.json_error("Character changed before deletion confirmation.", 409,
+                                                   code="state_conflict")
+
         store = dependencies.get_auth_store()
         actor = dependencies.get_current_user()
-        deleted = dependencies.delete_campaign_character_file(
-            current_app.config["CAMPAIGNS_DIR"],
-            campaign_slug,
-            character_slug,
-            state_store=current_app.extensions["character_state_store"],
-            auth_store=store,
-            coordinator=current_app.extensions["character_deletion_coordinator"],
-            operation_kind="character_controls_api",
-            actor_user_id=actor.id if actor is not None else None,
-            audit_source="character_controls_api",
-        )
+        try:
+            deleted = dependencies.delete_campaign_character_file(
+                current_app.config["CAMPAIGNS_DIR"],
+                campaign_slug,
+                character_slug,
+                state_store=current_app.extensions["character_state_store"],
+                auth_store=store,
+                coordinator=current_app.extensions["character_deletion_coordinator"],
+                operation_kind="character_controls_api",
+                actor_user_id=actor.id if actor is not None else None,
+                audit_source="character_controls_api",
+                expected_definition_revision=expected_definition_revision,
+                expected_state_revision=expected_state_revision,
+            )
+        except ValueError as exc:
+            if not activated:
+                raise
+            return dependencies.json_error(str(exc), 409, code="state_conflict")
         if deleted is None:
             return dependencies.json_error(
                 "That character no longer exists.", 404, code="not_found"

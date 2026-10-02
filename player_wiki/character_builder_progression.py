@@ -1521,8 +1521,31 @@ def build_native_level_up_character_definition(
     form_values: dict[str, str] | None = None,
     *,
     current_import_metadata: CharacterImportMetadata | None = None,
+    state: dict[str, Any] | None = None,
+    state_revision: int | None = None,
+    verified_manual_actions: tuple[Any, ...] = (),
+    verified_numeric_actions: tuple[Any, ...] = (),
+    authority_page_records: list[Any] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, int]:
     from .character_builder import normalize_definition_to_native_model
+    from .character_source_authority import build_reconciled_source_authority
+    from .committed_publication import active
+
+    if state is None or state_revision is None or level_up_context.get("systems_service") is None:
+        raise CharacterBuildError("Refresh the Character before recalculating level-up mechanics.")
+    activated = active()
+    if activated:
+        current_authority = build_reconciled_source_authority(
+            definition=current_definition, state=state, state_revision=state_revision,
+            systems_service=level_up_context["systems_service"],
+            campaign_page_records=authority_page_records,
+            verified_manual_actions=verified_manual_actions,
+            verified_numeric_actions=verified_numeric_actions,
+        )
+        try:
+            current_authority.require_authoring_inputs()
+        except ValueError as exc:
+            raise CharacterBuildError(str(exc)) from exc
     current_definition = normalize_definition_to_native_model(
         current_definition,
         item_catalog=level_up_context.get("item_catalog"),
@@ -1877,6 +1900,14 @@ def build_native_level_up_character_definition(
     )
     definition = normalize_definition_to_native_model(
         definition,
+        mode="authoring" if activated else "historical",
+        source_authority=build_reconciled_source_authority(
+            definition=definition, state=state, state_revision=state_revision,
+            systems_service=level_up_context["systems_service"],
+            campaign_page_records=authority_page_records,
+            verified_manual_actions=verified_manual_actions,
+            verified_numeric_actions=verified_numeric_actions,
+        ) if activated else None,
         item_catalog=item_catalog,
         spell_catalog=spell_catalog,
         systems_service=level_up_context.get("systems_service"),
@@ -1886,6 +1917,7 @@ def build_native_level_up_character_definition(
         resolved_species=selected_species,
         resolved_background=selected_background,
     )
+    require_resolved_ability_inputs(definition)
     import_metadata = _build_leveled_import_metadata(
         campaign_slug=campaign_slug,
         current_definition=current_definition,

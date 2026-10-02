@@ -242,6 +242,27 @@ def campaign_asset(campaign_slug: str, asset_path: str):
             access_decision("deny", "hidden", scope="wiki")
             abort(404)
         access_decision("allow", scope="content" if is_content_manager else "wiki")
+        from .committed_publication import active, image_bytes
+        if active():
+            from io import BytesIO
+            from flask import send_file
+            data = image_bytes(campaign_slug, asset_path, manager=is_content_manager)
+            if data is None:
+                if not is_content_manager:
+                    abort(404)
+                try:
+                    draft = managed_wiki_image_path(campaign.assets_dir, asset_path)
+                except CampaignContentError:
+                    abort(404)
+                if not draft.is_file():
+                    abort(404)
+                return _send_campaign_asset(draft)
+            media = validated_campaign_asset_media_type(Path(asset_path), data_blob=data)
+            if media is None:
+                abort(404)
+            response = send_file(BytesIO(data), mimetype=media, download_name=Path(asset_path).name, conditional=False)
+            response.headers["Cache-Control"] = "private, no-store"
+            return response
         try:
             asset_file = managed_wiki_image_path(campaign.assets_dir, asset_path)
         except CampaignContentError:

@@ -167,3 +167,4 @@ class CharacterRecord:
     definition: CharacterDefinition
     import_metadata: CharacterImportMetadata
     state_record: CharacterStateRecord
+    committed_revision: int | None = None

@@ -32,6 +32,7 @@ from .character_campaign_options import (
     normalize_campaign_overlay_support,
 )
 from .character_campaign_progression import build_campaign_page_progression_entries
+from .character_page_records import list_visible_character_page_records
 from .campaign_visibility import (
     VISIBILITY_DM,
     VISIBILITY_PLAYERS,
@@ -977,10 +978,15 @@ class SystemsService:
                     bool(item["enabled"]) if "enabled" in item else None,
                     self._normalize_or_default_visibility(item.get("default_visibility"), fallback=""),
                 )
-        return (
+        context = (
             default_systems_library_slug(campaign.systems_library_slug or campaign.system),
             tuple(sorted((source_id, *values) for source_id, values in defaults.items())),
         )
+        from .committed_publication import active, config
+        if active():
+            source, _ = config(campaign_slug)
+            return (*context, source["revision"], source["primary_sha256"], self.store.get_durable_revision())
+        return context
 
     def get_campaign_library_slug(self, campaign_slug: str) -> str:
         campaign = self._get_campaign(campaign_slug)
@@ -5138,6 +5144,14 @@ class SystemsService:
         page_store = getattr(self.repository_store, "page_store", None)
         if campaign is None or page_store is None:
             return []
+        from .committed_publication import active
+        if active():
+            return [
+                record for record in list_visible_character_page_records(
+                    page_store, campaign_slug, campaign, include_body=True,
+                )
+                if str(getattr(record.page, "section", "") or "").strip() == "Mechanics"
+            ]
         records = page_store.list_page_records(
             campaign_slug,
             content_dir=Path(campaign.player_content_dir),
@@ -5164,7 +5178,18 @@ class SystemsService:
         if not page_ref or page is None:
             return []
         page_title = str(getattr(page, "title", "") or "").strip() or page_ref
-        body_html = self._build_campaign_page_body_html(campaign_slug, page_ref)
+        from .committed_publication import active, CommittedSourceConflict
+        if active():
+            campaign = self._get_campaign(campaign_slug)
+            page_store = getattr(self.repository_store, "page_store", None)
+            if campaign is None or page_store is None:
+                return []
+            try:
+                body_html = str(render_page_content(campaign, page, page_store) or "").strip()
+            except CommittedSourceConflict:
+                return []
+        else:
+            body_html = self._build_campaign_page_body_html(campaign_slug, page_ref)
 
         overlay_cards: list[dict[str, object]] = []
         page_option = build_campaign_page_character_option(record, default_kind="feature")
@@ -6370,6 +6395,14 @@ class CharacterReadSystemsService(SystemsService):
         page_store = getattr(self.repository_store, "page_store", None)
         if campaign is None or page_store is None:
             return []
+        from .committed_publication import active
+        if active():
+            return [
+                record for record in list_visible_character_page_records(
+                    page_store, campaign_slug, campaign, include_body=True,
+                )
+                if str(getattr(record.page, "section", "") or "").strip() == "Mechanics"
+            ]
         records = page_store.list_page_records(
             campaign_slug,
             include_body=True,

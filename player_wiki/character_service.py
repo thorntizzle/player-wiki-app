@@ -8,8 +8,10 @@ from typing import Any
 from .character_artificer_infusions import normalize_active_infusions
 from .character_builder_equipment import _normalize_weapon_wield_mode_value
 from .character_hit_dice import (
+    derive_hit_dice_max_pools,
     normalize_hit_dice_state,
     normalize_hit_dice_state_payload,
+    normalize_verified_hit_dice_state_payload,
 )
 from .character_models import CharacterDefinition
 from .character_spell_slots import (
@@ -184,6 +186,7 @@ def merge_state_with_definition(
     removed_resource_ids: set[str] | None = None,
     prior_definition: CharacterDefinition | None = None,
     explicit_removed_item_id: str | None = None,
+    source_authority: Any | None = None,
 ) -> dict[str, Any]:
     if is_xianxia_system(definition.system):
         if explicit_removed_item_id:
@@ -194,6 +197,10 @@ def merge_state_with_definition(
             inventory_quantity_overrides=inventory_quantity_overrides,
             inventory_state_overrides=inventory_state_overrides,
         )
+
+    from .committed_publication import active
+    if source_authority is None and active():
+        raise CharacterStateValidationError("Character numeric authority is unavailable.")
 
     from .character_equipment_activation import activation_marker, analyze_activation
     if explicit_removed_item_id:
@@ -234,7 +241,19 @@ def merge_state_with_definition(
         )
 
     payload = deepcopy(state)
-    payload = normalize_hit_dice_state_payload(definition, payload)
+    hit_die_pools = [
+        *derive_hit_dice_max_pools(definition),
+        *list(dict(payload.get("hit_dice") or {}).get("pools") or []),
+    ]
+    if source_authority is None:
+        payload = normalize_hit_dice_state_payload(definition, payload)
+    else:
+        verified_faces = {
+            int(pool["faces"]) for pool in hit_die_pools
+            if isinstance(pool, dict) and type(pool.get("faces")) is int
+            and source_authority.resource_status("hit_die", str(pool["faces"])).is_effective
+        }
+        payload = normalize_verified_hit_dice_state_payload(definition, payload, verified_faces)
     existing_resources = list(payload.get("resources") or [])
     removed_managed_resources = {
         str(resource_id).strip()
@@ -252,6 +271,13 @@ def merge_state_with_definition(
     for template in definition.resource_templates:
         template_resource = build_resource_state(template)
         resource_id = str(template_resource.get("id") or "").strip()
+        if source_authority is not None and not source_authority.resource_status("resource", resource_id).is_effective:
+            merged_resources.extend(
+                deepcopy(row) for row in existing_resources
+                if str(row.get("id") or "").strip() == resource_id
+            )
+            template_resource_ids.add(resource_id)
+            continue
         if not resource_id:
             merged_resources.append(template_resource)
             continue
@@ -273,6 +299,9 @@ def merge_state_with_definition(
     for resource in existing_resources:
         resource_id = str(resource.get("id") or "").strip()
         if resource_id and resource_id in template_resource_ids:
+            continue
+        if source_authority is not None and not source_authority.resource_status("resource", resource_id).is_effective:
+            merged_resources.append(deepcopy(resource))
             continue
         if resource_id.startswith(MANAGED_CUSTOM_TRACKER_PREFIX):
             continue
@@ -305,6 +334,15 @@ def merge_state_with_definition(
             level = int(slot.get("level") or 0)
             max_slots = int(slot.get("max_slots") or 0)
             slot_key = (lane_id, level)
+            if source_authority is not None and not source_authority.resource_status(
+                "spell_slot", f"{lane_id}:{level}"
+            ).is_effective:
+                existing_slot = existing_slots_by_key.get(slot_key)
+                if existing_slot is not None:
+                    merged_slots.append(deepcopy(existing_slot))
+                tracked_slot_keys.add(slot_key)
+                tracked_slot_levels.add(level)
+                continue
             tracked_slot_keys.add(slot_key)
             tracked_slot_levels.add(level)
             existing_slot = existing_slots_by_key.get(slot_key)
@@ -324,6 +362,11 @@ def merge_state_with_definition(
         level = int(slot.get("level") or 0)
         slot_key = (lane_id, level)
         if slot_key in tracked_slot_keys:
+            continue
+        if source_authority is not None and not source_authority.resource_status(
+            "spell_slot", f"{lane_id}:{level}"
+        ).is_effective:
+            merged_slots.append(deepcopy(slot))
             continue
         if not lane_id and level in tracked_slot_levels:
             continue
@@ -420,7 +463,12 @@ def merge_state_with_definition(
 
     vitals = dict(payload.get("vitals") or {})
     current_hp = int(vitals.get("current_hp") or 0)
-    max_hp = int((definition.stats or {}).get("max_hp") or 0)
+    max_hp_status = source_authority.field_status("stats.max_hp") if source_authority is not None else None
+    if max_hp_status is not None and not max_hp_status.is_effective:
+        if hp_delta:
+            raise CharacterStateValidationError("HP maximum needs repair before an HP adjustment.")
+        return payload
+    max_hp = int(max_hp_status.effective if max_hp_status is not None else (definition.stats or {}).get("max_hp") or 0)
     if hp_delta:
         current_hp += int(hp_delta)
     vitals["current_hp"] = max(0, min(current_hp, max_hp))
@@ -487,18 +535,33 @@ def _merge_xianxia_state_with_definition(
     return payload
 
 
-def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> dict[str, Any]:
+def validate_state(
+    definition: CharacterDefinition, state: dict[str, Any], *,
+    source_authority: Any | None = None,
+    previous_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     payload = deepcopy(state)
     is_xianxia = is_xianxia_system(definition.system)
+    from .committed_publication import active
+    if source_authority is None and previous_state is not None and not is_xianxia and active():
+        raise CharacterStateValidationError("Character numeric authority is unavailable.")
     raw_xianxia_state = dict(payload.get("xianxia") or {}) if is_xianxia else {}
     if is_xianxia and not isinstance(payload.get("vitals"), dict) and isinstance(raw_xianxia_state.get("vitals"), dict):
         payload["vitals"] = raw_xianxia_state.get("vitals")
 
     vitals = dict(payload.get("vitals") or {})
-    max_hp = xianxia_hp_max(definition) if is_xianxia else int(definition.stats.get("max_hp") or 0)
+    hp_status = source_authority.field_status("stats.max_hp") if source_authority is not None and not is_xianxia else None
+    max_hp = xianxia_hp_max(definition) if is_xianxia else int(
+        hp_status.effective if hp_status is not None and hp_status.is_effective
+        else definition.stats.get("max_hp") or 0
+    )
     current_hp = int(vitals.get("current_hp") or 0)
     temp_hp = int(vitals.get("temp_hp") or 0)
-    if not is_xianxia and (current_hp < 0 or current_hp > max_hp):
+    if hp_status is not None and not hp_status.is_effective:
+        previous_hp = dict((previous_state or {}).get("vitals") or {}).get("current_hp")
+        if previous_state is None or vitals.get("current_hp") != previous_hp:
+            raise CharacterStateValidationError("HP maximum needs repair before HP can change.")
+    elif not is_xianxia and (current_hp < 0 or current_hp > max_hp):
         raise CharacterStateValidationError(
             f"current_hp must be between 0 and {max_hp}, got {current_hp}"
         )
@@ -516,16 +579,55 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
     payload["vitals"] = normalized_vitals
     if is_xianxia:
         payload.pop("hit_dice", None)
-    else:
+    elif source_authority is None:
         payload = normalize_hit_dice_state_payload(definition, payload)
+    else:
+        if previous_state is None:
+            raise CharacterStateValidationError("Previous state is required for guarded Hit Dice writes.")
+        def disputed_pools(source: dict[str, Any]) -> list[Any]:
+            return [deepcopy(pool) for pool in list(dict(source.get("hit_dice") or {}).get("pools") or [])
+                    if not isinstance(pool, dict) or not source_authority.resource_status(
+                        "hit_die", str(pool.get("faces") or "")
+                    ).is_effective]
+        if disputed_pools(payload) != disputed_pools(previous_state):
+            raise CharacterStateValidationError("An unverified Hit Die pool changed during this write.")
+        verified_faces = {
+            int(pool["faces"]) for pool in [*derive_hit_dice_max_pools(definition),
+                *list(dict(payload.get("hit_dice") or {}).get("pools") or [])]
+            if isinstance(pool, dict) and type(pool.get("faces")) is int
+            and source_authority.resource_status("hit_die", str(pool["faces"])).is_effective
+        }
+        payload = normalize_verified_hit_dice_state_payload(definition, payload, verified_faces)
     if is_xianxia:
         payload["resources"] = []
         payload["spell_slots"] = []
+    if source_authority is not None and not is_xianxia:
+        if previous_state is None:
+            raise CharacterStateValidationError("Previous state is required for guarded Character writes.")
+        for family in ("resources", "spell_slots"):
+            kind = "resource" if family == "resources" else "spell_slot"
+            def unknown_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                selected = []
+                for row in rows:
+                    stable_id = (str(row.get("id") or "").strip() if family == "resources"
+                                 else f"{normalize_spell_slot_lane_id(row.get('slot_lane_id'))}:{int(row.get('level') or 0)}")
+                    if not source_authority.resource_status(kind, stable_id).is_effective:
+                        selected.append(row)
+                return selected
+            if unknown_rows(list(payload.get(family) or [])) != unknown_rows(list(previous_state.get(family) or [])):
+                raise CharacterStateValidationError("An unverified Character pool changed during this write.")
 
     normalized_resources = []
     for resource in payload.get("resources") or []:
+        resource_id = str(resource.get("id") or "").strip()
+        status = source_authority.resource_status("resource", resource_id) if source_authority is not None and not is_xianxia else None
+        if status is not None and not status.is_effective:
+            normalized_resources.append(deepcopy(resource))
+            continue
         current = int(resource.get("current") or 0)
-        max_value = resource.get("max")
+        if status is not None and not isinstance(status.effective, dict):
+            raise CharacterStateValidationError("Verified resource metadata is incomplete.")
+        max_value = status.effective.get("max") if status is not None else resource.get("max")
         max_int = int(max_value) if max_value is not None else None
         if current < 0:
             raise CharacterStateValidationError(
@@ -563,7 +665,16 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
     for slot in payload.get("spell_slots") or []:
         lane_id = normalize_spell_slot_lane_id(slot.get("slot_lane_id"))
         level = int(slot.get("level") or 0)
-        max_slots = int(slot.get("max") or slot_limits.get((lane_id, level)) or 0)
+        status = source_authority.resource_status("spell_slot", f"{lane_id}:{level}") if source_authority is not None and not is_xianxia else None
+        if status is not None and not status.is_effective:
+            normalized_slots.append(deepcopy(slot))
+            continue
+        if status is not None and not isinstance(status.effective, dict):
+            raise CharacterStateValidationError("Verified spell slot metadata is incomplete.")
+        max_slots = int(
+            status.effective.get("max") if status is not None
+            else slot.get("max") or slot_limits.get((lane_id, level)) or 0
+        )
         used = int(slot.get("used") or 0)
         if used < 0 or used > max_slots:
             lane_label = f" in slot lane '{lane_id}'" if lane_id else ""
@@ -577,6 +688,19 @@ def validate_state(definition: CharacterDefinition, state: dict[str, Any]) -> di
     payload["spell_slots"] = normalized_slots
 
     normalized_inventory = []
+    if source_authority is not None and not is_xianxia:
+        prior_charges = {
+            str(item.get("id") or "").strip(): (item.get("charges_current"), item.get("charges_max"))
+            for item in list((previous_state or {}).get("inventory") or []) if isinstance(item, dict)
+        }
+        for item in list(payload.get("inventory") or []):
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("id") or "").strip()
+            if source_authority.resource_status("item_charge", item_id).is_effective:
+                continue
+            if (item.get("charges_current"), item.get("charges_max")) != prior_charges.get(item_id, (None, None)):
+                raise CharacterStateValidationError("Item charges need manager repair before they can change.")
     for item in payload.get("inventory") or []:
         quantity = int(item.get("quantity") or 0)
         if quantity < 0:

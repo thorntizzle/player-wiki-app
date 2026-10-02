@@ -96,6 +96,9 @@ def allocate_managed_wiki_image_path(assets_dir: str | Path, extension: str) -> 
 def is_visible_managed_wiki_image(campaign_slug: str, current_session: int, asset_ref: str) -> bool:
     """Read one SQLite snapshot of page visibility and journal ownership."""
 
+    from .committed_publication import active, image_bytes
+    if active():
+        return image_bytes(campaign_slug, asset_ref) is not None
     if not is_canonical_managed_wiki_image_ref(asset_ref):
         return False
     section_placeholders = ", ".join("?" for _ in DEPRECATED_WIKI_SECTIONS)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from .character_ability_inputs import recover_inputs, recovery_rows, require_resolved_ability_inputs
+from .character_ability_inputs import mechanics_changed, recover_inputs, recovery_rows, require_resolved_ability_inputs
+from .character_source_authority import build_reconciled_source_authority
 
 from copy import deepcopy
 import re
@@ -753,6 +754,8 @@ def apply_character_spell_management_edit(
     selected_class: Any | None = None,
     selected_class_rows: list[dict[str, Any]] | None = None,
     systems_service: Any | None = None,
+    source_authority: Any | None = None,
+    eligibility_definition: CharacterDefinition | None = None,
     operation: str,
     spell_key: str = "",
     selected_value: str = "",
@@ -771,10 +774,40 @@ def apply_character_spell_management_edit(
     section = _resolve_spell_management_section(manager, target_class_row_id)
     if section is None:
         raise CharacterEditValidationError("Choose a valid spellcasting class row.")
-    if not section.get("can_manage"):
-        raise CharacterEditValidationError(
-            str(section.get("unavailable_message") or "This sheet cannot manage spells here yet.")
-        )
+    from .committed_publication import active
+    activated = active()
+    if activated and (source_authority is None or eligibility_definition is None):
+        raise CharacterEditValidationError("Refresh this Character before changing its spell list.")
+    row_id = str(section.get("class_row_id") or target_class_row_id or "").strip()
+    if activated and not source_authority.source_row_is_effective(row_id, current_definition):
+        raise CharacterEditValidationError("This spell source needs manager repair before its spell list can change.")
+    safe_manager = build_character_spell_management_context(
+        eligibility_definition,
+        spell_catalog=spell_catalog,
+        selected_class=selected_class,
+        selected_class_rows=selected_class_rows,
+    ) if activated else manager
+    safe_section = _resolve_spell_management_section(safe_manager or {}, row_id)
+    if activated and (safe_section is None or not safe_section.get("can_manage")):
+        raise CharacterEditValidationError("This spell source needs manager repair before its spell list can change.")
+    # Saved spell counts and capacities are historical. A mismatch makes
+    # prepared/known limits ambiguous; the projected current source wins.
+    count_fields = (
+        "mode", "max_spell_level", "target_cantrip_count", "target_known_count",
+        "target_prepared_count", "current_cantrip_count", "current_known_count",
+        "current_prepared_count", "current_spellbook_count",
+        "current_ritual_book_count",
+    )
+    if activated and any(section.get(key) != safe_section.get(key) for key in count_fields):
+        raise CharacterEditValidationError("Spell counts need manager source repair before this edit.")
+    ability = str(safe_section.get("spellcasting_ability_key") or "").strip().casefold()
+    if activated and str(safe_section.get("mode") or "").strip() in {"prepared", "wizard"} and (
+        not ability or not source_authority.field_status(
+            f"stats.ability_scores.{ability}.score"
+        ).is_effective
+    ):
+        raise CharacterEditValidationError("The spellcasting ability needs manager verification before this edit.")
+    section = safe_section
 
     rows_by_key = {
         str(row.get("spell_key") or "").strip(): dict(row)
@@ -891,6 +924,10 @@ def apply_character_spell_management_edit(
         row = rows_by_key.get(clean_spell_key)
         if row is None:
             raise CharacterEditValidationError("Choose a valid spell to remove.")
+        if activated and not any(str(candidate.get("spell_key") or "").strip() == clean_spell_key
+                   and bool(candidate.get("can_remove"))
+                   for candidate in list(safe_section.get("rows") or [])):
+            raise CharacterEditValidationError("This spell needs manager source repair before removal.")
         if not bool(row.get("can_remove")):
             raise CharacterEditValidationError("That spell is fixed by class or feature rules and cannot be removed here.")
         spells_by_key.pop(clean_spell_key, None)
@@ -898,6 +935,10 @@ def apply_character_spell_management_edit(
         row = rows_by_key.get(clean_spell_key)
         if row is None:
             raise CharacterEditValidationError("Choose a valid spell to update.")
+        if activated and not any(str(candidate.get("spell_key") or "").strip() == clean_spell_key
+                   and bool(candidate.get("can_toggle_prepared"))
+                   for candidate in list(safe_section.get("rows") or [])):
+            raise CharacterEditValidationError("This spell needs manager source repair before preparation changes.")
         if not bool(row.get("can_toggle_prepared")):
             raise CharacterEditValidationError("That spell cannot have its prepared state changed here.")
         set_prepared = str(prepared_value or "").strip() in {"1", "true", "yes", "on"}
@@ -2205,6 +2246,10 @@ def apply_native_character_retraining(
     spell_catalog: dict[str, Any] | None = None,
     item_catalog: dict[str, Any] | None = None,
     systems_service: Any | None = None,
+    state: dict[str, Any] | None = None,
+    state_revision: int | None = None,
+    verified_manual_actions: tuple[Any, ...] = (),
+    verified_numeric_actions: tuple[Any, ...] = (),
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
     values = dict(form_values or {})
     base_edit_context = build_native_character_edit_context(
@@ -2243,6 +2288,10 @@ def apply_native_character_retraining(
         spell_catalog=spell_catalog,
         item_catalog=item_catalog,
         systems_service=systems_service,
+        state=state,
+        state_revision=state_revision,
+        verified_manual_actions=verified_manual_actions,
+        verified_numeric_actions=verified_numeric_actions,
     )
     if definition.to_dict() != current_definition.to_dict():
         payload = deepcopy(definition.to_dict())
@@ -2366,15 +2415,37 @@ def apply_native_character_edits(
     item_catalog: dict[str, Any] | None = None,
     systems_service: Any | None = None,
     linked_feature_authoring_support: dict[str, Any] | None = None,
+    state: dict[str, Any] | None = None,
+    state_revision: int | None = None,
+    verified_manual_actions: tuple[Any, ...] = (),
+    verified_numeric_actions: tuple[Any, ...] = (),
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
     values = dict(form_values or {})
     # Seed legacy provenance before removing any penalty or feature metadata.
+    raw_current_definition = current_definition
     current_definition = normalize_definition_to_native_model(
         current_definition, item_catalog=item_catalog, spell_catalog=spell_catalog,
         systems_service=systems_service, campaign_page_records=campaign_page_records,
     )
     current_definition = recover_inputs(current_definition, values)
     require_resolved_ability_inputs(current_definition)
+    from .committed_publication import active
+    activated = active()
+    current_authority = None
+    if activated and state is not None and state_revision is not None and systems_service is not None:
+        current_authority = build_reconciled_source_authority(
+            definition=raw_current_definition, state=state,
+            state_revision=state_revision, systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+            verified_manual_actions=verified_manual_actions,
+            verified_numeric_actions=verified_numeric_actions,
+        )
+    # Existing copied option payloads cannot be used to invert saved totals.
+    # Only current source-approved options may contribute to editor arithmetic.
+    current_effective_definition = (
+        current_authority.effective_definition(current_definition)
+        if current_authority is not None else current_definition
+    )
 
     linked_feature_authoring = dict(linked_feature_authoring_support or {})
     linked_feature_authoring_supported = bool(linked_feature_authoring.get("supported", True))
@@ -2447,13 +2518,13 @@ def apply_native_character_edits(
         if str(item.get("id") or "").strip()
     }
     existing_campaign_option_payloads = _campaign_option_payloads_from_entries(
-        _manual_custom_features(current_definition),
-        _manual_equipment_entries(current_definition),
+        _manual_custom_features(current_effective_definition),
+        _manual_equipment_entries(current_effective_definition),
     )
     spell_catalog = dict(spell_catalog or {})
     current_level = _character_total_level(current_definition)
     stripped_definition = _strip_definition_campaign_feat_effects(
-        current_definition,
+        current_effective_definition,
         selected_class=None,
     )
 
@@ -2788,6 +2859,22 @@ def apply_native_character_edits(
     ] + manual_resource_templates
 
     definition = CharacterDefinition.from_dict(payload)
+    authority = None
+    if activated and state is not None and state_revision is not None and systems_service is not None:
+        if mechanics_changed(raw_current_definition, definition):
+            try:
+                current_authority.require_authoring_inputs()
+            except ValueError as exc:
+                raise CharacterEditValidationError(str(exc)) from exc
+        authority = build_reconciled_source_authority(
+            definition=definition, state=state,
+            state_revision=state_revision, systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+            verified_manual_actions=verified_manual_actions,
+            verified_numeric_actions=verified_numeric_actions,
+        )
+    elif activated and mechanics_changed(raw_current_definition, definition):
+        raise CharacterEditValidationError("Refresh the Character before changing its mechanics.")
     source_type = str((current_definition.source or {}).get("source_type") or "").strip()
     if source_type and source_type != "native_character_builder":
         definition = converge_imported_definition(
@@ -2800,6 +2887,8 @@ def apply_native_character_edits(
     else:
         definition = normalize_definition_to_native_model(
             definition,
+            mode="authoring" if authority is not None else "historical",
+            source_authority=authority,
             spell_catalog=spell_catalog,
             systems_service=systems_service,
             campaign_page_records=campaign_page_records,

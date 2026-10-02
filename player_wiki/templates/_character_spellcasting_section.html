@@ -59,7 +59,7 @@
     </div>
   {% endmacro %}
   {% macro character_spell_fallback_details(spell) %}
-    {% if spell.description_html or spell.href %}
+    {% if spell.description_html or spell.href or spell.authority_note %}
       <details class="item-description-detail spell-card__fallback" data-character-spell-fallback>
         <summary>Spell details</summary>
         <div class="item-description-detail__body">
@@ -103,6 +103,7 @@
                         {% if spell_section.spell_attack_bonus %}| Attack {{ spell_section.spell_attack_bonus }}{% endif %}
                       </p>
                     {% endif %}
+                    {% for note in spell_section.spell_metric_notes or [] %}<p class="meta">{{ note }}</p>{% endfor %}
                     {% if spell_section.counts %}
                       <ul class="plain-list session-spellcasting-summary__counts">
                         {% for count in spell_section.counts %}
@@ -154,7 +155,6 @@
       {% if character.spellcasting.row_sections %}
         {% for spell_section in character.spellcasting.row_sections %}
           {% set manager_section = ((spell_manager.sections | selectattr('class_row_id', 'equalto', spell_section.class_row_id) | list | first) if spell_manager else none) %}
-          {% if spell_section.row_kind == "class" or spell_section.spell_mode == "ritual_book" %}
             <article class="detail-card spellcasting-class-card">
               <h3>{{ spell_section.title }}</h3>
               {% if spell_section.spellcasting_ability %}
@@ -165,7 +165,10 @@
                 </p>
               {% endif %}
               {% if manager_section and manager_section.mode_label %}
+                {% for note in spell_section.spell_metric_notes or [] %}<p class="meta">{{ note }}</p>{% endfor %}
                 <p class="meta">{{ manager_section.mode_label }}</p>
+              {% else %}
+                {% for note in spell_section.spell_metric_notes or [] %}<p class="meta">{{ note }}</p>{% endfor %}
               {% endif %}
               {% if manager_section and manager_section.rules_note %}
                 <p>{{ manager_section.rules_note }}</p>
@@ -174,7 +177,6 @@
                 <p class="meta">{{ manager_section.unavailable_message }}</p>
               {% endif %}
             </article>
-          {% endif %}
         {% endfor %}
       {% else %}
         <article class="detail-card spellcasting-class-card">
@@ -186,6 +188,7 @@
               {% if character.spellcasting.spell_attack_bonus %}| Attack {{ character.spellcasting.spell_attack_bonus }}{% endif %}
             </p>
           {% endif %}
+          {% for note in character.spellcasting.spell_metric_notes or [] %}<p class="meta">{{ note }}</p>{% endfor %}
         </article>
       {% endif %}
       {% if not (show_spell_list and (character_inline_state_controls_enabled | default(false))) %}

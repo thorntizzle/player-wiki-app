@@ -475,6 +475,7 @@ def update_player_wiki_page(campaign: Any, actor_user_id: int, existing_record: 
         metadata=metadata,
         body_markdown=body_markdown,
         page_store=dependencies.page_store,
+        expected_updated_at=existing_record.updated_at,
     )
     if dependencies.reconciler is None:
         raise RuntimeError("Player wiki forward reconciliation is not configured.")
@@ -504,6 +505,7 @@ def unpublish_player_wiki_page(campaign: Any, actor_user_id: int, existing_recor
         metadata=metadata,
         body_markdown=existing_record.body_markdown,
         page_store=dependencies.page_store,
+        expected_updated_at=existing_record.updated_at,
     )
     if dependencies.reconciler is None:
         raise RuntimeError("Player wiki forward reconciliation is not configured.")
@@ -538,6 +540,7 @@ def delete_player_wiki_page(campaign: Any, campaign_slug: str, actor_user_id: in
         return PlayerWikiDeleteResult("blocked", record=existing_record, blockers=blockers)
     if dependencies.reconciler is None:
         raise RuntimeError("Player wiki forward reconciliation is not configured.")
+    from .committed_publication import CommittedHardDeleteBlocked
     try:
         deleted = dependencies.reconciler.delete(
             campaign,
@@ -551,6 +554,8 @@ def delete_player_wiki_page(campaign: Any, campaign_slug: str, actor_user_id: in
                 "source": "dm_content_player_wiki",
             },
         )
+    except CommittedHardDeleteBlocked as exc:
+        return PlayerWikiDeleteResult("blocked", record=existing_record, blockers=exc.blockers)
     except CampaignContentError as exc:
         return PlayerWikiDeleteResult("error", record=existing_record, error=str(exc))
     if deleted is None:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import wraps
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from .divine_avatar_forms import (
@@ -11,18 +13,25 @@ from .divine_avatar_forms import (
 )
 from .character_hit_dice import (
     apply_long_rest_hit_dice_recovery,
+    derive_hit_dice_max_pools,
     hit_dice_rest_changes,
     hit_dice_summary_from_state,
     normalize_hit_dice_state_payload,
+    recover_verified_hit_dice_pools,
     set_hit_dice_current_values,
+    set_verified_hit_dice_current_values,
 )
 from .character_models import CharacterRecord, CharacterStateRecord
+from .character_profile import profile_class_rows
 from .character_service import validate_state
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lane_title_map
-from .character_store import CharacterStateConflictError, CharacterStateStore
+from .character_store import (
+    CharacterStateConflictError, CharacterStateStore, source_write_transaction,
+    source_writer_reserved,
+)
 from .repository import slugify
 from .rich_text import sanitize_rich_markdown
-from .system_policy import is_xianxia_system
+from .system_policy import is_dnd_5e_system, is_xianxia_system
 from .xianxia_character_model import (
     XIANXIA_CURRENCY_KEYS,
     XIANXIA_ENERGY_KEYS,
@@ -56,11 +65,43 @@ class CharacterRestPreview:
     label: str
     changes: list[CharacterRestChange]
     adjustments: dict[str, Any]
+    skipped: list[str]
+    can_apply: bool
 
 
 class CharacterStateService:
-    def __init__(self, state_store: CharacterStateStore) -> None:
+    def __init__(self, state_store: CharacterStateStore,
+                 authority_provider: Callable[[CharacterRecord], Any] | None = None) -> None:
         self.state_store = state_store
+        self.authority_provider = authority_provider
+        self.item_action_resolver: Callable[[CharacterRecord, str], dict[str, Any]] | None = None
+        self.divine_avatar_validator_factory: Callable[
+            [CharacterRecord, str], Callable[[dict[str, Any]], None] | None
+        ] | None = None
+
+    def current_authority(self, record: CharacterRecord) -> Any | None:
+        if not is_dnd_5e_system(record.definition.system):
+            return None
+        from .committed_publication import active
+        if not active(self.state_store_connection()):
+            return None
+        if self.authority_provider is None:
+            raise ValueError("Character numeric authority is unavailable.")
+        authority = self.authority_provider(record)
+        if (authority is None or authority.state_revision != record.state_record.revision
+                or not getattr(authority, "identity", "")):
+            raise ValueError("Character numeric authority changed. Refresh before saving.")
+        return authority
+
+    def _require_field(self, record: CharacterRecord, path: str) -> None:
+        authority = self.current_authority(record)
+        if authority is not None and not authority.field_status(path).is_effective:
+            raise ValueError("This Character value needs manager repair before it can change.")
+
+    def _require_resource(self, record: CharacterRecord, kind: str, stable_id: str) -> None:
+        authority = self.current_authority(record)
+        if authority is not None and not authority.resource_status(kind, stable_id).is_effective:
+            raise ValueError("This Character pool needs manager repair before it can change.")
 
     def update_vitals(
         self,
@@ -84,6 +125,11 @@ class CharacterStateService:
         updated_by_user_id: int | None = None,
         commit: bool = True,
     ) -> CharacterStateRecord:
+        if current_hp is not None or hp_delta is not None:
+            self._require_field(record, "stats.max_hp")
+        if hit_dice_current:
+            for faces in hit_dice_current:
+                self._require_resource(record, "hit_die", str(faces))
         state = deepcopy(record.state_record.state)
         self._apply_vitals_update(
             state,
@@ -94,7 +140,11 @@ class CharacterStateService:
             clear_temp_hp=clear_temp_hp,
         )
         if hit_dice_current is not None and not is_xianxia_system(record.definition.system):
-            state = set_hit_dice_current_values(record.definition, state, hit_dice_current)
+            authority = self.current_authority(record)
+            state = (set_hit_dice_current_values(record.definition, state, hit_dice_current)
+                     if authority is None else set_verified_hit_dice_current_values(
+                         record.definition, state, hit_dice_current,
+                         self._verified_hit_die_faces(record.definition, state, authority)))
         if is_xianxia_system(record.definition.system):
             self._apply_xianxia_stance_update(
                 state,
@@ -215,8 +265,31 @@ class CharacterStateService:
         updated_by_user_id: int | None = None,
         commit: bool = True,
     ) -> CharacterStateRecord:
+        definition = record.definition
+        from .committed_publication import active
+        if active() and str(action or "").strip().lower().replace("-", "_") in {
+            "activate", "mourning_wave", "strength_of_remembrance",
+        }:
+            authority = self.current_authority(record)
+            if authority is None:
+                raise ValueError("Divine Avatar Form source authority is unavailable.")
+            definition = authority.effective_definition(record.definition)
+            definition.features = [
+                feature for feature in definition.features
+                if isinstance(feature, dict)
+                and not feature.get("mechanics_suppressed")
+                and authority.status_for("feature", str(feature.get("id") or "")) == "VERIFIED"
+            ]
+            max_hp_status = authority.field_status("stats.max_hp")
+            if not max_hp_status.is_effective:
+                raise ValueError("Character HP needs manager repair before Divine Avatar automation.")
+            definition.stats["max_hp"] = max_hp_status.effective
+        if active() and proposed_state_validator is not None:
+            if self.divine_avatar_validator_factory is None:
+                raise ValueError("Current Divine Avatar source validation is unavailable.")
+            proposed_state_validator = self.divine_avatar_validator_factory(record, action)
         transition = transition_divine_avatar_form(
-            record.definition,
+            definition,
             record.state_record.state,
             form_key,
             action,
@@ -254,6 +327,7 @@ class CharacterStateService:
         delta: Any | None = None,
         updated_by_user_id: int | None = None,
     ) -> CharacterStateRecord:
+        self._require_resource(record, "resource", str(resource_id).strip())
         state = deepcopy(record.state_record.state)
         self._apply_resource_update(state, resource_id, current=current, delta=delta)
         return self._replace_state(
@@ -274,6 +348,7 @@ class CharacterStateService:
         delta_used: Any | None = None,
         updated_by_user_id: int | None = None,
     ) -> CharacterStateRecord:
+        self._require_resource(record, "spell_slot", f"{normalize_spell_slot_lane_id(slot_lane_id)}:{int(level)}")
         state = deepcopy(record.state_record.state)
         self._apply_spell_slots_update(
             state,
@@ -301,6 +376,17 @@ class CharacterStateService:
         updated_by_user_id: int | None = None,
     ) -> CharacterStateRecord:
         action_payload = dict(action or {})
+        from .committed_publication import active
+        if active():
+            if self.item_action_resolver is None:
+                raise ValueError("Current item action proof is unavailable.")
+            action_id = str(action_payload.get("id") or "").strip()
+            current_action = self.item_action_resolver(record, action_id)
+            if current_action != action_payload:
+                raise CharacterStateConflictError(
+                    "Item action source changed. Refresh before using it."
+                )
+            action_payload = current_action
         if str(action_payload.get("kind") or "").strip() != "spell_slot_item_attack":
             raise ValueError("Choose a modeled spell-slot item action.")
         if not bool(action_payload.get("enabled")):
@@ -330,6 +416,7 @@ class CharacterStateService:
         )
         if selected_option is None:
             raise ValueError("Choose a valid spell slot for this item action.")
+        self._require_resource(record, "spell_slot", f"{clean_lane_id}:{int(slot_level)}")
 
         state = deepcopy(record.state_record.state)
         max_slots = int(selected_option.get("max") or 0)
@@ -551,6 +638,8 @@ class CharacterStateService:
             if any(key in vitals for key in ("hp_delta", "temp_hp_delta", "clear_temp_hp")):
                 raise ValueError("Sheet edit vitals must use absolute current values, not delta actions.")
             if "current_hp" in vitals or "temp_hp" in vitals:
+                if "current_hp" in vitals:
+                    self._require_field(record, "stats.max_hp")
                 self._apply_vitals_update(
                     state,
                     current_hp=vitals.get("current_hp"),
@@ -571,6 +660,7 @@ class CharacterStateService:
                     raise ValueError("Sheet edit resources must use absolute current values, not delta actions.")
                 if "current" not in entry:
                     raise ValueError(f"Sheet edit resource '{resource_id}' is missing a current value.")
+                self._require_resource(record, "resource", resource_id)
                 self._apply_resource_update(state, resource_id, current=entry.get("current"))
                 applied_changes = True
 
@@ -586,6 +676,10 @@ class CharacterStateService:
                     raise ValueError("Each sheet edit spell slot row needs a level.")
                 if "used" not in entry:
                     raise ValueError("Each sheet edit spell slot row needs a used value.")
+                self._require_resource(
+                    record, "spell_slot",
+                    f"{normalize_spell_slot_lane_id(entry.get('slot_lane_id'))}:{int(entry.get('level'))}",
+                )
                 self._apply_spell_slots_update(
                     state,
                     int(entry.get("level")),
@@ -671,7 +765,11 @@ class CharacterStateService:
             active_form = str(divine_avatar_forms_state_from(state).get("active_form") or "")
             if active_form:
                 # Check every explicit value before computing transition-owned costs.
-                state = validate_state(record.definition, state)
+                state = validate_state(
+                    record.definition, state,
+                    source_authority=self.current_authority(record),
+                    previous_state=record.state_record.state,
+                )
                 return end_divine_avatar_form_automatically(
                     record.definition, state, active_form, reason="unconscious"
                 )
@@ -937,11 +1035,18 @@ class CharacterStateService:
         raise ValueError("Choose a supported feature state to update.")
 
     def _record_has_feature(self, record: CharacterRecord, feature_name: str) -> bool:
+        from .character_page_companion import blocks_page_companion_heuristics
+        from .committed_publication import active
+        activated = active()
+        authority = self.current_authority(record) if activated else None
         target = self._coerce_text(feature_name).casefold()
         return any(
             self._coerce_text(feature.get("name")).casefold() == target
             for feature in list(record.definition.features or [])
-            if isinstance(feature, dict)
+            if isinstance(feature, dict) and (not activated or not blocks_page_companion_heuristics(feature))
+            and (authority is None or authority.status_for(
+                "feature", str(feature.get("id") or ""),
+            ) == "VERIFIED")
         )
 
     def _coerce_text(self, value: Any) -> str:
@@ -1358,12 +1463,24 @@ class CharacterStateService:
 
     def preview_rest(self, record: CharacterRecord, rest_type: str) -> CharacterRestPreview:
         normalized_rest = self._normalize_rest_type(rest_type)
+        authority = self._require_rest_authority(record, normalized_rest)
         state = deepcopy(record.state_record.state)
         changes = self._collect_rest_changes(
             state,
             normalized_rest,
             definition=record.definition,
             spellcasting=record.definition.spellcasting,
+            source_authority=authority,
+        )
+        skipped = self._skipped_rest_targets(state, normalized_rest,
+                                             definition=record.definition,
+                                             source_authority=authority)
+        hit_die_inputs_available = bool(
+            list(dict(state.get("hit_dice") or {}).get("pools") or [])
+            and self._verified_hit_die_faces(record.definition, state, authority)
+        )
+        can_apply = bool(changes) or authority is None or bool(
+            authority.field_status("stats.max_hp").is_effective or hit_die_inputs_available
         )
         return CharacterRestPreview(
             rest_type=normalized_rest,
@@ -1374,9 +1491,13 @@ class CharacterStateService:
                     state,
                     normalized_rest,
                     definition=record.definition,
+                    source_authority=authority,
                 ),
                 record.definition,
+                source_authority=authority,
             ),
+            skipped=skipped,
+            can_apply=can_apply,
         )
 
     def apply_rest(
@@ -1390,19 +1511,36 @@ class CharacterStateService:
         updated_by_user_id: int | None = None,
     ) -> CharacterStateRecord:
         normalized_rest = self._normalize_rest_type(rest_type)
-        state = deepcopy(record.state_record.state)
+        authority = self._require_rest_authority(record, normalized_rest)
+        if current_hp is not None:
+            self._require_field(record, "stats.max_hp")
+        if hit_dice_current:
+            for faces in hit_dice_current:
+                self._require_resource(record, "hit_die", str(faces))
+        prior_state = record.state_record.state
+        state = deepcopy(prior_state)
         state = self._modeled_rest_state(
             state,
             normalized_rest,
             definition=record.definition,
+            source_authority=authority,
         )
 
         if current_hp is not None and str(current_hp).strip() != "":
             self._apply_vitals_update(state, current_hp=current_hp)
         if hit_dice_current is not None and not is_xianxia_system(record.definition.system):
-            state = set_hit_dice_current_values(record.definition, state, hit_dice_current)
+            state = (set_hit_dice_current_values(record.definition, state, hit_dice_current)
+                     if authority is None else set_verified_hit_dice_current_values(
+                         record.definition, state, hit_dice_current,
+                         self._verified_hit_die_faces(record.definition, state, authority)))
 
         state = self._apply_final_hp_transition(record, state)
+        if (authority is not None and state == prior_state
+                and self._skipped_rest_targets(
+                    prior_state, normalized_rest, definition=record.definition,
+                    source_authority=authority,
+                )):
+            raise ValueError("No verified recovery can be applied by this rest.")
         return self._replace_state(
             record,
             state,
@@ -1416,34 +1554,125 @@ class CharacterStateService:
         rest_type: str,
         *,
         definition: Any,
+        source_authority: Any | None = None,
     ) -> dict[str, Any]:
         modeled_state = deepcopy(state)
         for resource in list(modeled_state.get("resources") or []):
-            if not self._should_reset_resource(resource, rest_type):
+            status = source_authority.resource_status("resource", str(resource.get("id") or "")) if source_authority is not None else None
+            if status is not None and not status.is_effective:
                 continue
-            resource["current"] = self._reset_resource_value(resource)
+            effective_resource = dict(resource)
+            if status is not None:
+                effective_resource.update(dict(status.effective or {}))
+            if not self._should_reset_resource(effective_resource, rest_type):
+                continue
+            resource["current"] = self._reset_resource_value(effective_resource)
 
         if rest_type == "long":
             for slot in list(modeled_state.get("spell_slots") or []):
+                if source_authority is not None and not source_authority.resource_status(
+                    "spell_slot", f"{normalize_spell_slot_lane_id(slot.get('slot_lane_id'))}:{int(slot.get('level') or 0)}"
+                ).is_effective:
+                    continue
                 slot["used"] = 0
             if is_xianxia_system(getattr(definition, "system", None)):
                 self._apply_xianxia_one_day_rest(modeled_state, definition)
             else:
-                modeled_state = apply_long_rest_hit_dice_recovery(definition, modeled_state)
+                modeled_state = (apply_long_rest_hit_dice_recovery(definition, modeled_state)
+                                 if source_authority is None else recover_verified_hit_dice_pools(
+                                     definition, modeled_state,
+                                     self._verified_hit_die_faces(definition, modeled_state, source_authority),
+                                     verified_total_level=self._verified_character_level(definition, source_authority)))
         elif not is_xianxia_system(getattr(definition, "system", None)):
-            modeled_state = normalize_hit_dice_state_payload(definition, modeled_state)
+            modeled_state = (normalize_hit_dice_state_payload(definition, modeled_state)
+                             if source_authority is None else modeled_state)
         return modeled_state
+
+    @staticmethod
+    def _verified_hit_die_faces(definition: Any, state: dict[str, Any], authority: Any | None) -> set[int]:
+        if authority is None:
+            return {int(pool["faces"]) for pool in derive_hit_dice_max_pools(definition)}
+        existing = list(dict(state.get("hit_dice") or {}).get("pools") or [])
+        derived = derive_hit_dice_max_pools(definition)
+        return {
+            int(pool["faces"]) for pool in [*existing, *derived]
+            if isinstance(pool, dict) and type(pool.get("faces")) is int
+            and authority.resource_status("hit_die", str(pool["faces"])).is_effective
+        }
+
+    @staticmethod
+    def _verified_character_level(definition: Any, authority: Any | None) -> int:
+        rows = profile_class_rows(definition.profile)
+        verified = (set(authority.verified_class_rows) if authority is not None
+                    else {str(row.get("row_id") or "") for row in rows})
+        return sum(row["level"] for row in rows
+                   if str(row.get("row_id") or "") in verified
+                   and type(row.get("level")) is int and row["level"] > 0)
+
+    @classmethod
+    def _hit_dice_authorized(cls, definition: Any, state: dict[str, Any], authority: Any | None) -> bool:
+        if authority is None:
+            return True
+        existing = list(dict(state.get("hit_dice") or {}).get("pools") or [])
+        derived = derive_hit_dice_max_pools(definition)
+        verified = cls._verified_hit_die_faces(definition, state, authority)
+        return all(
+            isinstance(pool, dict) and pool.get("faces") in verified
+            for pool in [*existing, *derived]
+        )
+
+    def _require_rest_authority(self, record: CharacterRecord, rest_type: str) -> Any | None:
+        return self.current_authority(record)
+
+    def _skipped_rest_targets(
+        self, state: dict[str, Any], rest_type: str, *, definition: Any,
+        source_authority: Any | None,
+    ) -> list[str]:
+        if source_authority is None:
+            return []
+        skipped: list[str] = []
+        for resource in list(state.get("resources") or []):
+            if (self._should_reset_resource(resource, rest_type)
+                    and not source_authority.resource_status("resource", str(resource.get("id") or "")).is_effective):
+                skipped.append(f"{str(resource.get('label') or 'Resource')} (NEEDS REPAIR)")
+        if rest_type == "long":
+            for slot in list(state.get("spell_slots") or []):
+                stable_id = f"{normalize_spell_slot_lane_id(slot.get('slot_lane_id'))}:{int(slot.get('level') or 0)}"
+                if not source_authority.resource_status("spell_slot", stable_id).is_effective:
+                    skipped.append(f"Level {int(slot.get('level') or 0)} spell slots (NEEDS REPAIR)")
+            for pool in list(dict(state.get("hit_dice") or {}).get("pools") or []):
+                if isinstance(pool, dict) and pool.get("faces") not in self._verified_hit_die_faces(
+                    definition, state, source_authority):
+                    skipped.append(f"Hit Dice d{pool.get('faces')} (NEEDS REPAIR)")
+        if not source_authority.field_status("stats.max_hp").is_effective:
+            skipped.append("HP adjustment unavailable (NEEDS REPAIR)")
+        return skipped
 
     def _rest_adjustments_from_state(
         self,
         state: dict[str, Any],
         definition: Any,
+        *, source_authority: Any | None = None,
     ) -> dict[str, Any]:
         vitals = dict(state.get("vitals") or {})
         adjustments: dict[str, Any] = {
             "current_hp": int(vitals.get("current_hp") or 0),
         }
-        hit_dice = hit_dice_summary_from_state(definition, state)
+        verified_faces = self._verified_hit_die_faces(definition, state, source_authority)
+        if source_authority is None:
+            hit_dice = hit_dice_summary_from_state(definition, state)
+        else:
+            pools = [dict(pool) for pool in list(dict(state.get("hit_dice") or {}).get("pools") or [])
+                     if isinstance(pool, dict) and pool.get("faces") in verified_faces]
+            pools.sort(key=lambda pool: int(pool["faces"]))
+            total = self._verified_character_level(definition, source_authority)
+            hit_dice = {
+                "pools": [{**pool, "label": f"d{pool['faces']}",
+                           "input_name": f"hit_dice_d{pool['faces']}"} for pool in pools],
+                "value": " | ".join(f"d{pool['faces']} {pool.get('current', 0)}/{pool.get('max', 0)}" for pool in pools) or "--",
+                "full_value": " + ".join(f"{pool.get('max', 0)}d{pool['faces']}" for pool in pools) or "--",
+                "regain_on_long_rest": max(1, total // 2) if total else 0,
+            }
         if list(hit_dice.get("pools") or []):
             adjustments["hit_dice"] = hit_dice
         return adjustments
@@ -1457,13 +1686,35 @@ class CharacterStateService:
         updated_by_user_id: int | None = None,
         commit: bool = True,
     ) -> CharacterStateRecord:
+        from .committed_publication import active
+        activated = active()
+        if activated and not source_writer_reserved(self.state_store_connection()):
+            raise CharacterStateConflictError("Character source writer reservation is unavailable.")
+        authority = self.current_authority(record)
+        if authority is not None:
+            # Validate before the CAS, then re-read current source policy and
+            # audit witnesses immediately before the write boundary.
+            validate_state(
+                record.definition, state, source_authority=authority,
+                previous_state=record.state_record.state,
+            )
+            refreshed = self.current_authority(record)
+            if refreshed.identity != authority.identity:
+                raise CharacterStateConflictError("Character source authority changed before saving.")
         write_kwargs: dict[str, Any] = {
             "expected_revision": expected_revision,
             "updated_by_user_id": updated_by_user_id,
+            "source_authority": authority,
+            "previous_state": record.state_record.state,
         }
-        if not commit:
+        if not commit or activated:
             write_kwargs["commit"] = False
         return self.state_store.replace_state(record.definition, state, **write_kwargs)
+
+    @staticmethod
+    def state_store_connection():
+        from .db import get_db
+        return get_db()
 
     def _collect_rest_changes(
         self,
@@ -1472,12 +1723,17 @@ class CharacterStateService:
         *,
         definition: Any,
         spellcasting: dict[str, Any] | None = None,
+        source_authority: Any | None = None,
     ) -> list[CharacterRestChange]:
         changes: list[CharacterRestChange] = []
         for resource in list(state.get("resources") or []):
-            if not self._should_reset_resource(resource, rest_type):
+            status = source_authority.resource_status("resource", str(resource.get("id") or "")) if source_authority is not None else None
+            if status is not None and not status.is_effective:
                 continue
-            next_current = self._reset_resource_value(resource)
+            effective_resource = {**resource, **dict(status.effective or {})} if status is not None else resource
+            if not self._should_reset_resource(effective_resource, rest_type):
+                continue
+            next_current = self._reset_resource_value(effective_resource)
             current = int(resource.get("current") or 0)
             if current == next_current:
                 continue
@@ -1493,24 +1749,41 @@ class CharacterStateService:
             if is_xianxia_system(getattr(definition, "system", None)):
                 changes.extend(self._collect_xianxia_one_day_rest_changes(state, definition))
             else:
-                rested_state = apply_long_rest_hit_dice_recovery(definition, state)
-                for change in hit_dice_rest_changes(definition, state, rested_state):
-                    changes.append(
-                        CharacterRestChange(
-                            label=change["label"],
-                            from_value=change["from_value"],
-                            to_value=change["to_value"],
-                        )
-                    )
+                rested_state = (apply_long_rest_hit_dice_recovery(definition, state)
+                                if source_authority is None else recover_verified_hit_dice_pools(
+                                    definition, state,
+                                    self._verified_hit_die_faces(definition, state, source_authority),
+                                    verified_total_level=self._verified_character_level(definition, source_authority)))
+                if source_authority is None:
+                    for change in hit_dice_rest_changes(definition, state, rested_state):
+                        changes.append(CharacterRestChange(**change))
+                else:
+                    before_pools = {pool.get("faces"): pool for pool in list(dict(state.get("hit_dice") or {}).get("pools") or [])
+                                    if isinstance(pool, dict)}
+                    for pool in list(dict(rested_state.get("hit_dice") or {}).get("pools") or []):
+                        if not isinstance(pool, dict) or pool.get("faces") not in self._verified_hit_die_faces(
+                            definition, state, source_authority):
+                            continue
+                        prior = before_pools.get(pool["faces"])
+                        if prior is not None and prior.get("current") != pool.get("current"):
+                            changes.append(CharacterRestChange(
+                                label=f"Hit Dice d{pool['faces']}",
+                                from_value=f"{prior.get('current', 0)}/{prior.get('max', 0)}",
+                                to_value=f"{pool.get('current', 0)}/{pool.get('max', 0)}",
+                            ))
 
             lane_titles = spell_slot_lane_title_map(spellcasting)
             total_lanes = len(lane_titles)
             for slot in list(state.get("spell_slots") or []):
+                lane_id = normalize_spell_slot_lane_id(slot.get("slot_lane_id"))
+                if (source_authority is not None and not source_authority.resource_status(
+                    "spell_slot", f"{lane_id}:{int(slot.get('level') or 0)}"
+                ).is_effective):
+                    continue
                 used = int(slot.get("used") or 0)
                 max_slots = int(slot.get("max") or 0)
                 if used <= 0:
                     continue
-                lane_id = normalize_spell_slot_lane_id(slot.get("slot_lane_id"))
                 lane_title = str(lane_titles.get(lane_id) or "Spell slots").strip()
                 label = f"{self._spell_level_label(int(slot.get('level') or 0))} spell slots"
                 if total_lanes > 1:
@@ -1666,3 +1939,43 @@ class CharacterStateService:
         if match is None:
             raise ValueError(f"Unknown {item_type}: {target_id}")
         return match
+
+
+def _committed_state_action(method):
+    @wraps(method)
+    def wrapped(self, record: CharacterRecord, *args, **kwargs):
+        from .committed_publication import active
+        if not active():
+            return method(self, record, *args, **kwargs)
+        from .committed_character_publication import load_for_write
+        with source_write_transaction():
+            current = load_for_write(
+                SimpleNamespace(state_store=self.state_store),
+                record.definition.campaign_slug, record.definition.character_slug,
+            )
+            if (current is None
+                    or current.committed_revision != record.committed_revision
+                    or current.definition.to_dict() != record.definition.to_dict()
+                    or current.state_record.revision != record.state_record.revision
+                    or current.state_record.state != record.state_record.state):
+                raise CharacterStateConflictError(
+                    "Character source or state changed before the requested action."
+                )
+            return method(self, current, *args, **kwargs)
+    return wrapped
+
+
+for _action_name in (
+    "update_vitals", "update_xianxia_dying_rounds", "update_xianxia_active_state",
+    "update_feature_state", "update_divine_avatar_form", "update_resource",
+    "update_spell_slots", "use_spell_slot_item_action", "update_inventory_quantity",
+    "add_xianxia_inventory_item", "update_xianxia_inventory_item",
+    "remove_xianxia_inventory_item", "update_xianxia_inventory_quantity",
+    "update_xianxia_inventory_equipped_state", "update_currency",
+    "update_player_notes", "update_personal_details", "save_character_sheet_edit",
+    "apply_rest",
+):
+    setattr(
+        CharacterStateService, _action_name,
+        _committed_state_action(getattr(CharacterStateService, _action_name)),
+    )

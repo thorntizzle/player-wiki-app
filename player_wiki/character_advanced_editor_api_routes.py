@@ -9,6 +9,9 @@ from .character_editor import CharacterEditValidationError
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError
 from .character_reconciliation import CharacterPublicationConflict
+from .character_source_repair import load_verified_manual_actions, load_verified_numeric_actions
+from .character_source_authority import build_reconciled_source_authority
+from .committed_publication import active
 
 
 @dataclass(frozen=True)
@@ -106,11 +109,25 @@ def register_character_advanced_editor_api_routes(
                     item_catalog=item_catalog,
                     systems_service=current_app.extensions["systems_service"],
                     linked_feature_authoring_support=linked_feature_authoring,
+                    state=record.state_record.state or {},
+                    state_revision=record.state_record.revision,
+                    verified_manual_actions=(load_verified_manual_actions(campaign_slug, character_slug)
+                                             if active() else ()),
+                    verified_numeric_actions=(load_verified_numeric_actions(campaign_slug, character_slug)
+                                              if active() else ()),
                 )
             )
             definition = dependencies.finalize_character_definition_for_write(
                 campaign_slug, definition
             )
+            prospective_authority = build_reconciled_source_authority(
+                definition=definition, state=record.state_record.state or {},
+                state_revision=record.state_record.revision,
+                systems_service=current_app.extensions["systems_service"],
+                campaign_page_records=campaign_page_records,
+                verified_manual_actions=load_verified_manual_actions(campaign_slug, character_slug),
+                verified_numeric_actions=load_verified_numeric_actions(campaign_slug, character_slug),
+            ) if active() else None
             removed_resource_ids: set[str] = set()
             source_type = str(
                 (record.definition.source or {}).get("source_type") or ""
@@ -130,6 +147,7 @@ def register_character_advanced_editor_api_routes(
             merged_state = dependencies.merge_state_with_definition(
                 definition,
                 record.state_record.state,
+                source_authority=prospective_authority,
                 inventory_quantity_overrides=inventory_quantity_overrides,
                 removed_resource_ids=removed_resource_ids,
             )

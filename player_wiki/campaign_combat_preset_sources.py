@@ -95,6 +95,7 @@ class CampaignCombatPresetSourceResolver:
         dm_content_service,
         systems_service,
         *,
+        character_authority_provider: Callable[[Any], Any] | None = None,
         dm_statblock_batch_loader: DMStatblockBatchLoader | None = None,
         systems_campaign_config_loader: SystemsCampaignConfigLoader | None = None,
         systems_entry_batch_loader: SystemsEntryBatchLoader | None = None,
@@ -102,6 +103,7 @@ class CampaignCombatPresetSourceResolver:
         self.character_repository = character_repository
         self.dm_content_service = dm_content_service
         self.systems_service = systems_service
+        self.character_authority_provider = character_authority_provider
         self._dm_statblock_batch_loader = (
             dm_statblock_batch_loader or self._load_dm_statblocks
         )
@@ -115,7 +117,7 @@ class CampaignCombatPresetSourceResolver:
     def build_character_source_version(self, record: object) -> str:
         """Return the canonical normalized Character combat-seed fingerprint."""
 
-        seed_fields = build_character_combat_snapshot(record)
+        seed_fields = self._character_snapshot(record)
         return self._build_resolved_seed(
             source_kind=COMBAT_SOURCE_KIND_CHARACTER,
             source_ref=str(
@@ -129,6 +131,26 @@ class CampaignCombatPresetSourceResolver:
             temp_hp=int(seed_fields["temp_hp"]),
             movement_total=int(seed_fields["movement_total"]),
         ).source_version
+
+    def _character_snapshot(self, record: object) -> dict[str, int | str]:
+        from .committed_publication import active
+        from .system_policy import is_xianxia_system
+        if not active(get_db()) or is_xianxia_system(
+            getattr(getattr(record, "definition", None), "system", "")
+        ):
+            return build_character_combat_snapshot(record)
+        if self.character_authority_provider is None:
+            raise CampaignCombatPresetSourceValidationError(
+                "Character numeric authority is unavailable for encounter presets."
+            )
+        try:
+            return build_character_combat_snapshot(
+                record, source_authority=self.character_authority_provider(record),
+            )
+        except (TypeError, ValueError) as exc:
+            raise CampaignCombatPresetSourceValidationError(
+                "Character numeric values need repair before encounter preset use."
+            ) from exc
 
     def overlay_source_health_fingerprints(
         self,
@@ -334,6 +356,23 @@ class CampaignCombatPresetSourceResolver:
                 )
             )
         return tuple(prepared)
+
+    def resolve_source_for_action(
+        self, campaign_slug: str, source_kind: str, source_ref: str,
+        *, require_reservation: bool = True,
+    ) -> _ResolvedCombatSeed:
+        """Resolve a source for review, then again in the caller's writer reservation."""
+        from .committed_publication import active
+        from .character_store import source_writer_reserved
+        if active() and require_reservation and not source_writer_reserved(get_db()):
+            raise CampaignCombatPresetSourceValidationError("Combat source reservation is unavailable.")
+        if source_kind not in (COMBAT_SOURCE_KIND_DM_STATBLOCK, COMBAT_SOURCE_KIND_SYSTEMS_MONSTER):
+            raise CampaignCombatPresetSourceValidationError("Choose a valid NPC source.")
+        resolutions = self._resolve_unique_sources(
+            campaign_slug,
+            (CampaignCombatPresetEntryInput(source_kind=source_kind, source_ref=source_ref),),
+        )
+        return self._require_available(resolutions[(source_kind, source_ref)])
 
     def inspect_entries(
         self,
@@ -650,7 +689,11 @@ class CampaignCombatPresetSourceResolver:
             if record is None:
                 resolutions[key] = _SourceResolution(SOURCE_STATUS_MISSING)
                 continue
-            seed_fields = build_character_combat_snapshot(record)
+            try:
+                seed_fields = self._character_snapshot(record)
+            except CampaignCombatPresetSourceValidationError:
+                resolutions[key] = _SourceResolution(SOURCE_STATUS_MISSING)
+                continue
             resolutions[key] = _SourceResolution(
                 SOURCE_STATUS_CURRENT,
                 self._build_resolved_seed(
@@ -699,9 +742,20 @@ class CampaignCombatPresetSourceResolver:
             )
 
     def _resolve_systems_monsters(self, campaign_slug, refs, resolutions) -> None:
+        from .committed_publication import active, read_snapshot
+        if active():
+            read_snapshot(self._resolve_systems_monsters_in_view)(campaign_slug, refs, resolutions)
+        else:
+            self._resolve_systems_monsters_in_view(campaign_slug, refs, resolutions)
+
+    def _resolve_systems_monsters_in_view(self, campaign_slug, refs, resolutions) -> None:
         if not refs:
             return
-        library_slug, seed_by_id = self._systems_campaign_config_loader(campaign_slug)
+        from .committed_publication import active
+        library_slug, seed_by_id = (
+            self._load_systems_campaign_config(campaign_slug)
+            if active() else self._systems_campaign_config_loader(campaign_slug)
+        )
         library = (
             self.systems_service.store.get_library(library_slug)
             if library_slug
@@ -798,6 +852,19 @@ class CampaignCombatPresetSourceResolver:
         self,
         campaign_slug: str,
     ) -> tuple[str, dict[str, dict[str, object]]]:
+        from .committed_publication import active, config as committed_config
+        if active():
+            _, payload = committed_config(campaign_slug)
+            library_slug = default_systems_library_slug(
+                payload.get("systems_library") or payload.get("system")
+            )
+            seed_by_id = {}
+            for item in payload.get("systems_sources") or []:
+                if isinstance(item, dict):
+                    source_id = str(item.get("source_id") or "").strip()
+                    if source_id:
+                        seed_by_id[source_id] = dict(item)
+            return library_slug, seed_by_id
         try:
             campaigns_root = Path(self.character_repository.campaigns_dir).resolve()
             config_path = campaigns_root / campaign_slug / "campaign.yaml"

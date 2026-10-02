@@ -1154,6 +1154,32 @@ def _definition_derivation_hazards(
         for key, value in normalized.items()
         if key not in derived_top_level_fields
     }
+    expected_page_resources = {
+        (operation.payload.feature_id, resource.resource_id)
+        for operation in operations if isinstance(operation.payload, CampaignFeatureGrant)
+        for resource in operation.payload.resources
+    }
+    if expected_page_resources:
+        before_source = dict(candidate_stable.get("source") or {})
+        after_source = dict(normalized_stable.get("source") or {})
+        before_markers = list(before_source.get("source_authorizations") or [])
+        after_markers = list(after_source.get("source_authorizations") or [])
+        issued = [row for row in after_markers if isinstance(row, dict)
+                  and row.get("provenance") == "page_feature_update"
+                  and (row.get("feature_id"),
+                       str(row.get("target_id") or "").removeprefix("resource:"))
+                  in expected_page_resources]
+        if issued and len(issued) == len(after_markers) - len(before_markers):
+            remaining = [row for row in after_markers if row not in issued]
+            if _same(remaining, before_markers):
+                if before_markers or "source_authorizations" in before_source:
+                    after_source["source_authorizations"] = remaining
+                else:
+                    after_source.pop("source_authorizations", None)
+                if "source" not in candidate_stable and not after_source:
+                    normalized_stable.pop("source", None)
+                else:
+                    normalized_stable["source"] = after_source
     if not _same(candidate_stable, normalized_stable):
         warnings.append("Native derivation changed unrelated Character definition data.")
     if str(normalized.get("system") or "").strip() != SUPPORTED_SYSTEM:
@@ -1185,6 +1211,118 @@ def _definition_derivation_hazards(
         )
     )
     return tuple(dict.fromkeys(warnings))
+
+
+def historical_numeric_delta_paths(
+    prior: Mapping[str, Any],
+    final: Mapping[str, Any],
+    *,
+    expected_new_rows: Mapping[str, set[str]] | None = None,
+    ignored_paths: frozenset[str] = frozenset(),
+) -> tuple[str, ...]:
+    """Find numeric rewrites against the stored definition, including omissions.
+
+    Row collections are paired by stable identity, never by their current
+    position.  An ambiguous identity refuses the comparison rather than
+    allowing a different row to satisfy a historical value.
+    """
+    additions = expected_new_rows or {}
+    changes: list[str] = []
+    missing = object()
+
+    def numeric_content(value: Any, path: str) -> bool:
+        if isinstance(value, bool) or value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return True
+        if isinstance(value, str):
+            return bool(
+                re.search(r"\d|\b(?:str|dex|con|int|wis|cha|strength|dexterity|"
+                          r"constitution|intelligence|wisdom|charisma|pb|"
+                          r"proficiency|modifier)\b|[+*/()]", value, re.I)
+                or re.search(r"(?:^|[._])(?:formula|damage|bonus|modifier|"
+                             r"spellcasting_ability|quantity|weight|charges|"
+                             r"currency|uses|maximum|minimum)(?:$|[._])",
+                             path, re.I)
+            )
+        if isinstance(value, Mapping):
+            return any(numeric_content(child, f"{path}.{key}")
+                       for key, child in value.items())
+        if isinstance(value, (list, tuple)):
+            return any(numeric_content(child, path) for child in value)
+        return False
+
+    def row_id(path: str, row: Mapping[str, Any]) -> str:
+        if path == "attacks":
+            return _attack_identity(row)
+        if path == "spellcasting.spells":
+            return _spell_identity(row)
+        for key in (
+            "id", "class_row_id", "source_row_id", "row_id", "slot_lane_id",
+            "level", "name",
+        ):
+            value = row.get(key)
+            if value is not None and not isinstance(value, bool) and str(value).strip():
+                return str(value).strip()
+        return ""
+
+    def indexed(path: str, rows: list[Any]) -> dict[str, Mapping[str, Any]]:
+        result: dict[str, Mapping[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise ValueError(f"Historical numeric row at {path} is ambiguous.")
+            identity = row_id(path, row)
+            if not identity or identity in result:
+                raise ValueError(f"Historical numeric row at {path} has an ambiguous identity.")
+            result[identity] = row
+        return result
+
+    def visit(path: str, before: Any, after: Any) -> None:
+        if path in ignored_paths:
+            return
+        if before is missing or after is missing:
+            present = after if before is missing else before
+            if isinstance(present, Mapping):
+                visit(path, {} if before is missing else before,
+                      {} if after is missing else after)
+            elif isinstance(present, list):
+                visit(path, [] if before is missing else before,
+                      [] if after is missing else after)
+            elif numeric_content(present, path):
+                changes.append(path)
+            return
+        if _same(before, after):
+            return
+        if isinstance(before, Mapping) and isinstance(after, Mapping):
+            for key in sorted(set(before) | set(after)):
+                if not isinstance(key, str):
+                    raise ValueError("Historical numeric definition keys must be text.")
+                child = f"{path}.{key}" if path else key
+                visit(child, before.get(key, missing), after.get(key, missing))
+            return
+        if isinstance(before, list) and isinstance(after, list):
+            if not numeric_content(before, path) and not numeric_content(after, path):
+                return
+            if all(isinstance(row, Mapping) for row in before + after):
+                old_rows, new_rows = indexed(path, before), indexed(path, after)
+                for identity in sorted(set(old_rows) | set(new_rows)):
+                    child = f"{path}[{identity}]"
+                    if identity not in old_rows and identity in additions.get(path, set()):
+                        continue
+                    visit(child, old_rows.get(identity, missing), new_rows.get(identity, missing))
+                return
+            for index in range(max(len(before), len(after))):
+                visit(
+                    f"{path}[{index}]",
+                    before[index] if index < len(before) else missing,
+                    after[index] if index < len(after) else missing,
+                )
+            return
+        if (numeric_content(before, path) or numeric_content(after, path)) and not _same(before, after):
+            changes.append(path)
+
+    visit("", prior, final)
+    return tuple(dict.fromkeys(changes))
 
 
 def _row_family_hazards(

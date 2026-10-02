@@ -1293,8 +1293,14 @@ def import_pdf_character(
         character_dir = config.characters_dir / artifacts.definition.character_slug
         coordinator = app.extensions["character_publication_coordinator"]
         coordinator.recover_key(campaign_slug, artifacts.definition.character_slug)
-        definition_exists = (character_dir / "definition.yaml").exists()
-        import_exists = (character_dir / "import.yaml").exists()
+        from .committed_publication import active
+        activated = active()
+        if activated:
+            prior_committed = repository.get_character(campaign_slug, artifacts.definition.character_slug)
+            definition_exists = import_exists = prior_committed is not None
+        else:
+            definition_exists = (character_dir / "definition.yaml").exists()
+            import_exists = (character_dir / "import.yaml").exists()
         existing_state = state_store.get_state(
             campaign_slug,
             artifacts.definition.character_slug,
@@ -1341,11 +1347,21 @@ def import_pdf_character(
             raise ValueError(
                 "The character target is incomplete and requires repair before import."
             )
-        desired_state = reconcile_imported_state(
-            definition,
-            prior_record.state_record.state,
-            previous_definition=prior_record.definition,
-        )
+        try:
+            reimport_authority = (
+                coordinator.numeric_authority_provider(prior_record, definition)
+                if activated and coordinator.numeric_authority_provider is not None else None
+            )
+            desired_state = reconcile_imported_state(
+                definition,
+                prior_record.state_record.state,
+                previous_definition=prior_record.definition,
+                source_authority=reimport_authority,
+            )
+        except ValueError as exc:
+            raise CharacterImportError(
+                "Reimport needs current Character source or state repair. Inspect the Character and repair the affected source links before retrying."
+            ) from exc
         coordinator.update(
             prior_record,
             definition,
@@ -1354,6 +1370,8 @@ def import_pdf_character(
             expected_revision=prior_record.state_record.revision,
             updated_by_user_id=None,
             operation_kind="pdf_import",
+            reconcile_reimport_state=activated,
+            reimport_source_authority=reimport_authority,
         )
         return CharacterPdfImportResult(
             definition=definition,

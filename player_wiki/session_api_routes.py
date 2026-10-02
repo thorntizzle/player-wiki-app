@@ -15,6 +15,7 @@ from .session_models import (
     build_session_article_systems_source_ref,
     parse_session_article_source_ref,
 )
+from .session_source_presenter import get_pullable_session_wiki_article_payload
 
 
 @dataclass(frozen=True)
@@ -555,52 +556,25 @@ def register_session_article_authoring_routes(
                         created_by_user_id=user.id,
                     )
                 else:
-                    page_record = dependencies.get_pullable_session_wiki_page_record(
-                        campaign,
-                        source_ref,
+                    page_payload = get_pullable_session_wiki_article_payload(
+                        campaign, source_ref,
                         page_store=dependencies.get_campaign_page_store(),
-                        include_body=True,
+                        session_service=session_service,
+                        get_campaign_asset_file=dependencies.get_campaign_asset_file,
+                        guess_campaign_asset_media_type=dependencies.guess_campaign_asset_media_type,
+                        read_bounded_file=dependencies.read_bounded_file,
+                        max_ingress_file_bytes=dependencies.get_max_ingress_file_bytes(),
                     )
-                    if page_record is None:
+                    if page_payload is None:
                         raise CampaignSessionValidationError(
                             "Choose a visible published wiki page or Systems entry before pulling it into the session store."
                         )
-
-                    page_image_upload = None
-                    if page_record.page.image_path:
-                        image_path = dependencies.get_campaign_asset_file(
-                            campaign,
-                            page_record.page.image_path,
-                        )
-                        if image_path is not None:
-                            page_image_upload = session_service.prepare_article_image_upload(
-                                filename=image_path.name,
-                                media_type=dependencies.guess_campaign_asset_media_type(image_path),
-                                data_blob=dependencies.read_bounded_file(
-                                    image_path,
-                                    max_bytes=dependencies.get_max_ingress_file_bytes(),
-                                    message="Wiki page images must stay under 8 MB.",
-                                ),
-                                alt_text=page_record.page.image_alt,
-                                caption=page_record.page.image_caption,
-                            )
-
-                    source_body_markdown = (
-                        page_record.body_markdown.strip()
-                        or page_record.page.summary.strip()
-                    )
-                    if not source_body_markdown and page_image_upload is None:
-                        raise CampaignSessionValidationError(
-                            "The selected wiki page does not have any body text, summary, or image to pull into the session store."
-                        )
                     article = session_service.create_article(
                         campaign_slug,
-                        title=page_record.page.title,
-                        body_markdown=source_body_markdown,
-                        source_page_ref=build_session_article_page_source_ref(
-                            page_record.page_ref
-                        ),
-                        image_upload=page_image_upload,
+                        title=page_payload.title,
+                        body_markdown=page_payload.body_markdown,
+                        source_page_ref=page_payload.source_page_ref,
+                        image_upload=page_payload.image_upload,
                         created_by_user_id=user.id,
                     )
             else:

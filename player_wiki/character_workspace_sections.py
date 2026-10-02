@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 SESSION_CHARACTER_SECTION_LABELS = {
@@ -274,6 +275,22 @@ def build_session_character_sections(
     return sections
 
 
+def _inert_historical_feature_groups(value: object) -> list[dict[str, Any]]:
+    groups = deepcopy([
+        dict(group) for group in list(value or []) if isinstance(group, dict)
+    ])
+    for group in groups:
+        for feature in iter_feature_entries(group.get("entries")):
+            if feature.get("suppressed_historical"):
+                feature["activation_type"] = "passive"
+                feature["combat_availability"] = {"available": False, "reason": "Source needs repair."}
+                feature["metadata"] = ["Needs source repair"]
+                feature["href"] = ""
+                feature["systems_ref"] = {}
+                feature.pop("tracker_ref", None)
+    return groups
+
+
 def build_combat_character_workspace_sections(
     character_detail: dict[str, object],
     equipment_state_manager: dict[str, object],
@@ -281,12 +298,14 @@ def build_combat_character_workspace_sections(
     action_features: list[dict[str, object]] = []
     bonus_action_features: list[dict[str, object]] = []
     reaction_features: list[dict[str, object]] = []
-    feature_groups = [dict(group or {}) for group in list(character_detail.get("feature_groups") or [])]
+    feature_groups = _inert_historical_feature_groups(character_detail.get("feature_groups"))
 
     for group in feature_groups:
         group_title = str(group.get("title") or "Features").strip() or "Features"
         for feature in iter_feature_entries(group.get("entries")):
             feature_payload = dict(feature or {})
+            if feature_payload.get("suppressed_historical"):
+                continue
             feature_payload.pop("children", None)
             feature_payload["group_title"] = group_title
             combat_availability = dict(feature_payload.get("combat_availability") or {})
@@ -482,15 +501,13 @@ def build_combat_character_workspace_sections_payload(
     action_features: list[dict[str, Any]] = []
     bonus_action_features: list[dict[str, Any]] = []
     reaction_features: list[dict[str, Any]] = []
-    feature_groups = [
-        dict(group or {})
-        for group in list(character_detail.get("feature_groups") or [])
-        if isinstance(group, dict)
-    ]
+    feature_groups = _inert_historical_feature_groups(character_detail.get("feature_groups"))
     for group in feature_groups:
         group_title = str(group.get("title") or "Features").strip() or "Features"
         for feature in iter_feature_entries(group.get("entries")):
             feature_payload = dict(feature or {})
+            if feature_payload.get("suppressed_historical"):
+                continue
             combat_availability = dict(feature_payload.get("combat_availability") or {})
             if combat_availability and not bool(combat_availability.get("available", True)):
                 continue

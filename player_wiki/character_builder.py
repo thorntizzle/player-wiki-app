@@ -35,6 +35,7 @@ from .character_campaign_options import (
     normalize_campaign_mechanic_effects,
 )
 from .character_models import CharacterDefinition, CharacterImportMetadata
+from .character_spell_effects import reconcile_formula_row
 from .character_profile import (
     ensure_profile_class_rows,
     profile_class_level_text,
@@ -100,6 +101,7 @@ def _derive_definition_core_sheet_payloads(
     resolved_entries: dict[str, Any] | None = None,
     automatic_prepared_spell_flags_func: Any | None = None,
     transient_effects: dict[str, Any] | None = None,
+    source_authority: Any | None = None,
 ) -> dict[str, Any]:
     return _character_builder_derivation._derive_definition_core_sheet_payloads(
         definition,
@@ -117,6 +119,7 @@ def _derive_definition_core_sheet_payloads(
             automatic_prepared_spell_flags_func
         ),
         transient_effects=transient_effects,
+        source_authority=source_authority,
         resolve_definition_sheet_entries_func=_resolve_definition_sheet_entries,
         effective_item_catalog_for_definition_func=_effective_item_catalog_for_definition,
         effective_spell_catalog_for_definition_func=_effective_spell_catalog_for_definition,
@@ -503,6 +506,7 @@ def build_level_one_character_definition(
     )
     definition = normalize_definition_to_native_model(
         definition,
+        mode="native_create",
         item_catalog=item_catalog,
         spell_catalog=spell_catalog,
         systems_service=builder_context.get("systems_service"),
@@ -4512,6 +4516,10 @@ def _build_level_one_spellcasting(
         "spellcasting_ability": ability_name,
         "spell_save_dc": 8 + proficiency_bonus + modifier,
         "spell_attack_bonus": proficiency_bonus + modifier,
+        "spell_metric_provenance": {
+            "spell_save_dc": {"kind": "formula"},
+            "spell_attack_bonus": {"kind": "formula"},
+        },
         "slot_progression": slot_progression,
         "spells": spell_payloads,
     }
@@ -4576,14 +4584,18 @@ def _build_level_up_spellcasting(
 
     ability_key = next(key for key, label in ABILITY_LABELS.items() if label == ability_name)
     modifier = _ability_modifier(ability_scores[ability_key])
-    return {
+    return reconcile_formula_row(dict(current_definition.spellcasting or {}), {
         "spellcasting_class": class_name,
         "spellcasting_ability": ability_name,
         "spell_save_dc": 8 + proficiency_bonus + modifier,
         "spell_attack_bonus": proficiency_bonus + modifier,
+        "spell_metric_provenance": {
+            "spell_save_dc": {"kind": "formula"},
+            "spell_attack_bonus": {"kind": "formula"},
+        },
         "slot_progression": slot_progression,
         "spells": spell_payloads,
-    }
+    })
 
 
 
@@ -4847,7 +4859,19 @@ def prepare_native_derivation_foundation(
 def normalize_definition_with_prepared_native_foundation(
     definition: CharacterDefinition,
     foundation: PreparedNativeDerivationFoundation,
+    *,
+    source_authority: Any | None = None,
+    mode: str = "historical",
 ) -> CharacterDefinition:
+    if mode not in {"historical", "authoring", "effective", "native_create"}:
+        raise ValueError("Unknown character normalization mode")
+    if mode == "historical":
+        from .committed_publication import active
+
+        if active():
+            return CharacterDefinition.from_dict(deepcopy(definition.to_dict()))
+    if mode in {"authoring", "effective"} and source_authority is None:
+        raise ValueError("Derived normalization requires reconciled source authority")
     payload = deepcopy(definition.to_dict())
     if (
         str(definition.campaign_slug or "") != foundation.campaign_slug
@@ -4900,6 +4924,7 @@ def normalize_definition_with_prepared_native_foundation(
             automatic_prepared_spell_flags_func=(
                 apply_prepared_automatic_spell_flags
             ),
+            source_authority=source_authority,
         )
     )
     selected_derivation_components = (
@@ -4927,7 +4952,18 @@ def normalize_definition_to_native_model(
     resolved_subclass: SystemsEntryRecord | None = None,
     resolved_species: SystemsEntryRecord | None = None,
     resolved_background: SystemsEntryRecord | None = None,
+    source_authority: Any | None = None,
+    mode: str = "historical",
 ) -> CharacterDefinition:
+    if mode not in {"historical", "authoring", "effective", "native_create"}:
+        raise ValueError("Unknown character normalization mode")
+    if mode == "historical":
+        from .committed_publication import active
+
+        if active():
+            return CharacterDefinition.from_dict(deepcopy(definition.to_dict()))
+    if mode in {"authoring", "effective"} and source_authority is None:
+        raise ValueError("Derived normalization requires reconciled source authority")
     if not is_dnd_5e_system(definition.system):
         return CharacterDefinition.from_dict(deepcopy(definition.to_dict()))
     foundation = prepare_native_derivation_foundation(
@@ -4945,6 +4981,8 @@ def normalize_definition_to_native_model(
     return normalize_definition_with_prepared_native_foundation(
         definition,
         foundation,
+        source_authority=source_authority,
+        mode=mode,
     )
 
 
@@ -4957,6 +4995,7 @@ def project_definition_with_transient_effects(
     spell_catalog: dict[str, Any] | None = None,
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
+    source_authority: Any | None = None,
 ) -> CharacterDefinition:
     """Re-derive a read-only D&D projection from a canonical definition.
 
@@ -4996,6 +5035,7 @@ def project_definition_with_transient_effects(
             campaign_page_records=campaign_page_records,
             resolved_entries=resolved_entries,
             transient_effects=effects,
+            source_authority=source_authority,
         )
     )
     return CharacterDefinition.from_dict(payload)

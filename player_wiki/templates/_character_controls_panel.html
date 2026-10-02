@@ -93,6 +93,10 @@
         >
           {{ csrf_input() }}
           <input type="hidden" name="mode" value="{{ 'session' if is_session_mode else 'read' }}">
+          {% if character_controls.delete_committed_revision and character_controls.delete_state_revision %}
+            <input type="hidden" name="expected_definition_revision" value="{{ character_controls.delete_committed_revision }}">
+            <input type="hidden" name="expected_state_revision" value="{{ character_controls.delete_state_revision }}">
+          {% endif %}
           <label class="field">
             <span>Type <code>{{ character.slug }}</code> to confirm</span>
             <input type="text" name="confirm_character_slug" autocomplete="off" spellcheck="false">

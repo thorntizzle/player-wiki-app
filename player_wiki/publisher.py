@@ -77,6 +77,9 @@ class ImportPlan:
 
 
 def load_publish_config(project_root: Path, campaign_slug: str) -> CampaignPublishConfig:
+    from .committed_publication import active
+    if active():
+        raise PublishError("CLI source import requires the committed publication API in activated mode.")
     config_path = project_root / "campaigns" / campaign_slug / "campaign.yaml"
     if not config_path.exists():
         raise PublishError(f"Campaign config not found: {config_path}")
@@ -422,6 +425,9 @@ def promote_draft(
     force: bool = False,
     reveal_after_session: int | None = None,
 ) -> Path:
+    from .committed_publication import active
+    if active():
+        raise PublishError("CLI promotion requires the committed publication API in activated mode.")
     metadata, body = parse_frontmatter(draft_path.read_text(encoding="utf-8"))
     if not metadata:
         raise PublishError(f"Draft file is missing frontmatter: {draft_path}")

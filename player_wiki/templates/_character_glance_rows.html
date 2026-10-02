@@ -11,7 +11,19 @@
       {% if row_index == 1 and character_glance_inline_vitals_enabled %}id="session-vitals"{% endif %}
     >
       {% for stat in row %}
-        {% if row_index == 1 and not character_glance_is_xianxia and character_glance_inline_vitals_enabled and stat.label in ["Current HP", "Temp HP"] %}
+        {% if row_index == 1 and stat.label == "Current HP" and not character.hp_edit_allowed %}
+          <div class="glance-card">
+            <span class="meta">{{ stat.label }} · historical table value</span>
+            <strong>{{ stat.value }}</strong>
+            <small>{{ character.numeric_statuses.get('stats.max_hp', {}).get('status', 'NEEDS REPAIR') }} before HP automation.</small>
+          </div>
+        {% elif row_index == 1 and stat.label == "Hit Dice" and not character.hit_dice_edit_allowed %}
+          <div class="glance-card">
+            <span class="meta">{{ stat.label }} · historical table value</span>
+            <strong>{{ stat.value }}</strong>
+            <small>Hit Die owner verification required before automation.</small>
+          </div>
+        {% elif row_index == 1 and not character_glance_is_xianxia and character_glance_inline_vitals_enabled and stat.label in ["Current HP", "Temp HP"] %}
           <article class="glance-card glance-card--vitals">
             <form
               class="session-vitals-form session-vitals-form--inline {% if loop.index == 1 %}session-vitals-form--inline-current{% else %}session-vitals-form--inline-temp{% endif %}"
@@ -71,18 +83,22 @@
                 <span>{{ stat.label }}</span>
                 <div class="hit-dice-pool-list" aria-label="Hit Dice">
                   {% for pool in character.hit_dice.pools %}
-                    <label class="hit-dice-pool">
-                      <span>{{ pool.label }}</span>
-                      <input
-                        type="number"
-                        name="{{ pool.input_name }}"
-                        value="{{ pool.current }}"
-                        min="0"
-                        max="{{ pool.max }}"
-                        aria-label="{{ pool.label }} Hit Dice"
-                      >
-                      <span>/ {{ pool.max }}</span>
-                    </label>
+                    {% if pool.can_edit | default(true) %}
+                      <label class="hit-dice-pool">
+                        <span>{{ pool.label }}</span>
+                        <input
+                          type="number"
+                          name="{{ pool.input_name }}"
+                          value="{{ pool.current }}"
+                          min="0"
+                          max="{{ pool.max }}"
+                          aria-label="{{ pool.label }} Hit Dice"
+                        >
+                        <span>/ {{ pool.max }}</span>
+                      </label>
+                    {% else %}
+                      <span class="hit-dice-pool">{{ pool.label }} raw {{ pool.current }}/{{ pool.raw_max }} · NEEDS REPAIR</span>
+                    {% endif %}
                   {% endfor %}
                 </div>
               </div>

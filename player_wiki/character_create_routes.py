@@ -8,6 +8,10 @@ from flask import abort, flash, redirect, request, url_for
 from .auth import campaign_scope_access_required
 from .character_builder import CharacterBuildError
 from .character_path_safety import CharacterPathSafetyError
+from .character_source_repair import (
+    SourceRepairError, prepare_native_creation_authorizations,
+    record_confirmed_native_creation_witness,
+)
 from .system_policy import (
     CHARACTER_ROUTE_LANE_DND5E,
     CHARACTER_ROUTE_LANE_XIANXIA,
@@ -25,6 +29,7 @@ class CharacterCreateRouteDependencies:
     get_systems_service: Callable[..., object]
     render_xianxia_character_create_page: Callable[..., object]
     list_builder_campaign_page_records: Callable[..., list[object]]
+    list_visible_character_page_records: Callable[..., list[object]]
     render_character_builder_page: Callable[..., object]
     finalize_character_definition_for_write: Callable[..., object]
     can_manage_campaign_session: Callable[..., bool]
@@ -38,6 +43,9 @@ class CharacterCreateRouteDependencies:
     build_level_one_builder_context: Callable[..., dict[str, object]]
     build_level_one_character_definition: Callable[..., tuple[object, object]]
     build_initial_state: Callable[..., dict[str, object]]
+    get_authenticated_user: Callable[[], object | None]
+    get_current_auth_source: Callable[[], str]
+    get_auth_store: Callable[[], object]
 
 
 def register_character_create_route(
@@ -159,6 +167,13 @@ def register_character_create_route(
                 campaign_slug, builder_context
             )
 
+        if dependencies.get_current_auth_source() == "view_as":
+            abort(403)
+        actor = dependencies.get_authenticated_user()
+        actor_id = getattr(actor, "id", None)
+        if type(actor_id) is not int or actor_id < 1:
+            abort(403)
+
         if not builder_ready:
             flash(
                 "The native character builder needs a supported base class plus enabled Systems species and backgrounds first.",
@@ -180,6 +195,7 @@ def register_character_create_route(
                 campaign_slug,
                 definition,
                 campaign=campaign,
+                mode="historical",
             )
             dependencies.validate_character_slug(definition.character_slug)
         except (CharacterBuildError, CharacterPathSafetyError) as exc:
@@ -188,12 +204,30 @@ def register_character_create_route(
                 campaign_slug, builder_context, status_code=400
             )
 
+        initial_state = dependencies.build_initial_state(definition)
+        markers = ()
+        source_basis_digests = {}
+        source_snapshot_digest = ""
         try:
-            dependencies.publish_new_character(
-                definition,
-                import_metadata,
-                dependencies.build_initial_state(definition),
+            definition, markers, source_basis_digests, source_snapshot_digest = prepare_native_creation_authorizations(
+                definition, initial_state,
+                systems_service=dependencies.get_systems_service(),
+                campaign_page_records=dependencies.list_visible_character_page_records(campaign_slug, campaign),
+            )
+        except SourceRepairError:
+            from .committed_publication import active
+            if active():
+                flash("Character source proof changed. Reload the builder and try again.", "error")
+                return dependencies.render_character_builder_page(
+                    campaign_slug, builder_context, status_code=409
+                )
+            # Creation remains available; no copied provenance becomes proof.
+            markers = ()
+        try:
+            created_record = dependencies.publish_new_character(
+                definition, import_metadata, initial_state,
                 operation_kind="native_create",
+                updated_by_user_id=actor_id,
             )
         except CharacterPathSafetyError as exc:
             flash(str(exc), "error")
@@ -208,7 +242,44 @@ def register_character_create_route(
             return dependencies.render_character_builder_page(
                 campaign_slug, builder_context, status_code=409
             )
-        flash(f"{definition.name} created.", "success")
+        except ValueError as exc:
+            from .committed_publication import active
+            if not active():
+                raise
+            flash(str(exc), "error")
+            return dependencies.render_character_builder_page(
+                campaign_slug, builder_context, status_code=409
+            )
+        witnessed = False
+        if markers:
+            try:
+                def load_current_source_context():
+                    if not dependencies.can_manage_campaign_session(campaign_slug):
+                        raise SourceRepairError("Manager authorization changed after creation.")
+                    current_campaign = dependencies.load_campaign_context(campaign_slug)
+                    return (
+                        dependencies.get_systems_service(),
+                        dependencies.list_visible_character_page_records(campaign_slug, current_campaign),
+                    )
+
+                witnessed = record_confirmed_native_creation_witness(
+                    expected_definition=definition, initial_state=initial_state,
+                    readback_record=created_record, markers=markers,
+                    source_basis_digests=source_basis_digests,
+                    source_snapshot_digest=source_snapshot_digest,
+                    load_current_source_context=load_current_source_context,
+                    actor_id=actor_id, auth_store=dependencies.get_auth_store(),
+                )
+            except Exception:
+                # Publication already succeeded. Report the audit gap without a retry.
+                witnessed = False
+        if witnessed:
+            flash(f"{definition.name} created.", "success")
+        else:
+            flash(
+                f"{definition.name} was created. Its baseline needs manager review before automated totals or resources are used; inspect this Character rather than submitting create again.",
+                "warning",
+            )
         return redirect(
             url_for(
                 "character_read_view",

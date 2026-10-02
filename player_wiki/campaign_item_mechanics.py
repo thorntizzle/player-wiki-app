@@ -58,6 +58,7 @@ CAMPAIGN_ITEM_METADATA_KEYS = (
     "recharge",
     "resource_template_bonuses",
     "spell_support",
+    "spellcasting_modifiers",
     "stealth_disadvantage",
     "strength",
     "type",
@@ -564,6 +565,7 @@ def _merge_item_metadata(base: dict[str, Any], extra: dict[str, Any] | None) -> 
             continue
         if key in {
             "spell_support",
+            "spellcasting_modifiers",
             "defensive_rules",
             "resource_template_bonuses",
             "attack_reminder_rules",

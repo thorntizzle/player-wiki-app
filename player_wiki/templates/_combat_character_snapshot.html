@@ -19,6 +19,9 @@
         {% if selected_combatant.subtitle %}
           <p class="meta">{{ selected_combatant.subtitle }}</p>
         {% endif %}
+        {% if selected_combatant.snapshot_note %}
+          <p class="meta">{{ selected_combatant.snapshot_note }}</p>
+        {% endif %}
       </div>
       <div class="combatant-badges">
         <span class="combat-badge">Round {{ combat_tracker.round_number }}</span>
@@ -76,7 +79,19 @@
             aria-label="Temp HP for {{ selected_combatant.name }}"
           >
         </form>
-        {% if selected_combatant.hit_dice and selected_combatant.hit_dice.pools %}
+      {% else %}
+        <div class="combat-stat">
+          <span class="meta">HP</span>
+          <strong>{{ selected_combatant.current_hp }} / {{ selected_combatant.max_hp }}</strong>
+        </div>
+        <div class="combat-stat">
+          <span class="meta">Temp HP</span>
+          <strong>{{ selected_combatant.temp_hp }}</strong>
+        </div>
+      {% endif %}
+
+      {% if selected_combatant.hit_dice and selected_combatant.hit_dice.pools %}
+        {% if show_inline_editing and selected_combatant.can_edit_hit_dice %}
           <form
             method="post"
             action="{{ url_for('campaign_combat_update_vitals', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
@@ -89,33 +104,27 @@
             <span class="meta">Hit Dice</span>
             <div class="hit-dice-pool-list" aria-label="Hit Dice for {{ selected_combatant.name }}">
               {% for pool in selected_combatant.hit_dice.pools %}
-                <label class="hit-dice-pool">
-                  <span>{{ pool.label }}</span>
-                  <input
-                    class="combat-stat-input combat-stat-input--number"
-                    type="number"
-                    name="{{ pool.input_name }}"
-                    value="{{ pool.current }}"
-                    min="0"
-                    max="{{ pool.max }}"
-                    aria-label="{{ pool.label }} Hit Dice for {{ selected_combatant.name }}"
-                  >
-                  <span>/ {{ pool.max }}</span>
-                </label>
+                {% if pool.can_edit | default(false) %}
+                  <label class="hit-dice-pool">
+                    <span>{{ pool.label }}</span>
+                    <input
+                      class="combat-stat-input combat-stat-input--number"
+                      type="number"
+                      name="{{ pool.input_name }}"
+                      value="{{ pool.current }}"
+                      min="0"
+                      max="{{ pool.max }}"
+                      aria-label="{{ pool.label }} Hit Dice for {{ selected_combatant.name }}"
+                    >
+                    <span>/ {{ pool.max }}</span>
+                  </label>
+                {% else %}
+                  <span class="hit-dice-pool">{{ pool.label }} raw {{ pool.current }}/{{ pool.raw_max }} · NEEDS REPAIR</span>
+                {% endif %}
               {% endfor %}
             </div>
           </form>
-        {% endif %}
-      {% else %}
-        <div class="combat-stat">
-          <span class="meta">HP</span>
-          <strong>{{ selected_combatant.current_hp }} / {{ selected_combatant.max_hp }}</strong>
-        </div>
-        <div class="combat-stat">
-          <span class="meta">Temp HP</span>
-          <strong>{{ selected_combatant.temp_hp }}</strong>
-        </div>
-        {% if selected_combatant.hit_dice and selected_combatant.hit_dice.pools %}
+        {% else %}
           <div class="combat-stat combat-stat--hit-dice">
             <span class="meta">Hit Dice</span>
             <strong>{{ selected_combatant.hit_dice.value }}</strong>
@@ -123,7 +132,7 @@
         {% endif %}
       {% endif %}
 
-      {% if show_inline_editing and selected_combatant.can_edit_resources %}
+      {% if show_inline_editing and selected_combatant.can_edit_movement %}
         <form
           method="post"
           action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"

@@ -3,11 +3,12 @@ from __future__ import annotations
 from .character_ability_inputs import AbilityInputRecoveryRequired, require_resolved_ability_inputs
 
 from collections import Counter
+from copy import deepcopy
 from dataclasses import dataclass
 from re import fullmatch, sub
 from typing import Any, Callable, Mapping, Sequence
 
-from flask import abort, redirect, render_template, request, url_for
+from flask import abort, current_app, redirect, render_template, request, url_for
 
 from .auth import campaign_scope_access_required
 from .csrf import CSRF_FIELD_NAME
@@ -17,6 +18,9 @@ from .character_update_adapters import (
     EquipmentSafeRelinkIntent,
     SourceAccessDecision,
     SystemsItemAddIntent,
+    historical_numeric_delta_paths,
+    _safe_relink_definition_change,
+    _attack_identity,
 )
 from .character_update_apply import (
     CharacterUpdateApplyClassification,
@@ -161,7 +165,9 @@ class CharacterUpdatePreviewRouteDependencies:
     redirect_unsupported_native_character_tools: Callable[..., object]
     get_systems_service: Callable[..., object]
     list_builder_campaign_page_records: Callable[..., list[object]]
+    list_visible_character_page_records: Callable[..., list[object]]
     list_enabled_systems_items: Callable[..., list[object]]
+    list_enabled_systems_entries: Callable[..., list[object]]
     can_access_campaign_systems_entry: Callable[..., bool]
     build_campaign_page_character_option: Callable[..., Mapping[str, Any] | None]
     campaign_page_option_allowed: Callable[..., bool]
@@ -192,6 +198,7 @@ class _UpdateChoice:
 class _SourceFoundation:
     systems_service: object
     campaign_page_records: tuple[object, ...]
+    authority_page_records: tuple[object, ...]
     systems_entries: tuple[object, ...]
     choices: tuple[_UpdateChoice, ...]
 
@@ -299,6 +306,9 @@ def _build_source_foundation(
 ) -> _SourceFoundation:
     page_records = tuple(
         dependencies.list_builder_campaign_page_records(campaign_slug, campaign)
+    )
+    authority_page_records = tuple(
+        dependencies.list_visible_character_page_records(campaign_slug, campaign)
     )
     systems_service = dependencies.get_systems_service()
     systems_entries = tuple(
@@ -468,6 +478,7 @@ def _build_source_foundation(
     return _SourceFoundation(
         systems_service,
         page_records,
+        authority_page_records,
         tuple(
             entry
             for entry in retained_systems_entries
@@ -737,7 +748,7 @@ def _rows_for_normalized_operations(
     return rows
 
 
-def _source_digest(foundation: _SourceFoundation) -> str:
+def _source_digest(foundation: _SourceFoundation, authority_snapshot_digest: str) -> str:
     page_rows = []
     for record in foundation.campaign_page_records:
         page = getattr(record, "page", None)
@@ -748,6 +759,7 @@ def _source_digest(foundation: _SourceFoundation) -> str:
                 "metadata": dict(getattr(record, "metadata", {}) or {}),
                 "body_markdown": str(getattr(record, "body_markdown", "") or ""),
                 "updated_at": str(getattr(record, "updated_at", "") or ""),
+                "committed_revision": getattr(page, "committed_revision", None),
                 "page": {
                     "title": str(getattr(page, "title", "") or ""),
                     "section": str(getattr(page, "section", "") or ""),
@@ -775,7 +787,11 @@ def _source_digest(foundation: _SourceFoundation) -> str:
                 ),
             }
         )
-    return canonical_digest({"pages": page_rows, "systems": systems_rows})
+    return canonical_digest({
+        "pages": page_rows,
+        "systems": systems_rows,
+        "authority_snapshot": authority_snapshot_digest,
+    })
 
 
 def _policy_digest(foundation: _SourceFoundation) -> str:
@@ -826,19 +842,284 @@ def _prepare_recompute(
         campaign_page_records=list(foundation.campaign_page_records),
     )
 
+    from .character_source_authority import (
+        build_reconciled_source_authority, numeric_target_values,
+    )
+    from .committed_publication import active
+    from .character_source_repair import (
+        load_verified_manual_actions, load_verified_numeric_actions,
+        page_feature_authorization_record, add_numeric_authorization,
+    )
+    from .character_update_planner import (
+        CampaignEquipmentAdd, CampaignFeatureGrant, EquipmentSafeRelink,
+        SystemsItemAdd,
+    )
+    from .committed_character_publication import config
+
+    state = dict(record.state_record.state or {})
+    revision = record.state_record.revision
+    authority_state = state
+    authority_revision = revision
+    activated = active()
+    manual_actions = load_verified_manual_actions(campaign_slug, character_slug) if activated else ()
+    numeric_actions = load_verified_numeric_actions(campaign_slug, character_slug) if activated else ()
+    reviewed_config_revision = config(campaign_slug)[0]["revision"] if activated else None
+    pending_numeric_actions: list[dict[str, Any]] = []
+    pending_markers: list[dict[str, Any]] = []
+
+    def source_authority(definition: object, state_payload: Mapping[str, Any]):
+        return build_reconciled_source_authority(
+            definition=definition, state=dict(state_payload),
+            state_revision=authority_revision,
+            systems_service=foundation.systems_service,
+            campaign_page_records=list(foundation.authority_page_records),
+            verified_manual_actions=manual_actions,
+            verified_numeric_actions=(*numeric_actions, *pending_numeric_actions),
+        )
+
+    baseline_authority = source_authority(record.definition, state) if activated else None
+    raw_numeric = numeric_target_values(record.definition, state) if activated else {}
+    def unverified_target(key: tuple[str, str, str]) -> bool:
+        if key[0] in {"field", "proficiency"}:
+            return not baseline_authority.field_status(key[1]).is_effective
+        if key[0] == "resource":
+            kind, _, stable_id = key[1].partition(":")
+            return not baseline_authority.resource_status(kind, stable_id).is_effective
+        if key[0] == "spell_metric":
+            _, family, row_id, metric = key[1].split(":", 3)
+            return not baseline_authority.formula_metric_verified(family, row_id, metric)
+        if key[0] == "spell_choice":
+            return key[1].removeprefix("spell_choice:") not in baseline_authority.verified_spell_choices
+        return True
+
+    unverified_numeric = (
+        {key: value for key, value in raw_numeric.items() if unverified_target(key)}
+        if activated else {}
+    )
     # A relink cannot hide an unknown input by removing its old floor.
     baseline = dependencies.normalize_definition_with_prepared_native_foundation(
         record.definition, native_foundation,
+        source_authority=baseline_authority,
+        mode="effective" if activated else "historical",
     )
     require_resolved_ability_inputs(baseline)
 
     def normalize_definition(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        pending_numeric_actions.clear()
+        pending_markers.clear()
         definition = dependencies.character_definition_from_dict(dict(payload))
         normalized = dependencies.normalize_definition_with_prepared_native_foundation(
             definition,
             native_foundation,
+            source_authority=(source_authority(definition, authority_state)
+                              if activated else None),
+            mode="effective" if activated else "historical",
         )
         require_resolved_ability_inputs(normalized)
+        if activated:
+            final_values = numeric_target_values(normalized, state)
+            if any(key not in final_values or final_values[key] != raw
+                   for key, raw in unverified_numeric.items()):
+                raise ValueError("Unverified historical numeric values need review before this update.")
+            resource_grants = [
+                (operation.payload, resource)
+                for operation in prepared.operations
+                if isinstance(operation.payload, CampaignFeatureGrant)
+                for resource in operation.payload.resources
+                if not any(str(row.get("id") or "").strip() == resource.resource_id
+                           for row in list(record.definition.resource_templates or [])
+                           if isinstance(row, dict))
+            ]
+            if resource_grants:
+                basis_authority = source_authority(normalized, state)
+                action_id = canonical_digest({
+                    "character": character_slug,
+                    "prior_definition": record.definition.to_dict(),
+                    "prior_state": state, "state_revision": revision,
+                    "operations": operations,
+                    "source_snapshot": baseline_authority.source_snapshot_digest,
+                    "config_revision": reviewed_config_revision,
+                })
+                marked_payload = dict(normalized.to_dict())
+                for grant, resource in resource_grants:
+                    templates = [row for row in normalized.resource_templates
+                                 if isinstance(row, dict)
+                                 and str(row.get("id") or "").strip() == resource.resource_id]
+                    pages = [row for row in foundation.authority_page_records
+                             if _page_ref(row) == grant.page_ref]
+                    if len(templates) != 1 or len(pages) != 1:
+                        raise ValueError("Current approved page resource proof is unavailable.")
+                    page_revision = getattr(getattr(pages[0], "page", None),
+                                            "committed_revision", None)
+                    target = f"resource:{resource.resource_id}"
+                    basis = basis_authority.resource_basis_digest(target)
+                    if basis is None:
+                        raise ValueError("Current approved page resource proof is unavailable.")
+                    marker = page_feature_authorization_record(
+                        definition=normalized, state=state, template=dict(templates[0]),
+                        feature_id=grant.feature_id, page_ref=grant.page_ref,
+                        page_revision=page_revision, source_basis_digest=basis,
+                        source_snapshot_digest=baseline_authority.source_snapshot_digest,
+                        operation_digest=action_id, config_revision=reviewed_config_revision,
+                    )
+                    marked_payload = add_numeric_authorization(marked_payload, marker)
+                    pending_markers.append(marker)
+                    pending_numeric_actions.append({"authorization": marker,
+                                                    "source_basis_digest": basis})
+                normalized = dependencies.character_definition_from_dict(marked_payload)
+            # The owner-value map above is intentionally narrow. Compare the
+            # stored definition itself with the exact bytes the planner would
+            # publish, including nested numeric-bearing formulas and omissions.
+            expected_rows = {
+                "features": {op.payload.feature_id for op in prepared.operations
+                             if isinstance(op.payload, CampaignFeatureGrant)},
+                "equipment_catalog": {op.payload.equipment_id for op in prepared.operations
+                                      if isinstance(op.payload,
+                                                    (CampaignEquipmentAdd, SystemsItemAdd))},
+                "resource_templates": {resource.resource_id
+                                       for op in prepared.operations
+                                       if isinstance(op.payload, CampaignFeatureGrant)
+                                       for resource in op.payload.resources
+                                       if any(marker.get("target_id") ==
+                                              f"resource:{resource.resource_id}"
+                                              for marker in pending_markers)},
+            }
+            ignored = frozenset({"source.source_authorizations"})
+            raw_definition = record.definition.to_dict()
+            final_definition = normalized.to_dict()
+            # Inspect every historical number after removing only the source
+            # fields newly attached by an exact, currently approved relink.
+            numeric_comparison = deepcopy(final_definition)
+            raw_equipment = list(raw_definition.get("equipment_catalog") or [])
+            final_equipment = list(final_definition.get("equipment_catalog") or [])
+            comparison_equipment = list(numeric_comparison.get("equipment_catalog") or [])
+            for operation in prepared.operations:
+                payload = operation.payload
+                if not isinstance(payload, EquipmentSafeRelink):
+                    continue
+                equipment_id = payload.equipment_id
+                if sum(getattr(op.payload, "equipment_id", None) == equipment_id
+                       for op in prepared.operations) != 1:
+                    continue
+                old_rows = [row for row in raw_equipment if isinstance(row, Mapping)
+                            and str(row.get("id") or "").strip() == equipment_id]
+                new_rows = [row for row in final_equipment if isinstance(row, Mapping)
+                            and str(row.get("id") or "").strip() == equipment_id]
+                comparison_rows = [row for row in comparison_equipment
+                                   if isinstance(row, Mapping)
+                                   and str(row.get("id") or "").strip() == equipment_id]
+                if (len(old_rows) != 1 or len(new_rows) != 1
+                        or len(comparison_rows) != 1
+                        or not payload.source.policy_allowed
+                        or payload.source.ambiguous
+                        or payload.source.choice_bearing):
+                    continue
+                old_row, new_row = old_rows[0], new_rows[0]
+                if (old_row.get("page_ref") not in (None, "")
+                        or old_row.get("systems_ref") not in (None, {})):
+                    continue
+                source_kind = SourceKind(payload.target_source.kind)
+                if source_kind is SourceKind.CAMPAIGN_PAGE:
+                    # A previous option, especially one containing a number,
+                    # remains subject to the historical numeric guard.
+                    if old_row.get("campaign_option") not in (None, {}):
+                        continue
+                    page_records = [row for row in foundation.campaign_page_records
+                                    if _page_ref(row) == payload.target_source.value]
+                    if len(page_records) != 1:
+                        continue
+                    page_record = page_records[0]
+                    page = getattr(page_record, "page", None)
+                    section = str(getattr(page, "section", "") or "").strip()
+                    current_option = dict(
+                        dependencies.build_campaign_page_character_option(
+                            page_record,
+                            default_kind="item" if section == "Items" else "feature",
+                        ) or {}
+                    ) or None
+                    if (dependencies.campaign_option_is_choice_bearing(current_option or {})
+                            or not dependencies.campaign_page_option_allowed(
+                                page_record, field_kind="campaign_page_item",
+                                campaign_option=current_option or {},
+                            )
+                            or payload.definition.get("campaign_option") != current_option):
+                        continue
+                    exempt_fields = ("page_ref", "campaign_option")
+                elif source_kind is SourceKind.SYSTEMS_ENTRY:
+                    entries = [entry for entry in foundation.systems_entries
+                               if _entry_key(entry) == payload.target_source.value]
+                    if len(entries) != 1 or str(getattr(entries[0], "entry_type", "") or "").strip().casefold() != "item":
+                        continue
+                    exempt_fields = ("systems_ref",)
+                else:
+                    continue
+                expected_option = payload.definition.get("campaign_option")
+                if (not _safe_relink_definition_change(
+                        old_row, payload.definition, payload.target_source,
+                        has_campaign_option_expectation=source_kind is SourceKind.CAMPAIGN_PAGE,
+                        expected_campaign_option=expected_option,
+                    ) or not _safe_relink_definition_change(
+                        old_row, new_row, payload.target_source,
+                        has_campaign_option_expectation=source_kind is SourceKind.CAMPAIGN_PAGE,
+                        expected_campaign_option=expected_option,
+                    ) or any(new_row.get(field) != payload.definition.get(field)
+                             for field in exempt_fields)):
+                    continue
+                comparison_row = comparison_rows[0]
+                for field in exempt_fields:
+                    if field in old_row:
+                        comparison_row[field] = deepcopy(old_row[field])
+                    else:
+                        comparison_row.pop(field, None)
+            deltas = historical_numeric_delta_paths(
+                raw_definition, numeric_comparison,
+                expected_new_rows=expected_rows, ignored_paths=ignored,
+            )
+            baseline_deltas = set(historical_numeric_delta_paths(
+                raw_definition, baseline.to_dict(), ignored_paths=ignored,
+            ))
+            if deltas:
+                projection = prepared.project_semantics(
+                    raw_definition,
+                    {"definition": final_definition, "state": state}, state,
+                )
+                if projection.warnings:
+                    raise ValueError("Historical numeric review projection is ambiguous.")
+                disclosed = {(SemanticCategory(row.category), row.identity)
+                             for row in projection.rows}
+                source_change = any(
+                    isinstance(op.payload, (CampaignFeatureGrant,
+                                            CampaignEquipmentAdd, SystemsItemAdd,
+                                            EquipmentSafeRelink))
+                    and op.payload.source.policy_allowed
+                    and not op.payload.source.ambiguous
+                    and not op.payload.source.choice_bearing
+                    for op in prepared.operations
+                )
+                final_authority = source_authority(normalized, state)
+                attacks = {_attack_identity(row): row
+                           for row in normalized.attacks or []
+                           if isinstance(row, dict)}
+                for path in deltas:
+                    if path in baseline_deltas or not source_change:
+                        raise ValueError("Historical numeric values need review before this update.")
+                    if path == "stats.armor_class":
+                        allowed = (
+                            (SemanticCategory.ARMOR_CLASS, "armor-class") in disclosed
+                            and final_authority.field_status("stats.armor_class").is_effective
+                        )
+                    elif path.startswith("attacks["):
+                        attack_id = path.removeprefix("attacks[").split("]", 1)[0]
+                        attack = attacks.get(attack_id)
+                        allowed = (
+                            attack is not None
+                            and (SemanticCategory.ATTACKS, attack_id) in disclosed
+                            and final_authority.attack_inputs_effective(attack, normalized)
+                        )
+                    else:
+                        allowed = False
+                    if not allowed:
+                        raise ValueError("Historical numeric values need review before this update.")
         return dict(normalized.to_dict())
 
     def merge_state(
@@ -852,6 +1133,8 @@ def _prepare_recompute(
             dependencies.merge_state_with_definition(
                 definition,
                 dict(state_payload),
+                source_authority=(source_authority(definition, state_payload)
+                                  if activated else None),
             )
         )
 
@@ -877,10 +1160,16 @@ def _prepare_recompute(
     )
 
     def readback_semantic_rows(readback_record: object) -> Sequence[object]:
-        derived = prepared.derive(
-            dict(readback_record.definition.to_dict()),
-            dict(readback_record.state_record.state or {}),
-        )
+        nonlocal authority_state, authority_revision
+        prior_state, prior_revision = authority_state, authority_revision
+        authority_state = dict(readback_record.state_record.state or {})
+        authority_revision = readback_record.state_record.revision
+        try:
+            derived = prepared.derive(
+                dict(readback_record.definition.to_dict()), authority_state,
+            )
+        finally:
+            authority_state, authority_revision = prior_state, prior_revision
         if tuple(getattr(derived, "warnings", ())):
             raise ValueError("Character update readback derivation returned warnings.")
         projection = prepared.project_semantics(
@@ -898,14 +1187,67 @@ def _prepare_recompute(
             "derived_character": getattr(plan, "derived_character", None),
         }
     )
+    reviewed_authority = None
+    def refresh_review_basis() -> tuple[str, str]:
+        context = dependencies.load_character_apply_context(
+            campaign_slug, character_slug,
+        )
+        if context is None:
+            raise ValueError("Reviewed Character source is unavailable.")
+        current_campaign, _ = context
+        current_foundation = _build_source_foundation(
+            dependencies, campaign_slug, current_campaign, record,
+        )
+        current_authority = build_reconciled_source_authority(
+            definition=record.definition, state=state, state_revision=revision,
+            systems_service=current_foundation.systems_service,
+            campaign_page_records=list(current_foundation.authority_page_records),
+            verified_manual_actions=load_verified_manual_actions(campaign_slug, character_slug),
+            verified_numeric_actions=load_verified_numeric_actions(campaign_slug, character_slug),
+        )
+        return (
+            _source_digest(current_foundation, current_authority.source_snapshot_digest),
+            _policy_digest(current_foundation),
+        )
+    if activated and isinstance(getattr(plan, "candidate_definition", None), Mapping):
+        derived = getattr(plan, "derived_character", None)
+        candidate_payload = (derived.get("definition") if isinstance(derived, Mapping)
+                             else None)
+        if not isinstance(candidate_payload, Mapping):
+            raise ValueError("Reviewed Character candidate is unavailable.")
+        candidate_definition = dependencies.character_definition_from_dict(
+            dict(candidate_payload)
+        )
+        coordinator = current_app.extensions["character_publication_coordinator"]
+        provider = coordinator.numeric_authority_provider
+        if not callable(provider):
+            raise ValueError("Reviewed Character source authority is unavailable.")
+        reviewed_authority = provider(record, candidate_definition)
+        if pending_markers:
+            from .character_source_authority import with_pending_page_feature_witnesses
+            reviewed_authority = with_pending_page_feature_witnesses(
+                reviewed_authority, candidate_definition, state, tuple(pending_markers),
+            )
+        if reviewed_authority is None:
+            raise ValueError("Reviewed Character source authority is unavailable.")
+        if reviewed_authority.source_snapshot_digest != baseline_authority.source_snapshot_digest:
+            raise ValueError("Character source changed during update review.")
+        if config(campaign_slug)[0]["revision"] != reviewed_config_revision:
+            raise ValueError("Character source changed during update review.")
     return CharacterUpdateRecompute(
         record=record,
         plan=plan,
         operations=operations,
-        source_digest=_source_digest(foundation),
+        source_digest=_source_digest(
+            foundation, baseline_authority.source_snapshot_digest if activated else "closed"
+        ),
         policy_digest=_policy_digest(foundation),
         native_digest=native_digest,
         readback_semantic_rows=readback_semantic_rows,
+        reviewed_authority=reviewed_authority,
+        reviewed_config_revision=reviewed_config_revision,
+        pending_page_feature_markers=tuple(pending_markers),
+        refresh_review_basis=refresh_review_basis if activated else None,
     )
 
 
@@ -1370,6 +1712,9 @@ def register_character_update_preview_route(
         ),
         methods=("GET", "POST"),
     )
+
+    from .character_source_repair_routes import register_character_source_repair_route
+    register_character_source_repair_route(app, dependencies=dependencies)
 
 
 __all__ = [

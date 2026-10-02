@@ -281,6 +281,7 @@ def build_dnd_character_read_shell_projection(
         campaign=campaign,
         definition=record.definition,
         state=record.state_record.state or {},
+        state_revision=record.state_record.revision,
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
         components=_DND_READ_SHELL_COMPONENTS,

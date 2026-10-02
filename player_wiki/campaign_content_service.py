@@ -90,6 +90,9 @@ class PreparedCampaignPageWrite:
     metadata: dict[str, Any]
     body_markdown: str = field(repr=False, compare=False)
     rendered_markdown: bytes = field(repr=False, compare=False)
+    committed_revision: int | None = None
+    committed_config_revision: int | None = None
+    expected_updated_at: str | None = None
 
 
 @dataclass(slots=True)
@@ -234,6 +237,10 @@ def _normalize_campaign_config_updates(updates: dict[str, Any]) -> dict[str, Any
 
 def get_campaign_config_file(campaigns_dir: Path, campaign_slug: str) -> CampaignConfigRecord:
     config_path = campaigns_dir / campaign_slug / "campaign.yaml"
+    from .committed_publication import active, config
+    if active():
+        row, value = config(campaign_slug)
+        return CampaignConfigRecord(campaign_slug, config_path, value, row["committed_at"])
     if not config_path.exists():
         raise FileNotFoundError(f"Campaign config not found: {config_path}")
     return _load_campaign_config_record(config_path)
@@ -245,6 +252,9 @@ def update_campaign_config_file(
     *,
     updates: dict[str, Any],
 ) -> CampaignConfigRecord:
+    from .committed_publication import active, publish_config
+    if active():
+        return publish_config(campaigns_dir, campaign_slug, updates)
     record = get_campaign_config_file(campaigns_dir, campaign_slug)
     normalized_updates = _normalize_campaign_config_updates(updates)
     updated_config = dict(record.config)
@@ -313,6 +323,7 @@ def prepare_campaign_page_write(
     metadata: dict[str, Any],
     body_markdown: str,
     page_store: CampaignPageStore,
+    expected_updated_at: str | None = None,
 ) -> PreparedCampaignPageWrite:
     """Normalize and validate one page mutation without publishing it."""
 
@@ -359,6 +370,9 @@ def prepare_campaign_page_write(
         normalized_metadata,
         normalized_body_markdown,
     ).encode("utf-8")
+    from .committed_publication import active, revision
+    committed_revision = revision(campaign.slug, "page", normalized_page_ref) if active() else None
+    config_revision = revision(campaign.slug, "config") if active() else None
     return PreparedCampaignPageWrite(
         campaign_slug=campaign.slug,
         page_ref=normalized_page_ref,
@@ -368,6 +382,9 @@ def prepare_campaign_page_write(
         metadata=normalized_metadata,
         body_markdown=normalized_body_markdown,
         rendered_markdown=rendered_markdown,
+        committed_revision=committed_revision,
+        committed_config_revision=config_revision,
+        expected_updated_at=expected_updated_at,
     )
 
 
@@ -379,6 +396,9 @@ def write_campaign_page_file(
     body_markdown: str,
     page_store: CampaignPageStore,
 ) -> CampaignPageFileRecord:
+    from .committed_publication import active
+    if active():
+        raise CampaignContentError("Use committed page reconciliation for this publication.")
     prepared = prepare_campaign_page_write(
         campaign,
         page_ref,
@@ -435,6 +455,9 @@ def delete_campaign_page_file(
     *,
     page_store: CampaignPageStore,
 ) -> CampaignPageFileRecord | None:
+    from .committed_publication import active
+    if active():
+        raise CampaignContentError("Use committed page reconciliation for this deletion.")
     existing = get_campaign_page_file(campaign, page_ref, page_store=page_store)
     if existing is None:
         return None
@@ -679,11 +702,37 @@ def delete_campaign_asset_file(campaign: Campaign, asset_ref: str) -> CampaignAs
 
 def _load_character_file_record(campaigns_dir: Path, campaign_slug: str, character_slug: str) -> CampaignCharacterFileRecord | None:
     from .character_reconciliation import is_character_reconciliation_protected
+    from .committed_publication import active
 
     try:
         validate_character_slug(character_slug)
     except CharacterPathSafetyError:
         return None
+    if active():
+        from .committed_character_publication import exact_character, portrait_bytes
+        from .db import get_db
+        connection = get_db()
+        owned = not connection.in_transaction
+        if owned:
+            connection.execute("BEGIN")
+        try:
+            source = exact_character(campaign_slug, character_slug, connection=connection)
+            if source is None:
+                return None
+            portrait_bytes(campaign_slug, character_slug, connection=connection)
+            config = load_campaign_character_config(campaigns_dir, campaign_slug)
+            if not config.characters_dir.resolve().is_relative_to(config.campaign_dir.resolve()):
+                raise CampaignContentError("Committed Character directory is unsafe.")
+            return CampaignCharacterFileRecord(
+                character_slug=character_slug,
+                character_dir=resolve_character_path(config.characters_dir, character_slug),
+                definition=CharacterDefinition.from_dict(yaml.safe_load(source["primary_bytes"].decode("utf-8"))),
+                import_metadata=CharacterImportMetadata.from_dict(yaml.safe_load(source["secondary_bytes"].decode("utf-8"))),
+                updated_at=source["committed_at"],
+            )
+        finally:
+            if owned:
+                connection.rollback()
     if is_character_reconciliation_protected(campaign_slug, character_slug):
         return None
     config = load_campaign_character_config(campaigns_dir, campaign_slug)
@@ -820,6 +869,74 @@ def write_campaign_character_file(
         default_import_payload["import_status"] = "managed"
     import_metadata = CharacterImportMetadata.from_dict(default_import_payload)
 
+    from .committed_publication import active
+    if active():
+        if coordinator is None:
+            raise CampaignContentError("Activated Character publication coordinator is unavailable.")
+        prior_record = coordinator.repository.get_character(campaign_slug, character_slug)
+        if prior_record is None:
+            from .db import get_db
+            if get_db().execute(
+                "SELECT 1 FROM committed_source_current WHERE campaign_slug=? "
+                "AND object_kind='character' AND object_ref=?", (campaign_slug, character_slug)
+            ).fetchone():
+                raise CampaignContentError("Character committed proof needs manager repair.")
+            published = coordinator.create(definition, import_metadata, build_initial_state(definition),
+                                           operation_kind="content_api_create")
+            created = True
+        else:
+            if is_dnd_5e_system(definition.system):
+                from .character_equipment_activation import reconcile_equipment_state_for_raw_update
+                desired_state = reconcile_equipment_state_for_raw_update(
+                    definition, prior_record.state_record.state
+                )
+                authority_provider = getattr(coordinator, "numeric_authority_provider", None)
+                source_authority = (
+                    authority_provider(prior_record, definition)
+                    if callable(authority_provider) else None
+                )
+                validated_state = state_store.prepare_initial_state(
+                    definition, desired_state, source_authority=source_authority,
+                    previous_state=prior_record.state_record.state,
+                ).validated_state
+                baseline_state = state_store.prepare_initial_state(
+                    definition, prior_record.state_record.state,
+                    source_authority=source_authority,
+                    previous_state=prior_record.state_record.state,
+                ).validated_state
+                if (any(validated_state.get(key) != baseline_state.get(key)
+                        for key in set(validated_state) | set(baseline_state)
+                        if key not in {"inventory", "equipment_activation"})
+                        or list(validated_state.get("inventory") or [])[:len(baseline_state.get("inventory") or [])]
+                        != list(baseline_state.get("inventory") or [])):
+                    raise CampaignContentError(
+                        "Raw DND Character update would alter SQLite state beyond new equipment rows."
+                    )
+            else:
+                desired_state = merge_state_with_definition(definition, prior_record.state_record.state)
+            published = coordinator.update(
+                prior_record, definition, import_metadata, desired_state,
+                expected_revision=prior_record.state_record.revision,
+                operation_kind="content_api_update",
+            )
+            created = False
+        from .db import get_db
+        generation = get_db().execute(
+            "SELECT committed_at FROM committed_source_generations WHERE campaign_slug=? "
+            "AND object_kind='character' AND object_ref=? AND revision=?",
+            (campaign_slug, character_slug, published.committed_revision),
+        ).fetchone()
+        if generation is None:
+            raise CampaignContentError("Committed Character acknowledgement is unavailable.")
+        return CampaignCharacterFileRecord(
+            character_slug=character_slug,
+            character_dir=resolve_character_path(config.characters_dir, character_slug),
+            definition=published.definition,
+            import_metadata=published.import_metadata,
+            updated_at=generation["committed_at"],
+            state_created=created,
+        )
+
     try:
         character_dir = resolve_character_path(config.characters_dir, character_slug)
         definition_path = resolve_character_path(config.characters_dir, character_slug, "definition.yaml")
@@ -877,14 +994,22 @@ def write_campaign_character_file(
             )
         if is_dnd_5e_system(definition.system):
             from .character_equipment_activation import reconcile_equipment_state_for_raw_update
+            authority_provider = getattr(coordinator, "numeric_authority_provider", None)
+            source_authority = authority_provider(prior_record, definition) if callable(authority_provider) else None
             desired_state = reconcile_equipment_state_for_raw_update(
                 definition, prior_record.state_record.state
             )
-            validated_state = state_store.prepare_initial_state(definition, desired_state).validated_state
+            validated_state = state_store.prepare_initial_state(
+                definition, desired_state,
+                source_authority=source_authority,
+                previous_state=prior_record.state_record.state,
+            ).validated_state
             # Compare against the same validator pass the pre-cutover raw PUT
             # already performed on its byte-for-byte prior-state input.
             baseline_state = state_store.prepare_initial_state(
-                definition, prior_record.state_record.state
+                definition, prior_record.state_record.state,
+                source_authority=source_authority,
+                previous_state=prior_record.state_record.state,
             ).validated_state
             if (any(validated_state.get(key) != baseline_state.get(key)
                     for key in set(validated_state) | set(baseline_state)
@@ -954,6 +1079,8 @@ def delete_campaign_character_file(
     operation_kind: str = "content_api",
     actor_user_id: int | None = None,
     audit_source: str | None = None,
+    expected_definition_revision: int | None = None,
+    expected_state_revision: int | None = None,
 ) -> DeletedCharacterContent | None:
     from .character_reconciliation import CharacterDeletionError
 
@@ -974,6 +1101,8 @@ def delete_campaign_character_file(
             operation_kind=operation_kind,
             actor_user_id=actor_user_id,
             audit_source=audit_source,
+            expected_definition_revision=expected_definition_revision,
+            expected_state_revision=expected_state_revision,
         )
     except CharacterDeletionError as exc:
         raise CampaignContentError(str(exc)) from exc

@@ -4,6 +4,7 @@ import json
 import hashlib
 import time
 from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -186,6 +187,7 @@ class CampaignPageStore:
         self._lock = Lock()
         self._content_fingerprints: dict[str, tuple] = {}
         self._last_check_monotonic: dict[str, float] = {}
+        self.mirror_conflicts: dict[str, tuple[str, ...]] = {}
 
     def sync_campaign_pages(self, campaign_slug: str, content_dir: Path | None) -> None:
         if content_dir is None:
@@ -205,6 +207,9 @@ class CampaignPageStore:
             return pages, self._content_fingerprints[campaign_slug]
 
     def count_pages(self, campaign_slug: str) -> int:
+        from .committed_publication import active, page_rows
+        if active():
+            return len(page_rows(campaign_slug))
         row = get_db().execute(
             "SELECT COUNT(*) AS count FROM campaign_pages WHERE campaign_slug = ?",
             (campaign_slug,),
@@ -217,6 +222,12 @@ class CampaignPageStore:
         *,
         content_dir: Path | None = None,
     ) -> list[Page]:
+        from .committed_publication import active, page_rows, read_snapshot
+        if active():
+            @read_snapshot
+            def committed_pages():
+                return sorted([self._map_page(row, include_body=False) for row in page_rows(campaign_slug)], key=page_sort_key)
+            return committed_pages()
         if content_dir is not None:
             self._ensure_campaign_pages_current(campaign_slug, content_dir)
 
@@ -239,6 +250,9 @@ class CampaignPageStore:
         content_dir: Path | None = None,
         include_body: bool = False,
     ) -> list[CampaignPageRecord]:
+        from .committed_publication import active, page_rows
+        if active():
+            return sorted([self._map_record(row, include_body=include_body) for row in page_rows(campaign_slug)], key=lambda item: (*page_sort_key(item.page), item.page_ref))
         if content_dir is not None:
             self._ensure_campaign_pages_current(campaign_slug, content_dir)
 
@@ -294,6 +308,19 @@ class CampaignPageStore:
             """,
             (campaign_slug, query_limit, query_offset),
         ).fetchall()
+        from .committed_publication import active, page_row, config
+        if active():
+            _, settings = config(campaign_slug)
+            proved = []
+            for row in rows:
+                try:
+                    proof = page_row(campaign_slug, row["page_ref"])
+                except ValueError:
+                    continue
+                if (proof is not None and proof["published"] == 1 and proof["section"] == "Mechanics"
+                        and proof["reveal_after_session"] <= int(settings["current_session"])):
+                    proved.append(proof)
+            rows = proved
         if offset:
             if (
                 not rows
@@ -367,6 +394,18 @@ class CampaignPageStore:
             """,
             (campaign_slug, *page_refs),
         ).fetchall()
+        from .committed_publication import active, page_row, config
+        if active():
+            _, settings = config(campaign_slug)
+            proved = []
+            for row in rows:
+                try:
+                    proof = page_row(campaign_slug, row["page_ref"])
+                except ValueError:
+                    continue
+                if proof is not None and proof["reveal_after_session"] <= int(settings["current_session"]):
+                    proved.append(proof)
+            rows = proved
         by_page_ref = {str(row["page_ref"]): row for row in rows}
         resolutions: dict[SourceHealthReference, SourceHealthResolution] = {}
         for reference in page_references:
@@ -393,6 +432,10 @@ class CampaignPageStore:
         content_dir: Path | None = None,
         include_body: bool = True,
     ) -> CampaignPageRecord | None:
+        from .committed_publication import active, page_row
+        if active():
+            row = page_row(campaign_slug, self.normalize_page_ref(page_ref))
+            return self._map_record(row, include_body=include_body) if row is not None else None
         if content_dir is not None:
             self._ensure_campaign_pages_current(campaign_slug, content_dir)
 
@@ -435,6 +478,13 @@ class CampaignPageStore:
         *,
         include_body: bool = False,
     ) -> Page | None:
+        from .committed_publication import active, page_rows, read_snapshot
+        if active():
+            @read_snapshot
+            def committed_route():
+                row = next((row for row in page_rows(campaign_slug) if row["route_slug"] == route_slug), None)
+                return self._map_page(row, include_body=include_body) if row is not None else None
+            return committed_route()
         row = get_db().execute(
             """
             SELECT *
@@ -448,6 +498,10 @@ class CampaignPageStore:
         return self._map_page(row, include_body=include_body)
 
     def get_page_body_markdown(self, campaign_slug: str, route_slug: str) -> str | None:
+        from .committed_publication import active
+        if active():
+            page = self.get_page_by_route_slug(campaign_slug, route_slug, include_body=True)
+            return page.body_markdown if page else None
         row = get_db().execute(
             """
             SELECT body_markdown
@@ -461,6 +515,9 @@ class CampaignPageStore:
         return str(row["body_markdown"] or "")
 
     def search_route_slugs(self, campaign_slug: str, query: str) -> list[str]:
+        from .committed_publication import active, page_rows
+        if active():
+            return [row["route_slug"] for row in page_rows(campaign_slug) if query.strip() and query.strip().lower() in row["searchable_text"]]
         normalized_query = query.strip().lower()
         if not normalized_query:
             return []
@@ -486,6 +543,17 @@ class CampaignPageStore:
         include_body: bool = False,
         current_session: int | None = None,
     ) -> list[CampaignPageRecord]:
+        from .committed_publication import active, page_rows, config, read_snapshot
+        if active():
+            @read_snapshot
+            def committed_search():
+                _, settings = config(campaign_slug)
+                rows = [row for row in page_rows(campaign_slug) if query.strip() and query.strip().lower() in row["searchable_text"]]
+                if current_session is not None:
+                    rows = [row for row in rows if row["published"] and row["reveal_after_session"] <= int(settings["current_session"])
+                            and row["section"].strip().lower() not in DEPRECATED_WIKI_SECTIONS and row["page_type"].strip().lower() not in DEPRECATED_WIKI_PAGE_TYPES]
+                return sorted([self._map_record(row, include_body=include_body) for row in rows], key=lambda record: page_sort_key(record.page))[:max(1, limit)]
+            return committed_search()
         normalized_query = query.strip().lower()
         if not normalized_query:
             return []
@@ -540,40 +608,102 @@ class CampaignPageStore:
         body_markdown: str,
         commit: bool = True,
     ) -> CampaignPageRecord:
+        from .committed_publication import active, CommittedSourceConflict
+        if active():
+            raise CommittedSourceConflict("Use committed publication; direct row or filesystem ingestion is blocked.")
         if not isinstance(metadata, dict):
             raise ValueError("Page metadata must be an object.")
         if not isinstance(body_markdown, str):
             raise ValueError("body_markdown must be a string.")
 
         connection = get_db()
-        payload = self.validate_page_upsert(
-            campaign_slug,
-            page_ref,
-            metadata=metadata,
-            body_markdown=body_markdown,
+        try:
+            self._reserve_page_write(connection)
+            # The preflight used by file writers is advisory; check route
+            # occupancy again after acquiring the SQLite write reservation.
+            payload = self.validate_page_upsert(
+                campaign_slug,
+                page_ref,
+                metadata=metadata,
+                body_markdown=body_markdown,
+            )
+            self._persist_page_payload(campaign_slug, payload)
+            record = self.get_page_record(campaign_slug, payload["page_ref"], include_body=True)
+            if record is None:
+                raise RuntimeError("Failed to persist campaign page.")
+            if commit:
+                connection.commit()
+            return record
+        except BaseException:
+            connection.rollback()
+            raise
+
+    @staticmethod
+    def _reserve_page_write(connection) -> None:
+        if not connection.in_transaction:
+            connection.execute("BEGIN IMMEDIATE")
+        else:
+            # Reconciliation already owns BEGIN IMMEDIATE. An outer deferred
+            # transaction must upgrade before reading the row or high-water;
+            # a stale WAL snapshot fails with SQLITE_BUSY_SNAPSHOT here.
+            connection.execute(
+                "UPDATE campaign_page_sync_state SET seeded_at = seeded_at WHERE 0"
+            )
+
+    @staticmethod
+    def _revision_datetime(value: str) -> datetime:
+        revision = datetime.fromisoformat(value)
+        if revision.tzinfo is None or revision.utcoffset() is None:
+            raise ValueError("Campaign page revision must include a timezone.")
+        return revision.astimezone(timezone.utc)
+
+    def _advance_page_revision(self, campaign_slug: str, prior_revision: str | None = None) -> str:
+        """Allocate and persist one campaign revision inside the writer transaction."""
+        connection = get_db()
+        marker = connection.execute(
+            "SELECT seeded_at FROM campaign_page_sync_state WHERE campaign_slug = ?",
+            (campaign_slug,),
+        ).fetchone()
+        floor = utcnow()
+        if marker is not None:
+            floor = max(floor, self._revision_datetime(str(marker["seeded_at"])))
+        if prior_revision is not None:
+            floor = max(floor, self._revision_datetime(prior_revision))
+        revision = floor + timedelta(microseconds=1)
+        if revision.microsecond == 0:
+            # C8 page revisions used whole seconds. Even if a deleted
+            # legacy row outlived its old marker, it cannot equal this value.
+            revision += timedelta(microseconds=1)
+        value = revision.isoformat(timespec="microseconds")
+        connection.execute(
+            """
+            INSERT INTO campaign_page_sync_state (campaign_slug, seeded_at)
+            VALUES (?, ?)
+            ON CONFLICT(campaign_slug) DO UPDATE SET seeded_at = excluded.seeded_at
+            """,
+            (campaign_slug, value),
         )
-
-        self._persist_page_payload(campaign_slug, payload)
-        self._mark_sync_state(campaign_slug)
-        if commit:
-            connection.commit()
-
-        record = self.get_page_record(campaign_slug, payload["page_ref"], include_body=True)
-        if record is None:
-            raise RuntimeError("Failed to persist campaign page.")
-        return record
+        return value
 
     def _persist_page_payload(self, campaign_slug: str, payload: dict[str, Any]) -> None:
         """Persist an already normalized payload without parsing or collision queries."""
         connection = get_db()
+        from .committed_publication import active, _projection_payload, CommittedSourceConflict
+        if active() and (not connection.in_transaction or
+                         _projection_payload.get() != (campaign_slug, tuple(sorted(payload.items())))):
+            raise CommittedSourceConflict("Page projection requires the committed publication reservation.")
         existing = connection.execute(
             """
-            SELECT created_at
+            SELECT created_at, updated_at
             FROM campaign_pages
             WHERE campaign_slug = ? AND page_ref = ?
             """,
             (campaign_slug, payload["page_ref"]),
         ).fetchone()
+        payload["updated_at"] = self._advance_page_revision(
+            campaign_slug,
+            str(existing["updated_at"]) if existing is not None else None,
+        )
         created_at = str(existing["created_at"]) if existing is not None else payload["updated_at"]
 
         connection.execute(
@@ -688,22 +818,36 @@ class CampaignPageStore:
         return payload
 
     def delete_page(self, campaign_slug: str, page_ref: str, *, commit: bool = True) -> CampaignPageRecord | None:
-        existing = self.get_page_record(campaign_slug, page_ref, include_body=True)
-        if existing is None:
-            return None
-
+        from .committed_publication import active, CommittedSourceConflict
+        if active():
+            raise CommittedSourceConflict("Use committed publication; direct row or filesystem ingestion is blocked.")
         connection = get_db()
-        connection.execute(
-            """
-            DELETE FROM campaign_pages
-            WHERE campaign_slug = ? AND page_ref = ?
-            """,
-            (campaign_slug, existing.page_ref),
-        )
-        self._mark_sync_state(campaign_slug)
-        if commit:
-            connection.commit()
-        return existing
+        owned_transaction = not connection.in_transaction
+        try:
+            self._reserve_page_write(connection)
+            existing = self.get_page_record(campaign_slug, page_ref, include_body=True)
+            if existing is None:
+                if owned_transaction:
+                    connection.rollback()
+                return None
+            # Preserve the deleted revision in durable campaign history before
+            # removing the row, so same-ref recreation cannot replay a witness.
+            self._advance_page_revision(campaign_slug, existing.updated_at)
+            deleted = connection.execute(
+                """
+                DELETE FROM campaign_pages
+                WHERE campaign_slug = ? AND page_ref = ?
+                """,
+                (campaign_slug, existing.page_ref),
+            )
+            if deleted.rowcount != 1:
+                raise RuntimeError("Campaign page deletion lost its reserved row.")
+            if commit:
+                connection.commit()
+            return existing
+        except BaseException:
+            connection.rollback()
+            raise
 
     normalize_page_ref = staticmethod(normalize_page_ref)
 
@@ -724,6 +868,10 @@ class CampaignPageStore:
             raise CampaignRefreshTransactionError("Campaign refresh requires a connection without an active transaction.")
 
     def _ensure_campaign_pages_current(self, campaign_slug: str, content_dir: Path) -> None:
+        from .committed_publication import active, inspect_page_mirrors
+        if active():
+            self.mirror_conflicts[campaign_slug] = inspect_page_mirrors(campaign_slug, content_dir)
+            return
         with self._lock:
             if not self._has_sync_state(campaign_slug):
                 self._sync_campaign_pages_locked(campaign_slug, content_dir)
@@ -785,10 +933,18 @@ class CampaignPageStore:
         return replace(plan, sync_identity=sync_identity)
 
     def _sync_campaign_pages_locked(self, campaign_slug: str, content_dir: Path) -> None:
+        from .committed_publication import active, inspect_page_mirrors
+        if active():
+            self.mirror_conflicts[campaign_slug] = inspect_page_mirrors(campaign_slug, content_dir)
+            self._content_fingerprints[campaign_slug] = ((), ())
+            return
         plan = self._prepare_campaign_refresh_locked(campaign_slug, content_dir)
         self._apply_campaign_refresh_locked(plan)
 
     def _apply_campaign_refresh_locked(self, plan) -> None:
+        from .committed_publication import active, CommittedSourceConflict
+        if active():
+            raise CommittedSourceConflict("Use committed publication; direct row or filesystem ingestion is blocked.")
         self._require_refresh_admission()  # Outside rollback/commit ownership.
         connection = get_db()
         # sqlite's connection context rolls back owned DML and failed commits,
@@ -811,13 +967,17 @@ class CampaignPageStore:
             changed_refs = frozenset(changes)
             for payload in payloads:
                 if payload["page_ref"] in changed_refs:
-                    payload["updated_at"] = isoformat(utcnow())
                     self._persist_page_payload(plan.campaign_slug, payload)
+            rows_by_ref = {str(row["page_ref"]): row for row in rows}
             for page_ref in deletions:
-                connection.execute(
+                prior = rows_by_ref[page_ref]
+                self._advance_page_revision(plan.campaign_slug, str(prior["updated_at"]))
+                deleted = connection.execute(
                     "DELETE FROM campaign_pages WHERE campaign_slug = ? AND page_ref = ?",
                     (plan.campaign_slug, page_ref),
                 )
+                if deleted.rowcount != 1:
+                    raise StaleCampaignRefreshPlan("rows")
             self._mark_sync_state(plan.campaign_slug)
         # Publish only consumed observations, never a fresh post-write scan.
         self._content_fingerprints[plan.campaign_slug] = (plan.source.witnesses, plan.protection)
@@ -830,15 +990,11 @@ class CampaignPageStore:
     def _mark_sync_state(self, campaign_slug: str) -> None:
         get_db().execute(
             """
-            INSERT INTO campaign_page_sync_state (
-                campaign_slug,
-                seeded_at
-            )
+            INSERT INTO campaign_page_sync_state (campaign_slug, seeded_at)
             VALUES (?, ?)
-            ON CONFLICT(campaign_slug) DO UPDATE SET
-                seeded_at = excluded.seeded_at
+            ON CONFLICT(campaign_slug) DO NOTHING
             """,
-            (campaign_slug, isoformat(utcnow())),
+            (campaign_slug, utcnow().isoformat(timespec="microseconds")),
         )
 
     def _build_page_payload(
@@ -849,11 +1005,20 @@ class CampaignPageStore:
 
     def _map_page(self, row, *, include_body: bool) -> Page:
         metadata = json.loads(str(row["metadata_json"] or "{}"))
-        return self._map_page_from_decoded_metadata(
+        page = self._map_page_from_decoded_metadata(
             row,
             include_body=include_body,
             metadata=metadata,
         )
+        from .committed_publication import active, current
+        if active():
+            source = current(str(row["campaign_slug"]), "page", str(row["page_ref"]))
+            settings = current(str(row["campaign_slug"]), "config")
+            if source is None or settings is None:
+                raise ValueError("Committed page identity is unavailable.")
+            page.committed_revision = int(source["revision"])
+            page.committed_config_revision = int(settings["revision"])
+        return page
 
     def _map_page_from_decoded_metadata(
         self,

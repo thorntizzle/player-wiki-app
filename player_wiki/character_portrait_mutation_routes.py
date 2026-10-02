@@ -8,7 +8,7 @@ from flask import abort, current_app, flash, request, url_for
 from .auth import campaign_scope_access_required
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError, CharacterStateUnavailableError
-from .character_reconciliation import CharacterPublicationConflict
+from .character_reconciliation import CharacterPublicationConflict, PendingReviewedSourceProof
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,26 @@ class CharacterPortraitMutationRouteDependencies:
 
 def _dependencies() -> CharacterPortraitMutationRouteDependencies:
     return current_app.extensions["character_portrait_mutation_route_dependencies"]
+
+
+def _prospective_numeric_authority(record: object, definition: object) -> object | None:
+    from .committed_publication import active
+
+    if not active():
+        return None
+    coordinator = current_app.extensions["character_publication_coordinator"]
+    provider = coordinator.numeric_authority_provider
+    if not callable(provider):
+        raise ValueError("Character numeric authority is unavailable.")
+    return provider(record, definition)
+
+
+def _reviewed_config_revision(definition: object) -> int | None:
+    from .committed_publication import active
+    if not active():
+        return None
+    from .committed_character_publication import config
+    return config(definition.campaign_slug)[0]["revision"]
 
 
 def register_character_portrait_mutation_routes(
@@ -132,8 +152,11 @@ def register_character_portrait_mutation_routes(
                 record.definition.character_slug,
                 record.import_metadata,
             )
+            config_revision = _reviewed_config_revision(definition)
+            prospective_authority = _prospective_numeric_authority(record, definition)
             merged_state = dependencies.merge_state_with_definition(
-                definition, record.state_record.state
+                definition, record.state_record.state,
+                source_authority=prospective_authority,
             )
             dependencies.publish_character_portrait(
                 record,
@@ -145,6 +168,10 @@ def register_character_portrait_mutation_routes(
                 operation_kind="portrait_upsert",
                 desired_asset_ref=next_asset_ref,
                 desired_asset_bytes=data_blob,
+                reviewed_source_proof=(PendingReviewedSourceProof.capture(
+                    record, definition, merged_state, prospective_authority,
+                    config_revision=config_revision,
+                ) if prospective_authority is not None else None),
             )
         except CharacterPublicationConflict:
             return protected_recovery(
@@ -222,8 +249,11 @@ def register_character_portrait_mutation_routes(
                 record.definition.character_slug,
                 record.import_metadata,
             )
+            config_revision = _reviewed_config_revision(definition)
+            prospective_authority = _prospective_numeric_authority(record, definition)
             merged_state = dependencies.merge_state_with_definition(
-                definition, record.state_record.state
+                definition, record.state_record.state,
+                source_authority=prospective_authority,
             )
             dependencies.publish_character_portrait(
                 record,
@@ -233,6 +263,10 @@ def register_character_portrait_mutation_routes(
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
                 operation_kind="portrait_remove",
+                reviewed_source_proof=(PendingReviewedSourceProof.capture(
+                    record, definition, merged_state, prospective_authority,
+                    config_revision=config_revision,
+                ) if prospective_authority is not None else None),
             )
         except CharacterPublicationConflict:
             return protected_recovery(

@@ -7,6 +7,11 @@ from flask import Blueprint, current_app, jsonify, url_for
 
 from .character_builder import CharacterBuildError
 from .character_service import CharacterStateValidationError
+from .character_source_repair import (
+    SourceRepairError,
+    prepare_native_creation_authorizations,
+    record_confirmed_native_creation_witness,
+)
 from .system_policy import (
     CHARACTER_ROUTE_LANE_DND5E,
     CHARACTER_ROUTE_LANE_XIANXIA,
@@ -20,6 +25,7 @@ class CharacterCreateSubmitApiDependencies:
     json_error: Callable[..., Any]
     normalize_character_authoring_values: Callable[[dict[str, Any]], dict[str, Any]]
     list_builder_campaign_page_records: Callable[[str, Any], list[Any]]
+    list_visible_character_page_records: Callable[[str, Any], list[Any]]
     write_new_character_record: Callable[..., Any]
     serialize_character_record: Callable[[str, Any], dict[str, Any]]
     serialize_character_authoring_links: Callable[[str, Any], dict[str, str]]
@@ -33,6 +39,9 @@ class CharacterCreateSubmitApiDependencies:
     build_level_one_character_definition: Callable[..., tuple[Any, Any]]
     build_initial_state: Callable[[Any], dict[str, Any]]
     native_character_create_unsupported_message: Callable[[str], str]
+    get_authenticated_user: Callable[[], Any | None]
+    get_current_auth_source: Callable[[], str]
+    get_auth_store: Callable[[], Any]
 
 
 def register_character_create_submit_api_route(
@@ -55,6 +64,16 @@ def register_character_create_submit_api_route(
         lane = dependencies.native_character_create_lane(
             getattr(campaign, "system", "")
         )
+        actor_id = None
+        if lane == CHARACTER_ROUTE_LANE_DND5E:
+            if dependencies.get_current_auth_source() == "view_as":
+                return dependencies.json_error("View As cannot create a Character.", 403, code="forbidden")
+            actor_id = getattr(dependencies.get_authenticated_user(), "id", None)
+            if type(actor_id) is not int or actor_id < 1:
+                return dependencies.json_error("Authentication required.", 403, code="forbidden")
+        markers = ()
+        source_basis_digests = {}
+        source_snapshot_digest = ""
         try:
             if lane == CHARACTER_ROUTE_LANE_XIANXIA:
                 create_context = dependencies.build_xianxia_character_create_context(
@@ -73,13 +92,14 @@ def register_character_create_submit_api_route(
                     definition, values
                 )
             elif lane == CHARACTER_ROUTE_LANE_DND5E:
+                campaign_page_records = dependencies.list_builder_campaign_page_records(
+                    campaign_slug, campaign
+                )
                 builder_context = dependencies.build_level_one_builder_context(
                     current_app.extensions["systems_service"],
                     campaign_slug,
                     values,
-                    campaign_page_records=dependencies.list_builder_campaign_page_records(
-                        campaign_slug, campaign
-                    ),
+                    campaign_page_records=campaign_page_records,
                 )
                 builder_ready = bool(
                     builder_context.get("class_options")
@@ -100,9 +120,22 @@ def register_character_create_submit_api_route(
                     )
                 )
                 definition = dependencies.finalize_character_definition_for_write(
-                    campaign_slug, definition
+                    campaign_slug, definition, mode="historical"
                 )
                 initial_state = dependencies.build_initial_state(definition)
+                try:
+                    definition, markers, source_basis_digests, source_snapshot_digest = prepare_native_creation_authorizations(
+                        definition, initial_state,
+                        systems_service=current_app.extensions["systems_service"],
+                        campaign_page_records=dependencies.list_visible_character_page_records(
+                            campaign_slug, campaign
+                        ),
+                    )
+                except SourceRepairError:
+                    from .committed_publication import active
+                    if active():
+                        raise
+                    markers = ()
             else:
                 return dependencies.json_error(
                     dependencies.native_character_create_unsupported_message(
@@ -116,6 +149,7 @@ def register_character_create_submit_api_route(
                 definition,
                 import_metadata,
                 initial_state,
+                **({"updated_by_user_id": actor_id} if lane == CHARACTER_ROUTE_LANE_DND5E else {}),
             )
         except CharacterBuildError as exc:
             return dependencies.json_error(str(exc), 400, code="validation_error")
@@ -124,10 +158,47 @@ def register_character_create_submit_api_route(
         except (CharacterStateValidationError, TypeError, ValueError) as exc:
             return dependencies.json_error(str(exc), 400, code="validation_error")
 
+        witnessed = None
+        if lane == CHARACTER_ROUTE_LANE_DND5E:
+            witnessed = False
+            if markers:
+                try:
+                    def load_current_source_context():
+                        current_campaign, access_error = dependencies.ensure_character_authoring_access(
+                            campaign_slug
+                        )
+                        if access_error is not None or current_campaign is None:
+                            raise SourceRepairError("Manager authorization changed after creation.")
+                        return (
+                            current_app.extensions["systems_service"],
+                            dependencies.list_visible_character_page_records(campaign_slug, current_campaign),
+                        )
+
+                    witnessed = record_confirmed_native_creation_witness(
+                        expected_definition=definition,
+                        initial_state=initial_state,
+                        readback_record=record,
+                        markers=markers,
+                        source_basis_digests=source_basis_digests,
+                        source_snapshot_digest=source_snapshot_digest,
+                        load_current_source_context=load_current_source_context,
+                        actor_id=actor_id,
+                        auth_store=dependencies.get_auth_store(),
+                    )
+                except Exception:
+                    # Creation succeeded; a failed audit must not suggest retry.
+                    witnessed = False
         return jsonify(
             {
                 "ok": True,
-                "message": f"{record.definition.name} created.",
+                "message": (
+                    f"{record.definition.name} created."
+                    if witnessed is not False else
+                    f"{record.definition.name} was created. Its baseline needs manager review before automated totals or resources are used; inspect this Character rather than submitting create again."
+                ),
+                "baseline_verification": (
+                    "verified" if witnessed else "needs_repair"
+                ) if witnessed is not None else None,
                 "character": dependencies.serialize_character_record(
                     campaign_slug, record
                 ),

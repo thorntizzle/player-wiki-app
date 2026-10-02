@@ -3,13 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from flask import Blueprint, abort
+from flask import Blueprint, abort, current_app
 
 from .campaign_content_service import CampaignContentError
 from .character_editor import CharacterEditValidationError
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError
-from .character_reconciliation import CharacterPublicationConflict
+from .character_reconciliation import CharacterPublicationConflict, PendingReviewedSourceProof
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,26 @@ class CharacterPortraitMutationApiDependencies:
     build_managed_character_import_metadata: Callable[..., Any]
     merge_state_with_definition: Callable[..., dict[str, Any]]
     publish_character_portrait: Callable[..., Any]
+
+
+def _prospective_numeric_authority(record: object, definition: object) -> object | None:
+    from .committed_publication import active
+
+    if not active():
+        return None
+    coordinator = current_app.extensions["character_publication_coordinator"]
+    provider = coordinator.numeric_authority_provider
+    if not callable(provider):
+        raise ValueError("Character numeric authority is unavailable.")
+    return provider(record, definition)
+
+
+def _reviewed_config_revision(definition: object) -> int | None:
+    from .committed_publication import active
+    if not active():
+        return None
+    from .committed_character_publication import config
+    return config(definition.campaign_slug)[0]["revision"]
 
 
 def register_character_portrait_mutation_api_routes(
@@ -75,8 +95,11 @@ def register_character_portrait_mutation_api_routes(
                 record.definition.character_slug,
                 record.import_metadata,
             )
+            config_revision = _reviewed_config_revision(definition)
+            prospective_authority = _prospective_numeric_authority(record, definition)
             merged_state = dependencies.merge_state_with_definition(
-                definition, record.state_record.state
+                definition, record.state_record.state,
+                source_authority=prospective_authority,
             )
             dependencies.publish_character_portrait(
                 record,
@@ -88,6 +111,10 @@ def register_character_portrait_mutation_api_routes(
                 operation_kind="portrait_upsert",
                 desired_asset_ref=next_asset_ref,
                 desired_asset_bytes=portrait_payload["data_blob"],
+                reviewed_source_proof=(PendingReviewedSourceProof.capture(
+                    record, definition, merged_state, prospective_authority,
+                    config_revision=config_revision,
+                ) if prospective_authority is not None else None),
             )
         except CharacterPublicationConflict:
             return dependencies.json_error(
@@ -159,8 +186,11 @@ def register_character_portrait_mutation_api_routes(
                 record.definition.character_slug,
                 record.import_metadata,
             )
+            config_revision = _reviewed_config_revision(definition)
+            prospective_authority = _prospective_numeric_authority(record, definition)
             merged_state = dependencies.merge_state_with_definition(
-                definition, record.state_record.state
+                definition, record.state_record.state,
+                source_authority=prospective_authority,
             )
             dependencies.publish_character_portrait(
                 record,
@@ -170,6 +200,10 @@ def register_character_portrait_mutation_api_routes(
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
                 operation_kind="portrait_remove",
+                reviewed_source_proof=(PendingReviewedSourceProof.capture(
+                    record, definition, merged_state, prospective_authority,
+                    config_revision=config_revision,
+                ) if prospective_authority is not None else None),
             )
         except CharacterPublicationConflict:
             return dependencies.json_error(

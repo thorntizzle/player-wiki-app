@@ -173,6 +173,12 @@ class PlayerWikiReconciler:
         expected_page_snapshot: PagePublicationSnapshot | None = None,
         guard_page_snapshot: bool = False,
     ) -> CampaignPageFileRecord:
+        from .committed_publication import active, publish_page
+        if active():
+            return publish_page(self, campaign, prepared_page, operation_kind=operation_kind,
+                prepared_image=prepared_image, audit_event_type=audit_event_type,
+                audit_actor_user_id=audit_actor_user_id, audit_metadata=audit_metadata,
+                expected_page_snapshot=expected_page_snapshot, guard_page_snapshot=guard_page_snapshot)
         key = (prepared_page.campaign_slug, prepared_page.page_ref)
         with self._page_lock(key):
             operation, primary_path, primary_payload = self._prepare_operation(
@@ -232,7 +238,14 @@ class PlayerWikiReconciler:
         audit_event_type: str | None = None,
         audit_actor_user_id: int | None = None,
         audit_metadata: dict[str, Any] | None = None,
+        force_delete: bool = False,
     ) -> CampaignPageFileRecord:
+        from .committed_publication import active, publish_page
+        if active():
+            return publish_page(self, campaign, None, operation_kind=operation_kind,
+                delete_record=existing_record, audit_event_type=audit_event_type,
+                audit_actor_user_id=audit_actor_user_id, audit_metadata=audit_metadata,
+                force_delete=force_delete)
         key = (str(campaign.slug), existing_record.page_ref)
         with self._page_lock(key):
             operation, source_path, tombstone_path = self._prepare_deletion_operation(
@@ -268,6 +281,9 @@ class PlayerWikiReconciler:
             return existing_record
 
     def recover_pending(self, *, limit: int = 8) -> dict[str, int]:
+        from .committed_publication import active, replay_mirrors
+        if active():
+            return replay_mirrors(self.repository_store.campaigns_dir, limit=limit)
         rows = get_db().execute(
             """
             SELECT operation_id, campaign_slug, page_ref, state
@@ -389,6 +405,9 @@ class PlayerWikiReconciler:
         operation_id: str,
         action: str,
     ) -> str:
+        from .committed_publication import active
+        if active():
+            raise CampaignContentError("Legacy reconciliation is blocked under committed authority; manager repair required.")
         _validate_exact_operation_identity(kind, operation_id)
         operation = self._load_exact_operation(kind, operation_id)
         if operation is None:

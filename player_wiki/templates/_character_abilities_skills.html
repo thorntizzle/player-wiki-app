@@ -8,7 +8,7 @@
       <article class="ability-card ability-card--skills">
         <div>
           <p class="card-kicker">{{ ability.abbr }}</p>
-          <h3>{{ ability.score }}</h3>
+          <h3>{{ ability.score_label if ability.score_label is defined else ability.score }}</h3>
           <p>{{ ability.name }}</p>
           <p class="meta">Modifier {{ ability.modifier }} | Save {{ ability.save_bonus }}</p>
         </div>

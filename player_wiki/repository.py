@@ -65,6 +65,10 @@ class Repository:
 
     @classmethod
     def load(cls, campaigns_dir: Path, page_store: Any) -> "Repository":
+        from .committed_publication import active
+        if active():
+            from .repository_store import RepositoryStore
+            return RepositoryStore(campaigns_dir, page_store=page_store, reload_enabled=False, scan_interval_seconds=0).refresh_from_database()
         campaigns: dict[str, Campaign] = {}
         input_specs: list[tuple[Path, Path]] = []
         config_specs: list[CampaignConfig] = []
@@ -122,7 +126,11 @@ class Repository:
         if page is None:
             return None
 
-        return render_page_content(campaign, page, self.page_store)
+        from .committed_publication import CommittedSourceConflict
+        try:
+            return render_page_content(campaign, page, self.page_store)
+        except CommittedSourceConflict:
+            return None
 
     def get_section_pages(self, campaign_slug: str, section_slug: str) -> list[Page]:
         campaign = self.get_campaign(campaign_slug)
@@ -136,6 +144,31 @@ class Repository:
         campaign = self.get_campaign(campaign_slug)
         if not campaign:
             return []
+
+        from .committed_publication import active, config, current, page_rows, read_snapshot
+        if active():
+            @read_snapshot
+            def committed_search():
+                settings_source, settings = config(campaign_slug)
+                normalized = query.strip().lower()
+                matching = []
+                for row in page_rows(campaign_slug):
+                    if normalized and normalized not in row["searchable_text"]:
+                        continue
+                    cached = campaign.pages.get(row["route_slug"])
+                    if (cached is None or cached.source_path != f"db://{campaign_slug}/{row['page_ref']}" or
+                            cached.committed_config_revision != settings_source["revision"]):
+                        continue
+                    source = current(campaign_slug, "page", row["page_ref"])
+                    if source is None or cached.committed_revision != source["revision"]:
+                        continue
+                    if not row["published"] or row["reveal_after_session"] > int(settings["current_session"]):
+                        continue
+                    if cached.is_deprecated_wiki_overview:
+                        continue
+                    matching.append(cached)
+                return sorted(matching, key=page_sort_key)
+            return committed_search()
 
         normalized_query = query.strip().lower()
         if not normalized_query:
@@ -178,6 +211,10 @@ def load_campaign_config(config_path: Path) -> CampaignConfig:
     # Local import avoids a cycle with the independent page normalization owner.
     from .campaign_page_refresh import ancestor_witnesses, validate_witnesses
 
+    from .committed_publication import active, config as committed_config
+    if active():
+        _, config = committed_config(config_path.parent.name)
+        return CampaignConfig(config_path, config, config_path.parent / config.get("player_content_dir", "content"), config["slug"], ())
     witnesses = ancestor_witnesses(config_path)
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     content_root = config_path.parent / config.get("player_content_dir", "content")
@@ -188,6 +225,10 @@ def load_campaign_config(config_path: Path) -> CampaignConfig:
 
 def load_campaign(config_path: Path, page_store: Any, *, config_spec: CampaignConfig | None = None,
                   page_snapshot: list[Page] | None = None) -> Campaign:
+    from .committed_publication import active
+    if active():
+        config_spec = load_campaign_config(config_path)
+        page_snapshot = page_store.list_pages(config_spec.slug)
     spec = config_spec if config_spec is not None else load_campaign_config(config_path)
     config = spec.config
     content_root = spec.content_root
@@ -363,6 +404,26 @@ def resolve_campaign_links(campaign: Campaign) -> None:
 
 
 def load_page_content(campaign: Campaign, page: Page, page_store: Any) -> str:
+    from .committed_publication import active, config, current, page_row, read_snapshot, CommittedSourceConflict
+    if active():
+        @read_snapshot
+        def committed_body():
+            if not page.source_path.startswith(f"db://{campaign.slug}/"):
+                raise CommittedSourceConflict("Page identity is unavailable.")
+            ref = page.source_path[len(f"db://{campaign.slug}/"):]
+            settings_source, settings = config(campaign.slug)
+            source = current(campaign.slug, "page", ref)
+            row = page_row(campaign.slug, ref)
+            if (source is None or row is None or
+                    page.committed_revision != source["revision"] or
+                    page.committed_config_revision != settings_source["revision"] or
+                    row["route_slug"] != page.route_slug or
+                    not row["published"] or
+                    row["reveal_after_session"] > int(settings["current_session"]) or
+                    page.is_deprecated_wiki_overview):
+                raise CommittedSourceConflict("Page changed or is not visible.")
+            return str(row["body_markdown"] or "")
+        return committed_body()
     if page.content_loaded:
         return page.body_markdown
 
@@ -375,7 +436,8 @@ def load_page_content(campaign: Campaign, page: Page, page_store: Any) -> str:
 
 
 def render_page_content(campaign: Campaign, page: Page, page_store: Any) -> str:
-    if page.html_loaded:
+    from .committed_publication import active
+    if page.html_loaded and not active():
         return page.body_html
 
     body = load_page_content(campaign, page, page_store)

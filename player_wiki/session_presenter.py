@@ -221,6 +221,7 @@ def present_session_dm_passive_score_rows(
                 campaign=campaign,
                 definition=record.definition,
                 state=record.state_record.state,
+                state_revision=record.state_record.revision,
                 systems_service=systems_service,
                 campaign_page_records=campaign_page_records,
             )
@@ -229,13 +230,23 @@ def present_session_dm_passive_score_rows(
 
         projected_definition = projection.get("definition")
         stat_values = dict(getattr(projected_definition, "stats", {}) or {})
+        raw_stats = dict(record.definition.stats or {})
+        authority = projection.get("source_authority")
+
+        def passive_label(key: str) -> str:
+            value = stat_values.get(key)
+            status = authority.field_status(f"stats.{key}") if authority is not None else None
+            if value is not None and (status is None or status.is_effective):
+                return str(_coerce_nonnegative_int(value))
+            raw = raw_stats.get(key)
+            return f"Raw {raw} · NEEDS REPAIR" if raw is not None else "NEEDS REPAIR"
 
         rows.append(
             {
                 "name": record.definition.name,
-                "passive_perception": str(_coerce_nonnegative_int(stat_values.get("passive_perception", 0))),
-                "passive_insight": str(_coerce_nonnegative_int(stat_values.get("passive_insight", 0))),
-                "passive_investigation": str(_coerce_nonnegative_int(stat_values.get("passive_investigation", 0))),
+                "passive_perception": passive_label("passive_perception"),
+                "passive_insight": passive_label("passive_insight"),
+                "passive_investigation": passive_label("passive_investigation"),
             }
         )
     return rows

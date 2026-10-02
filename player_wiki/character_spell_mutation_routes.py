@@ -6,6 +6,8 @@ from typing import Any, Callable
 from flask import abort, request
 
 from .auth import campaign_scope_access_required
+from .character_mechanics_projection import build_character_mechanics_projection
+from .committed_publication import active
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,7 @@ class CharacterSpellMutationRouteDependencies:
     redirect_unsupported_dnd5e_character_spellcasting_tools: Callable[..., object]
     load_character_spell_management_support: Callable[..., tuple[object, object]]
     get_systems_service: Callable[..., object]
+    list_visible_character_page_records: Callable[..., list[object]]
     run_character_definition_mutation: Callable[..., object]
     has_session_mode_access: Callable[..., bool]
     apply_character_spell_management_edit: Callable[..., tuple[object, object]]
@@ -25,6 +28,21 @@ def register_character_spell_mutation_routes(
     *,
     dependencies: CharacterSpellMutationRouteDependencies,
 ) -> None:
+    def _current_authority(campaign_slug: str, campaign: Any, record: Any) -> tuple[Any, Any]:
+        if not active():
+            return None, record.definition
+        projection = build_character_mechanics_projection(
+            campaign=campaign,
+            definition=record.definition,
+            state=record.state_record.state or {},
+            state_revision=record.state_record.revision,
+            systems_service=dependencies.get_systems_service(),
+            campaign_page_records=dependencies.list_visible_character_page_records(
+                campaign_slug, campaign
+            ),
+        )
+        return projection["source_authority"], projection["definition"]
+
     def character_spell_add(campaign_slug: str, character_slug: str):
         campaign, _ = dependencies.load_character_context(
             campaign_slug, character_slug
@@ -40,6 +58,9 @@ def register_character_spell_mutation_routes(
             )
 
         def _action(record):
+            source_authority, eligibility_definition = _current_authority(
+                campaign_slug, campaign, record
+            )
             spell_catalog, selected_class_rows = (
                 dependencies.load_character_spell_management_support(
                     campaign_slug,
@@ -53,6 +74,8 @@ def register_character_spell_mutation_routes(
                 spell_catalog=spell_catalog,
                 selected_class_rows=selected_class_rows,
                 systems_service=dependencies.get_systems_service(),
+                source_authority=source_authority,
+                eligibility_definition=eligibility_definition,
                 operation="add",
                 kind=request.form.get("kind", ""),
                 selected_value=request.form.get("selected_value", ""),
@@ -82,6 +105,9 @@ def register_character_spell_mutation_routes(
             )
 
         def _action(record):
+            source_authority, eligibility_definition = _current_authority(
+                campaign_slug, campaign, record
+            )
             spell_catalog, selected_class_rows = (
                 dependencies.load_character_spell_management_support(
                     campaign_slug,
@@ -95,6 +121,8 @@ def register_character_spell_mutation_routes(
                 spell_catalog=spell_catalog,
                 selected_class_rows=selected_class_rows,
                 systems_service=dependencies.get_systems_service(),
+                source_authority=source_authority,
+                eligibility_definition=eligibility_definition,
                 operation="update",
                 spell_key=request.form.get("spell_key", ""),
                 prepared_value=request.form.get("prepared_value", ""),
@@ -124,6 +152,9 @@ def register_character_spell_mutation_routes(
             )
 
         def _action(record):
+            source_authority, eligibility_definition = _current_authority(
+                campaign_slug, campaign, record
+            )
             spell_catalog, selected_class_rows = (
                 dependencies.load_character_spell_management_support(
                     campaign_slug,
@@ -137,6 +168,8 @@ def register_character_spell_mutation_routes(
                 spell_catalog=spell_catalog,
                 selected_class_rows=selected_class_rows,
                 systems_service=dependencies.get_systems_service(),
+                source_authority=source_authority,
+                eligibility_definition=eligibility_definition,
                 operation="remove",
                 spell_key=request.form.get("spell_key", ""),
                 target_class_row_id=request.form.get("target_class_row_id", ""),

@@ -255,6 +255,10 @@ def _inspect_exact(
     operation_id: str,
     action: str,
 ) -> dict[str, object]:
+    from .committed_publication import active
+    with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as connection:
+        if active(connection):
+            raise PlayerWikiReconciliationOperationError("legacy_reconciliation_blocked_by_committed_authority")
     report, _exit_code = inspect_player_wiki_reconciliation(
         database_path=database,
         campaigns_dir=campaigns,

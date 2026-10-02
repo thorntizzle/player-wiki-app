@@ -49,6 +49,9 @@ class RepositoryStore:
             raise CampaignRefreshTransactionError("Campaign refresh requires a connection without an active transaction.")
 
     def get(self) -> Repository:
+        from .committed_publication import active
+        if active():
+            return self.refresh_from_database()
         with self._lock:
             if self._repository is None:
                 self._reload_repository()
@@ -99,8 +102,13 @@ class RepositoryStore:
             return self._repository
 
     def status(self) -> dict[str, object]:
-        return dict(reload_enabled=self.reload_enabled, scan_interval_seconds=self.scan_interval_seconds,
-                    last_loaded_unix=self._last_loaded_unix, campaigns_dir=str(self.campaigns_dir))
+        result = dict(reload_enabled=self.reload_enabled, scan_interval_seconds=self.scan_interval_seconds,
+                      last_loaded_unix=self._last_loaded_unix, campaigns_dir=str(self.campaigns_dir))
+        from .committed_publication import active
+        if active():
+            result.update(config_mirror_conflicts=getattr(self, "_config_conflicts", ()),
+                          page_mirror_conflicts=dict(self.page_store.mirror_conflicts))
+        return result
 
     def refresh(self) -> Repository:
         with self._lock:
@@ -161,8 +169,14 @@ class RepositoryStore:
         # Admission happens before source planning and outside failure cleanup;
         # rejecting a caller transaction neither rolls it back nor invalidates
         # the previously committed shared view.
-        self._require_refresh_admission()
+        from .committed_publication import active
+        if not active():
+            self._require_refresh_admission()
         try:
+            if active():
+                from .committed_publication import read_snapshot
+                read_snapshot(self._reload_committed_repository)()
+                return
             if specs is None:
                 paths, inventory = self._discover_configs()
                 specs = tuple(load_campaign_config(path) for path in paths)
@@ -210,3 +224,30 @@ class RepositoryStore:
         except Exception:
             self._invalidate_failed_generation()
             raise
+
+    def _reload_committed_repository(self):
+        rows = get_db().execute("SELECT campaign_slug FROM committed_source_current WHERE object_kind='config' ORDER BY campaign_slug").fetchall()
+        campaigns, committed_specs = {}, []
+        config_conflicts = []
+        for row in rows:
+            try:
+                spec = load_campaign_config(self.campaigns_dir / row[0] / "campaign.yaml")
+                campaign = load_campaign(spec.config_path, _DatabaseAuthoritativePageStore(self.page_store), config_spec=spec)
+            except ValueError:
+                continue
+            from .committed_publication import inspect_page_mirrors, config, digest, _mirror_bytes
+            self.page_store.mirror_conflicts[spec.slug] = inspect_page_mirrors(spec.slug, spec.content_root)
+            source, _ = config(spec.slug)
+            try:
+                observed = _mirror_bytes(spec.config_path)
+                if digest(observed) != source["primary_sha256"]:
+                    config_conflicts.append(spec.slug)
+            except (OSError, ValueError):
+                config_conflicts.append(spec.slug)
+            committed_specs.append(spec)
+            resolve_campaign_links(campaign)
+            campaigns[campaign.slug] = campaign
+        self._repository = Repository(campaigns, self.page_store, (), tuple(committed_specs))
+        self._config_conflicts = tuple(config_conflicts)
+        self._last_loaded_unix = time.time()
+        return

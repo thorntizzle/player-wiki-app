@@ -11,7 +11,7 @@ import re
 from datetime import timedelta
 from typing import Any
 
-from flask import Blueprint, abort, current_app, jsonify, redirect, request, url_for
+from flask import Blueprint, abort, current_app, g, jsonify, redirect, request, url_for
 from .incident_diagnostics import access_decision
 
 from .admin_audit import (
@@ -2907,6 +2907,7 @@ def register_api(app) -> None:
         initial_state: dict[str, Any],
         *,
         operation_kind: str,
+        updated_by_user_id: int | None = None,
     ):
         validate_character_slug(definition.character_slug)
         return current_app.extensions["character_publication_coordinator"].create(
@@ -2914,6 +2915,7 @@ def register_api(app) -> None:
             import_metadata,
             initial_state,
             operation_kind=operation_kind,
+            updated_by_user_id=updated_by_user_id,
         )
 
     def serialize_character_links(campaign_slug: str, campaign, record: CharacterRecord) -> dict[str, str]:
@@ -3045,13 +3047,10 @@ def register_api(app) -> None:
             record.definition,
             readiness=level_up_readiness,
         )
-        campaign_page_records = [
-            page_record
-            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
-            if page_record.page.published
-            and page_record.page.reveal_after_session <= campaign.current_session
-            and str(page_record.page.section or "").strip() != "Sessions"
-        ]
+        campaign_page_records = list_visible_character_page_records_for_store(
+            get_campaign_page_store(), campaign_slug, campaign,
+            include_body=False, excluded_sections={"Sessions"},
+        )
         spell_catalog = _build_spell_catalog(
             _list_campaign_enabled_entries(
                 current_app.extensions["systems_service"],
@@ -3224,13 +3223,10 @@ def register_api(app) -> None:
         }
 
     def character_retraining_catalog_parts(campaign_slug: str, campaign) -> tuple[list[object], dict[str, Any], dict[str, Any], dict[str, Any]]:
-        campaign_page_records = [
-            page_record
-            for page_record in get_campaign_page_store().list_page_records(campaign_slug)
-            if page_record.page.published
-            and page_record.page.reveal_after_session <= campaign.current_session
-            and str(page_record.page.section or "").strip() != "Sessions"
-        ]
+        campaign_page_records = list_visible_character_page_records_for_store(
+            get_campaign_page_store(), campaign_slug, campaign,
+            include_body=False, excluded_sections={"Sessions"},
+        )
         spell_catalog = _build_spell_catalog(
             _list_campaign_enabled_entries(
                 current_app.extensions["systems_service"],
@@ -3643,6 +3639,9 @@ def register_api(app) -> None:
             serialize_character_level_up_response=serialize_character_level_up_response,
             normalize_character_level_up_values=normalize_character_level_up_values,
             build_character_level_up_context_parts=build_character_level_up_context_parts,
+            list_visible_character_page_records=lambda campaign_slug, campaign: (
+                list_visible_character_page_records(campaign_slug, campaign)
+            ),
             json_error=json_error,
             load_json_object=load_json_object,
             load_character_record=lambda campaign_slug, character_slug: load_character_record(
@@ -3661,6 +3660,7 @@ def register_api(app) -> None:
             character_publication_coordinator=app.extensions[
                 "character_publication_coordinator"
             ],
+            get_auth_store=get_auth_store,
         ),
     )
 
@@ -4285,7 +4285,25 @@ def register_api(app) -> None:
         }
 
     def serialize_character_summary(campaign, record: CharacterRecord) -> dict[str, Any]:
-        presented = present_character_roster([record])[0]
+        from .committed_publication import active
+
+        context: dict[str, Any] = {}
+        if active() and is_dnd_5e_system(record.definition.system):
+            page_context = getattr(g, "character_roster_page_context", None)
+            if page_context is None or page_context[0] != campaign.slug:
+                page_context = (
+                    campaign.slug,
+                    list_visible_character_page_records(campaign.slug, campaign),
+                )
+                g.character_roster_page_context = page_context
+            context = {
+                "campaign": campaign,
+                "systems_service": current_app.extensions["systems_service"],
+                "campaign_page_records": page_context[1],
+            }
+        presented = present_character_roster(
+            [record], **context,
+        )[0]
         return {
             **presented,
             "system": record.definition.system,
@@ -4300,9 +4318,24 @@ def register_api(app) -> None:
         }
 
     def build_character_item_catalog(campaign_slug: str) -> dict[str, object]:
+        from .committed_publication import active
+
+        page_store = get_campaign_page_store()
+        if active():
+            visible_records = list_visible_character_page_records_for_store(
+                page_store, campaign_slug, None, include_body=True,
+                excluded_sections={"Sessions"},
+            )
+
+            class _VisiblePageStore:
+                def list_page_records(self, requested_campaign_slug, *, include_body=False):
+                    del include_body
+                    return visible_records if requested_campaign_slug == campaign_slug else []
+
+            page_store = _VisiblePageStore()
         return build_shared_character_item_catalog(
             current_app.extensions["systems_service"],
-            get_campaign_page_store(),
+            page_store,
             campaign_slug,
         )
 
@@ -4314,6 +4347,7 @@ def register_api(app) -> None:
             campaign=campaign,
             definition=record.definition,
             state=record.state_record.state,
+            state_revision=record.state_record.revision,
             systems_service=current_app.extensions["systems_service"],
             campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
         )
@@ -4339,6 +4373,7 @@ def register_api(app) -> None:
             campaign_slug,
             campaign,
             include_body=True,
+            excluded_sections={"Sessions"},
         )
 
     def build_artificer_infusions_state_payload(
@@ -4593,6 +4628,11 @@ def register_api(app) -> None:
         definition_payload = record.definition.to_dict()
         if not can_view_manager_metadata:
             definition_payload.pop("source", None)
+            spellcasting_payload = definition_payload.get("spellcasting")
+            if isinstance(spellcasting_payload, dict):
+                spellcasting_payload = dict(spellcasting_payload)
+                spellcasting_payload.pop("manual_authorizations", None)
+                definition_payload["spellcasting"] = spellcasting_payload
         campaign_page_records = (
             list_visible_character_page_records(campaign_slug, campaign) if campaign is not None else []
         )
@@ -5308,9 +5348,18 @@ def register_api(app) -> None:
             campaign,
             page_records,
         )
+        from .committed_publication import active, page_repairs
+        source_repairs = page_repairs(campaign_slug) if active() else []
+        if active():
+            from .committed_character_publication import character_repairs
+            source_repairs.extend(
+                {"object_kind": "character", **repair}
+                for repair in character_repairs(campaign_slug)
+            )
         return jsonify(
             {
                 "ok": True,
+                **({"source_repairs": source_repairs} if active() else {}),
                 "pages": [
                     _build_content_page_file_payload(
                         campaign_slug,
@@ -5411,7 +5460,8 @@ def register_api(app) -> None:
         except (CampaignContentError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
 
-        refreshed_record = get_campaign_page_file(
+        from .committed_publication import active
+        refreshed_record = record if active() else get_campaign_page_file(
             campaign,
             page_ref,
             page_store=get_campaign_page_store(),
@@ -5487,12 +5537,20 @@ def register_api(app) -> None:
                 },
             )
 
+        from .committed_publication import CommittedHardDeleteBlocked
         try:
             deleted = current_app.extensions["player_wiki_reconciler"].delete(
                 campaign,
                 existing_record,
                 operation_kind="api_delete",
+                force_delete=force,
             )
+        except CommittedHardDeleteBlocked as exc:
+            return json_error(str(exc), 409, code="hard_delete_blocked", details={
+                "page_ref": existing_record.page_ref,
+                "hard_delete_blockers": list(exc.blockers),
+                "force_query_param": "force", "force_required": True,
+            })
         except CampaignContentError as exc:
             return json_error(str(exc), 400, code="validation_error")
         if deleted is None:
@@ -5516,9 +5574,17 @@ def register_api(app) -> None:
         except (CampaignContentError, FileNotFoundError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
 
+        from .committed_publication import active
+        if active():
+            from .committed_character_publication import character_repairs
+            source_repairs = character_repairs(campaign_slug)
+        else:
+            source_repairs = []
+
         return jsonify(
             {
                 "ok": True,
+                **({"source_repairs": source_repairs} if active() else {}),
                 "characters": [serialize_character_file_summary(record) for record in records],
             }
         )
@@ -5578,6 +5644,19 @@ def register_api(app) -> None:
     @api.delete("/campaigns/<campaign_slug>/content/characters/<character_slug>")
     @api_campaign_content_management_required
     def content_character_delete(campaign_slug: str, character_slug: str):
+        from .committed_publication import active
+        activated = active()
+        expected_definition_revision = expected_state_revision = None
+        if activated:
+            observed = get_character_repository().get_character(campaign_slug, character_slug)
+            if observed is None:
+                abort(404)
+            expected_definition_revision = observed.committed_revision
+            expected_state_revision = observed.state_record.revision
+            if (type(expected_definition_revision) is not int or expected_definition_revision < 1
+                    or type(expected_state_revision) is not int or expected_state_revision < 1):
+                return json_error("Character committed proof needs manager repair.", 400,
+                                  code="validation_error")
         try:
             deleted = delete_campaign_character_file(
                 current_app.config["CAMPAIGNS_DIR"],
@@ -5587,6 +5666,8 @@ def register_api(app) -> None:
                 auth_store=current_app.extensions["auth_store"],
                 coordinator=current_app.extensions["character_deletion_coordinator"],
                 operation_kind="content_api",
+                expected_definition_revision=expected_definition_revision,
+                expected_state_revision=expected_state_revision,
             )
         except (CampaignContentError, FileNotFoundError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
@@ -6096,6 +6177,8 @@ def register_api(app) -> None:
                 movement_total=statblock.movement_total,
                 source_kind="dm_statblock",
                 source_ref=str(statblock.id),
+                display_name_is_override=bool(str(payload.get("display_name") or "").strip()),
+                turn_value_is_override=bool(str(payload.get("turn_value") or "").strip()),
                 resource_counter_seeds=resource_counter_seeds,
                 resource_note_seeds=resource_note_seeds,
                 created_by_user_id=user.id,
@@ -6148,6 +6231,8 @@ def register_api(app) -> None:
                 movement_total=monster_seed.movement_total,
                 source_kind="systems_monster",
                 source_ref=monster_entry.entry_key,
+                display_name_is_override=bool(str(payload.get("display_name") or "").strip()),
+                turn_value_is_override=bool(str(payload.get("turn_value") or "").strip()),
                 resource_counter_seeds=resource_counter_seeds,
                 resource_note_seeds=resource_note_seeds,
                 created_by_user_id=user.id,
@@ -6257,19 +6342,47 @@ def register_api(app) -> None:
         try:
             payload = load_json_object()
             require_supported_combat_campaign(campaign_slug)
+            if (combatant.is_player_character and combatant.character_slug
+                    and "movement_remaining" in payload
+                    and str(payload["movement_remaining"]).strip() != str(combatant.movement_remaining)):
+                character_record = get_character_repository().get_visible_character(
+                    campaign_slug, combatant.character_slug
+                )
+                if character_record is None:
+                    return json_error("That Character is unavailable.", 404, code="not_found")
+                authority = current_app.extensions["character_state_service"].current_authority(
+                    character_record
+                )
+                if (authority is not None
+                        and not authority.field_status("stats.speed").is_effective):
+                    return json_error(
+                        "Movement needs manager repair before it can change.",
+                        409, code="source_needs_repair",
+                    )
             expected_combatant_revision = payload.get("expected_combatant_revision")
+            if "expected_combatant_revision" in payload:
+                if (isinstance(expected_combatant_revision, bool)
+                        or not str(expected_combatant_revision).strip().isdigit()):
+                    raise ValueError("Invalid combatant revision. Refresh and try again.")
+                expected_resource_revision = int(expected_combatant_revision)
+            else:
+                from .committed_publication import active
+                expected_resource_revision = (
+                    combatant.revision if active() and combatant.is_player_character
+                    and combatant.character_slug else None
+                )
+            resource_updates = {
+                field: coerce_bool(payload[field], label=field)
+                for field in ("has_action", "has_bonus_action", "has_reaction")
+                if field in payload
+            }
+            if "movement_remaining" in payload:
+                resource_updates["movement_remaining"] = payload["movement_remaining"]
             combat_service.update_resources(
                 campaign_slug,
                 combatant_id,
-                expected_revision=(
-                    int(expected_combatant_revision)
-                    if expected_combatant_revision is not None and str(expected_combatant_revision).strip()
-                    else None
-                ),
-                has_action=coerce_bool(payload["has_action"], label="has_action") if "has_action" in payload else combatant.has_action,
-                has_bonus_action=coerce_bool(payload["has_bonus_action"], label="has_bonus_action") if "has_bonus_action" in payload else combatant.has_bonus_action,
-                has_reaction=coerce_bool(payload["has_reaction"], label="has_reaction") if "has_reaction" in payload else combatant.has_reaction,
-                movement_remaining=payload.get("movement_remaining", combatant.movement_remaining),
+                expected_revision=expected_resource_revision,
+                **resource_updates,
                 updated_by_user_id=user.id,
             )
         except CampaignCombatRevisionConflictError:
@@ -6360,6 +6473,7 @@ def register_api(app) -> None:
             json_error=json_error,
             normalize_character_authoring_values=normalize_character_authoring_values,
             list_builder_campaign_page_records=list_builder_campaign_page_records,
+            list_visible_character_page_records=list_visible_character_page_records,
             write_new_character_record=lambda *args, **kwargs: write_new_character_record(
                 *args,
                 operation_kind="native_create",
@@ -6368,8 +6482,8 @@ def register_api(app) -> None:
             serialize_character_record=serialize_character_record,
             serialize_character_authoring_links=serialize_character_authoring_links,
             flask_campaign_href=flask_campaign_href,
-            finalize_character_definition_for_write=lambda campaign_slug, definition: finalize_character_definition_for_write(
-                campaign_slug, definition
+            finalize_character_definition_for_write=lambda campaign_slug, definition, **kwargs: finalize_character_definition_for_write(
+                campaign_slug, definition, **kwargs
             ),
             native_character_create_lane=lambda system: native_character_create_lane(system),
             build_xianxia_character_create_context=lambda *args, **kwargs: build_xianxia_character_create_context(
@@ -6388,6 +6502,9 @@ def register_api(app) -> None:
                 *args, **kwargs
             ),
             build_initial_state=lambda definition: build_initial_state(definition),
+            get_authenticated_user=get_authenticated_user,
+            get_current_auth_source=get_current_auth_source,
+            get_auth_store=get_auth_store,
             native_character_create_unsupported_message=lambda system: native_character_create_unsupported_message(
                 system
             ),
@@ -6600,7 +6717,7 @@ def register_api(app) -> None:
 
         return serialize_updated_character(campaign_slug, character_slug)
 
-    def finalize_character_definition_for_write(campaign_slug: str, definition):
+    def finalize_character_definition_for_write(campaign_slug: str, definition, *, mode: str = "historical"):
         campaign = get_repository().get_campaign(campaign_slug)
         if campaign is None:
             abort(404)
@@ -6610,8 +6727,10 @@ def register_api(app) -> None:
             definition,
             item_catalog=build_character_item_catalog(campaign_slug),
             systems_service=current_app.extensions["systems_service"],
+            mode=mode,
         )
-        require_resolved_ability_inputs(normalized)
+        if mode == "native_create":
+            require_resolved_ability_inputs(normalized)
         return normalized
 
     def run_character_definition_mutation(
@@ -6622,6 +6741,7 @@ def register_api(app) -> None:
         forbidden_message: str = "You do not have permission to update this character from this view.",
         conflict_message: str = "This sheet changed in another session. Refresh and try again.",
         equipment_activation: bool = False,
+        equipment_item_id: str | None = None,
     ):
         record = load_character_record(campaign_slug, character_slug)
         if not has_session_mode_access(campaign_slug, character_slug):
@@ -6644,6 +6764,12 @@ def register_api(app) -> None:
                     lambda current: action(current, payload, user.id),
                     expected_revision=expected_revision,
                     updated_by_user_id=user.id,
+                    item_id=equipment_item_id,
+                    values={
+                        "is_equipped": payload.get("is_equipped", False),
+                        "is_attuned": payload.get("is_attuned", False),
+                        "weapon_wield_mode": payload.get("weapon_wield_mode"),
+                    },
                 )
                 return serialize_updated_character(campaign_slug, character_slug)
             finalize_character_definition_for_write(campaign_slug, record.definition)
@@ -6654,9 +6780,27 @@ def register_api(app) -> None:
             else:
                 definition, import_metadata, inventory_quantity_overrides = result
             definition = finalize_character_definition_for_write(campaign_slug, definition)
+            from .committed_publication import active
+            prospective_authority = None
+            if active() and is_dnd_5e_system(definition.system):
+                from .character_source_authority import build_reconciled_source_authority
+                from .character_source_repair import load_verified_manual_actions, load_verified_numeric_actions
+
+                campaign = get_repository().get_campaign(campaign_slug)
+                if campaign is None:
+                    raise ValueError("Campaign source policy is unavailable")
+                prospective_authority = build_reconciled_source_authority(
+                    definition=definition, state=record.state_record.state or {},
+                    state_revision=record.state_record.revision,
+                    systems_service=current_app.extensions["systems_service"],
+                    campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
+                    verified_manual_actions=load_verified_manual_actions(campaign_slug, character_slug),
+                    verified_numeric_actions=load_verified_numeric_actions(campaign_slug, character_slug),
+                )
             merged_state = merge_state_with_definition(
                 definition,
                 record.state_record.state,
+                source_authority=prospective_authority,
                 inventory_quantity_overrides=inventory_quantity_overrides,
                 inventory_state_overrides=inventory_state_overrides,
             )

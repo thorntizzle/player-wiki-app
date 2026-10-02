@@ -1799,7 +1799,190 @@ INSERT OR IGNORE INTO systems_revision(singleton, token) VALUES (1, lower(hex(ra
     for table in SYSTEMS_REVISION_TABLES
     for operation in ("INSERT", "UPDATE", "DELETE")
 )
-CURRENT_SCHEMA_SQL = SCHEMA_V13_SQL + "\n" + _SYSTEMS_REVISION_SCHEMA_SQL
+SCHEMA_V14_SQL = SCHEMA_V13_SQL + "\n" + _SYSTEMS_REVISION_SCHEMA_SQL
+_COMMITTED_SOURCE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS committed_source_generations (
+    campaign_slug TEXT NOT NULL,
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('config', 'character', 'page')),
+    object_ref TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    system_code TEXT NOT NULL,
+    primary_bytes BLOB,
+    secondary_bytes BLOB,
+    primary_sha256 TEXT,
+    secondary_sha256 TEXT,
+    tombstone INTEGER NOT NULL DEFAULT 0 CHECK (tombstone IN (0, 1)),
+    actor_user_id INTEGER,
+    reason TEXT NOT NULL CHECK (reason IN ('legacy_admission', 'publication', 'deletion')),
+    committed_at TEXT NOT NULL,
+    PRIMARY KEY (campaign_slug, object_kind, object_ref, revision),
+    CHECK ((tombstone = 1 AND primary_bytes IS NULL AND secondary_bytes IS NULL
+            AND primary_sha256 IS NULL AND secondary_sha256 IS NULL)
+        OR (tombstone = 0 AND primary_bytes IS NOT NULL AND primary_sha256 IS NOT NULL
+            AND ((object_kind = 'character' AND secondary_bytes IS NOT NULL AND secondary_sha256 IS NOT NULL)
+              OR (object_kind <> 'character' AND secondary_bytes IS NULL AND secondary_sha256 IS NULL)))),
+    FOREIGN KEY (actor_user_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS committed_source_current (
+    campaign_slug TEXT NOT NULL,
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('config', 'character', 'page')),
+    object_ref TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    PRIMARY KEY (campaign_slug, object_kind, object_ref),
+    FOREIGN KEY (campaign_slug, object_kind, object_ref, revision)
+      REFERENCES committed_source_generations(campaign_slug, object_kind, object_ref, revision)
+);
+CREATE TRIGGER IF NOT EXISTS committed_source_current_monotonic
+BEFORE UPDATE ON committed_source_current
+WHEN NEW.campaign_slug <> OLD.campaign_slug OR NEW.object_kind <> OLD.object_kind
+  OR NEW.object_ref <> OLD.object_ref OR NEW.revision <= OLD.revision
+BEGIN SELECT RAISE(ABORT, 'committed source pointer must advance'); END;
+CREATE TRIGGER IF NOT EXISTS committed_source_current_no_delete
+BEFORE DELETE ON committed_source_current
+BEGIN SELECT RAISE(ABORT, 'committed source pointer cannot be removed'); END;
+CREATE TRIGGER IF NOT EXISTS committed_source_generations_no_update
+BEFORE UPDATE ON committed_source_generations
+BEGIN SELECT RAISE(ABORT, 'committed source generations are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS committed_source_generations_no_delete
+BEFORE DELETE ON committed_source_generations
+BEGIN SELECT RAISE(ABORT, 'committed source generations are immutable'); END;
+CREATE TABLE IF NOT EXISTS committed_source_admission (
+    campaign_slug TEXT NOT NULL,
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('config', 'character', 'page')),
+    object_ref TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('admitted', 'blocked')),
+    reason_code TEXT NOT NULL,
+    revision INTEGER,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (campaign_slug, object_kind, object_ref),
+    CHECK ((status = 'admitted' AND revision IS NOT NULL) OR (status = 'blocked' AND revision IS NULL))
+);
+CREATE TABLE IF NOT EXISTS committed_source_admission_receipts (
+    campaign_slug TEXT NOT NULL,
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('config', 'character', 'page')),
+    object_ref TEXT NOT NULL,
+    receipt_sha256 TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    admitted_at TEXT NOT NULL,
+    PRIMARY KEY (campaign_slug, object_kind, object_ref, receipt_sha256),
+    FOREIGN KEY (campaign_slug, object_kind, object_ref, revision)
+      REFERENCES committed_source_generations(campaign_slug, object_kind, object_ref, revision)
+);
+CREATE TABLE IF NOT EXISTS committed_source_publications (
+    operation_id TEXT PRIMARY KEY,
+    campaign_slug TEXT NOT NULL,
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('config', 'character', 'page')),
+    object_ref TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('prepared', 'committed', 'conflict', 'abandoned')),
+    expected_revision INTEGER,
+    expected_primary_sha256 TEXT,
+    expected_secondary_sha256 TEXT,
+    desired_primary_bytes BLOB,
+    desired_secondary_bytes BLOB,
+    desired_primary_sha256 TEXT,
+    desired_secondary_sha256 TEXT,
+    committed_revision INTEGER,
+    actor_user_id INTEGER,
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (actor_user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_committed_source_publications_object
+ON committed_source_publications(campaign_slug, object_kind, object_ref, state);
+CREATE TABLE IF NOT EXISTS committed_source_mirrors (
+    campaign_slug TEXT NOT NULL,
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('config', 'character', 'page')),
+    object_ref TEXT NOT NULL,
+    expected_primary_sha256 TEXT,
+    expected_secondary_sha256 TEXT,
+    mirrored_revision INTEGER,
+    state TEXT NOT NULL CHECK (state IN ('unknown', 'matching', 'pending', 'conflict', 'missing')),
+    draft_primary_bytes BLOB,
+    draft_secondary_bytes BLOB,
+    observed_primary_sha256 TEXT,
+    observed_secondary_sha256 TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (campaign_slug, object_kind, object_ref)
+);
+CREATE TABLE IF NOT EXISTS committed_source_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_slug TEXT NOT NULL,
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('config', 'character', 'page')),
+    object_ref TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    expected_primary_sha256 TEXT,
+    expected_secondary_sha256 TEXT,
+    state TEXT NOT NULL CHECK (state IN ('pending', 'retry', 'conflict', 'complete')),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (campaign_slug, object_kind, object_ref, revision),
+    FOREIGN KEY (campaign_slug, object_kind, object_ref, revision)
+      REFERENCES committed_source_generations(campaign_slug, object_kind, object_ref, revision)
+);
+CREATE TABLE IF NOT EXISTS committed_source_activation (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    activated INTEGER NOT NULL DEFAULT 0 CHECK (activated IN (0, 1)),
+    activated_at TEXT,
+    coverage_version INTEGER NOT NULL DEFAULT 0,
+    schema_version INTEGER NOT NULL DEFAULT 15,
+    CHECK ((activated = 0 AND activated_at IS NULL) OR (activated = 1 AND activated_at IS NOT NULL))
+);
+INSERT OR IGNORE INTO committed_source_activation(singleton, activated, coverage_version, schema_version)
+VALUES (1, 0, 0, 15);
+CREATE TRIGGER IF NOT EXISTS committed_source_activation_no_insert_active
+BEFORE INSERT ON committed_source_activation WHEN NEW.activated <> 0
+BEGIN SELECT RAISE(ABORT, 'committed source activation is not available'); END;
+CREATE TRIGGER IF NOT EXISTS committed_source_activation_no_update_active
+BEFORE UPDATE ON committed_source_activation WHEN NEW.activated <> 0
+BEGIN SELECT RAISE(ABORT, 'committed source activation is not available'); END;
+CREATE TRIGGER IF NOT EXISTS committed_source_activation_no_delete
+BEFORE DELETE ON committed_source_activation
+BEGIN SELECT RAISE(ABORT, 'committed source activation marker is permanent'); END;
+"""
+SCHEMA_V15_SQL = SCHEMA_V14_SQL + "\n" + _COMMITTED_SOURCE_SCHEMA_SQL
+_COMMITTED_IMAGE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS committed_page_images (
+ campaign_slug TEXT NOT NULL,
+ object_kind TEXT NOT NULL DEFAULT 'page' CHECK(object_kind = 'page'),
+ page_ref TEXT NOT NULL,
+ revision INTEGER NOT NULL CHECK(revision > 0),
+ asset_ref TEXT NOT NULL,
+ sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+ image_bytes BLOB NOT NULL CHECK(length(image_bytes) > 0 AND length(image_bytes) <= 8388608),
+ PRIMARY KEY(campaign_slug, page_ref, revision, asset_ref),
+ FOREIGN KEY(campaign_slug, object_kind, page_ref, revision)
+ REFERENCES committed_source_generations(campaign_slug, object_kind, object_ref, revision)
+);
+CREATE TRIGGER IF NOT EXISTS committed_page_images_no_update BEFORE UPDATE ON committed_page_images
+BEGIN SELECT RAISE(ABORT, 'committed image bytes are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS committed_page_images_no_delete BEFORE DELETE ON committed_page_images
+BEGIN SELECT RAISE(ABORT, 'committed image bytes are immutable'); END;
+"""
+SCHEMA_V16_SQL = SCHEMA_V15_SQL + "\n" + _COMMITTED_IMAGE_SCHEMA_SQL
+_COMMITTED_CHARACTER_PORTRAIT_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS committed_character_portraits (
+ campaign_slug TEXT NOT NULL,
+ object_kind TEXT NOT NULL DEFAULT 'character' CHECK(object_kind = 'character'),
+ character_slug TEXT NOT NULL,
+ revision INTEGER NOT NULL CHECK(revision > 0),
+ asset_ref TEXT NOT NULL,
+ sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+ image_bytes BLOB NOT NULL CHECK(length(image_bytes) > 0 AND length(image_bytes) <= 8388608),
+ PRIMARY KEY(campaign_slug, character_slug, revision),
+ FOREIGN KEY(campaign_slug, object_kind, character_slug, revision)
+ REFERENCES committed_source_generations(campaign_slug, object_kind, object_ref, revision)
+);
+CREATE TRIGGER IF NOT EXISTS committed_character_portraits_no_update
+BEFORE UPDATE ON committed_character_portraits
+BEGIN SELECT RAISE(ABORT, 'committed portrait bytes are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS committed_character_portraits_no_delete
+BEFORE DELETE ON committed_character_portraits
+BEGIN SELECT RAISE(ABORT, 'committed portrait bytes are immutable'); END;
+"""
+CURRENT_SCHEMA_SQL = SCHEMA_V16_SQL + "\n" + _COMMITTED_CHARACTER_PORTRAIT_SCHEMA_SQL
 
 
 class MigrationError(RuntimeError):
@@ -2435,9 +2618,15 @@ _CAMPAIGN_SESSION_CLOSEOUTS_CHECKSUM = (
     "5b22a2400de5360db911e6de51e5bbb7ceed70db7e27b6f035b5b7b2a774bfc1"
 )
 
-_SYSTEMS_REVISION_PAYLOAD = MigrationPayload(schema_sql=CURRENT_SCHEMA_SQL, transforms=())
+_SYSTEMS_REVISION_PAYLOAD = MigrationPayload(schema_sql=SCHEMA_V14_SQL, transforms=())
 _SYSTEMS_REVISION_CHECKSUM = "69f3745d9d171e97e174887032f502b29fe14077d4c7b4ef2e4717daf341fa51"
+_COMMITTED_SOURCE_PAYLOAD = MigrationPayload(schema_sql=SCHEMA_V15_SQL, transforms=())
+_COMMITTED_SOURCE_CHECKSUM = "20a56573f27b5256121dbd11cc343fc496502cfdc218cfea606eadf80a466e45"
 
+_COMMITTED_IMAGE_PAYLOAD = MigrationPayload(schema_sql=SCHEMA_V16_SQL, transforms=())
+_COMMITTED_IMAGE_CHECKSUM = "f99b3e993e8fc2193dee4a1d1625a197db3a36d945eeff26a26ff19a74cc7b3d"
+_COMMITTED_CHARACTER_PORTRAIT_PAYLOAD = MigrationPayload(schema_sql=CURRENT_SCHEMA_SQL, transforms=())
+_COMMITTED_CHARACTER_PORTRAIT_CHECKSUM = "4dd3eb97b6a7ad6b1d3d63519f9d81271c1714f534cf8e7343ddf31c042278d1"
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, _BASELINE_NAME, _BASELINE_CHECKSUM, _BASELINE_PAYLOAD),
@@ -2514,6 +2703,10 @@ MIGRATIONS: tuple[Migration, ...] = (
         _CAMPAIGN_SESSION_CLOSEOUTS_PAYLOAD,
     ),
     Migration(14, "0014_systems_revision", _SYSTEMS_REVISION_CHECKSUM, _SYSTEMS_REVISION_PAYLOAD),
+    Migration(15, "0015_committed_source_authority", _COMMITTED_SOURCE_CHECKSUM, _COMMITTED_SOURCE_PAYLOAD),
+    Migration(16, "0016_committed_page_images", _COMMITTED_IMAGE_CHECKSUM, _COMMITTED_IMAGE_PAYLOAD),
+    Migration(17, "0017_committed_character_portraits", _COMMITTED_CHARACTER_PORTRAIT_CHECKSUM,
+              _COMMITTED_CHARACTER_PORTRAIT_PAYLOAD),
 )
 
 

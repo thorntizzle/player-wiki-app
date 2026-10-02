@@ -10,6 +10,9 @@ from .character_editor import CharacterEditValidationError
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError, CharacterStateUnavailableError
 from .character_reconciliation import CharacterPublicationConflict
+from .character_page_records import list_visible_character_page_records
+from .character_source_repair import load_verified_manual_actions, load_verified_numeric_actions
+from .character_source_authority import build_reconciled_source_authority
 
 
 @dataclass(frozen=True)
@@ -89,15 +92,13 @@ def register_character_retraining_route(
                     character_slug=character_slug,
                 )
             )
-        campaign_page_records = [
-            page_record
-            for page_record in dependencies.get_campaign_page_store().list_page_records(
-                campaign_slug
-            )
-            if page_record.page.published
-            and page_record.page.reveal_after_session <= campaign.current_session
-            and str(page_record.page.section or "").strip() != "Sessions"
-        ]
+        campaign_page_records = list_visible_character_page_records(
+            dependencies.get_campaign_page_store(),
+            campaign_slug,
+            campaign,
+            include_body=False,
+            excluded_sections={"Sessions"},
+        )
         spell_catalog = dependencies._build_spell_catalog(
             dependencies._list_campaign_enabled_entries(
                 current_app.extensions["systems_service"],
@@ -183,6 +184,10 @@ def register_character_retraining_route(
                     spell_catalog=spell_catalog,
                     item_catalog=item_catalog,
                     systems_service=current_app.extensions["systems_service"],
+                    state=record.state_record.state or {},
+                    state_revision=record.state_record.revision,
+                    verified_manual_actions=load_verified_manual_actions(campaign_slug, character_slug),
+                    verified_numeric_actions=load_verified_numeric_actions(campaign_slug, character_slug),
                 )
             )
             definition = dependencies.finalize_character_definition_for_write(
@@ -190,6 +195,17 @@ def register_character_retraining_route(
                 definition,
                 campaign=campaign,
             )
+            from .committed_publication import active
+            prospective_authority = None
+            if active():
+                prospective_authority = build_reconciled_source_authority(
+                    definition=definition, state=record.state_record.state or {},
+                    state_revision=record.state_record.revision,
+                    systems_service=current_app.extensions["systems_service"],
+                    campaign_page_records=campaign_page_records,
+                    verified_manual_actions=load_verified_manual_actions(campaign_slug, character_slug),
+                    verified_numeric_actions=load_verified_numeric_actions(campaign_slug, character_slug),
+                )
             removed_resource_ids: set[str] = set()
             source_type = str(
                 (record.definition.source or {}).get("source_type") or ""
@@ -209,6 +225,7 @@ def register_character_retraining_route(
             merged_state = dependencies.merge_state_with_definition(
                 definition,
                 record.state_record.state,
+                source_authority=prospective_authority,
                 inventory_quantity_overrides=inventory_quantity_overrides,
                 removed_resource_ids=removed_resource_ids,
             )

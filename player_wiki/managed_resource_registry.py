@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .repository import normalize_lookup
+from .character_page_companion import blocks_page_companion_heuristics
 
 
 def managed_resource_formula_fixed(value: int) -> dict[str, Any]:
@@ -1505,6 +1506,8 @@ def _build_managed_resource_family_maps() -> tuple[dict[str, dict[str, Any]], di
 
 
 def resolve_managed_resource_family_and_member(feature_payload: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if blocks_page_companion_heuristics(feature_payload):
+        return None, None
     systems_ref = dict(feature_payload.get("systems_ref") or {})
     systems_slug = normalize_lookup(str(systems_ref.get("slug") or "").strip())
     page_ref = normalize_lookup(str(feature_payload.get("page_ref") or "").strip())

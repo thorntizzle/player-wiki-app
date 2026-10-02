@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from flask import current_app, has_app_context
+
 from .character_hit_dice import hit_dice_summary_from_state
 from .character_models import CharacterRecord
 from .character_profile import profile_class_level_text
+from .db import get_db
+from .system_policy import is_dnd_5e_system
 from .combat_models import (
     COMBAT_SOURCE_KIND_CHARACTER,
     COMBAT_SOURCE_KIND_DM_STATBLOCK,
@@ -78,6 +82,38 @@ def present_combat_tracker(
             if combatant.character_slug
             else None
         )
+        historical_snapshot = combatant.is_player_character and character_record is None
+        movement_safe = not historical_snapshot
+        hp_safe = not historical_snapshot
+        authority = None
+        if (combatant.is_player_character and character_record is not None
+                and is_dnd_5e_system(character_record.definition.system)):
+            historical_snapshot = True
+            movement_safe = False
+            if character_record is not None and has_app_context():
+                try:
+                    from .committed_publication import active
+                    if not active(get_db()):
+                        historical_snapshot = False
+                        movement_safe = True
+                        hp_safe = True
+                    else:
+                        state_service = current_app.extensions["character_state_service"]
+                        authority = state_service.current_authority(character_record)
+                        movement_safe = authority is not None and authority.field_status("stats.speed").is_effective
+                        hp_safe = authority is not None and authority.field_status("stats.max_hp").is_effective
+                        historical_snapshot = authority is None or any(
+                            not authority.field_status(path).is_effective
+                            for path in (
+                                "stats.initiative_bonus", "stats.ability_scores.dex.modifier",
+                                "stats.max_hp", "stats.speed",
+                            )
+                        )
+                except (KeyError, RuntimeError, TypeError, ValueError):
+                    historical_snapshot = True
+                    movement_safe = False
+                    hp_safe = False
+                    authority = None
         profile = dict(character_record.definition.profile or {}) if character_record is not None else {}
         stats = dict(character_record.definition.stats or {}) if character_record is not None else {}
         hit_dice = (
@@ -85,6 +121,25 @@ def present_combat_tracker(
             if character_record is not None
             else {"pools": [], "value": "", "full_value": "", "regain_on_long_rest": 0}
         )
+        if combatant.is_player_character and authority is not None:
+            hit_dice = dict(hit_dice)
+            hit_dice["pools"] = [
+                {**pool, "raw_max": pool["max"],
+                 "max": pool["max"] if authority.resource_status("hit_die", str(pool["faces"])).is_effective else None,
+                 "can_edit": authority.resource_status("hit_die", str(pool["faces"])).is_effective}
+                for pool in hit_dice["pools"]
+            ]
+            if any(not pool["can_edit"] for pool in hit_dice["pools"]):
+                hit_dice["value"] = f"Raw {hit_dice['value']} · NEEDS REPAIR"
+        elif combatant.is_player_character and not historical_snapshot:
+            hit_dice = dict(hit_dice)
+            hit_dice["pools"] = [{**pool, "can_edit": True} for pool in hit_dice["pools"]]
+        elif combatant.is_player_character and historical_snapshot:
+            hit_dice = dict(hit_dice)
+            hit_dice["pools"] = [{**pool, "raw_max": pool["max"], "max": None, "can_edit": False}
+                                 for pool in hit_dice["pools"]]
+            if hit_dice["pools"]:
+                hit_dice["value"] = f"Raw {hit_dice['value']} · NEEDS REPAIR"
         conditions = conditions_by_combatant.get(combatant.id, [])
         resource_counters = resource_counters_by_combatant.get(combatant.id, []) if show_detail else []
         resource_notes = resource_notes_by_combatant.get(combatant.id, []) if show_detail else []
@@ -109,6 +164,11 @@ def present_combat_tracker(
                 "player_detail_visible": player_detail_visible,
                 "turn_value": combatant.turn_value,
                 "initiative_bonus_label": format_signed(combatant.initiative_bonus) if show_detail else "",
+                "historical_snapshot": historical_snapshot,
+                "snapshot_note": (
+                    "Historical table-managed Combat snapshot; Character numeric owners need repair before automatic refresh."
+                    if historical_snapshot and show_detail else ""
+                ),
                 "dexterity_modifier": combatant.dexterity_modifier if can_manage_combat else None,
                 "dexterity_modifier_label": (
                     format_signed(combatant.dexterity_modifier) if can_manage_combat else ""
@@ -126,7 +186,9 @@ def present_combat_tracker(
                 "movement_total": combatant.movement_total if show_detail else None,
                 "movement_remaining": combatant.movement_remaining if show_detail else None,
                 "speed_label": (
-                    str(stats.get("speed") or f"{combatant.movement_total} ft.").strip()
+                    (f"Raw {combatant.movement_total} ft. · NEEDS REPAIR" if not movement_safe else
+                     str((authority.field_status("stats.speed").effective if authority is not None else
+                          stats.get("speed")) or f"{combatant.movement_total} ft.").strip())
                     if show_detail
                     else ""
                 ),
@@ -134,11 +196,15 @@ def present_combat_tracker(
                 "has_bonus_action": combatant.has_bonus_action if show_detail else False,
                 "has_reaction": combatant.has_reaction if show_detail else False,
                 "is_current_turn": combatant.id == tracker.current_combatant_id,
-                "can_edit_vitals": can_manage_combat
+                "can_edit_vitals": hp_safe and (can_manage_combat
                 or (
                     combatant.is_player_character
                     and viewer_owns_character
-                ),
+                )),
+                "can_edit_hit_dice": any(pool.get("can_edit", False) for pool in hit_dice.get("pools", []))
+                and (can_manage_combat or (combatant.is_player_character and viewer_owns_character)),
+                "can_edit_movement": movement_safe and (can_manage_combat
+                or (combatant.is_player_character and viewer_owns_character)),
                 "can_edit_resources": can_manage_combat
                 or (
                     combatant.is_player_character

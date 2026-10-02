@@ -108,6 +108,173 @@ class _AuthorityConflict(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class PendingReviewedSourceProof:
+    """The source basis observed during an activated prospective review."""
+
+    prior_revision: int
+    prior_definition_digest: str
+    prior_state_digest: str
+    candidate_definition_digest: str
+    desired_state_digest: str
+    source_snapshot_digest: str
+    authority_identity: str
+    config_revision: int
+    page_feature_markers: tuple[dict[str, Any], ...] = ()
+    reviewed_source_digest: str = ""
+    reviewed_policy_digest: str = ""
+    refresh_review_basis: Callable[[], tuple[str, str]] | None = field(
+        default=None, repr=False, compare=False,
+    )
+
+    @staticmethod
+    def _digest(value: Any) -> str:
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                         ensure_ascii=False).encode("utf-8")).hexdigest()
+
+    @classmethod
+    def capture(cls, prior_record: CharacterRecord, definition: CharacterDefinition,
+                desired_state: dict[str, Any], authority: Any, *,
+                config_revision: int | None = None,
+                page_feature_markers: tuple[dict[str, Any], ...] = (),
+                source_digest: str = "", policy_digest: str = "",
+                refresh_review_basis: Callable[[], tuple[str, str]] | None = None,
+                ) -> PendingReviewedSourceProof:
+        from .committed_character_publication import config
+        revision = (config(definition.campaign_slug)[0]["revision"]
+                    if config_revision is None else config_revision)
+        if (authority is None or not authority.identity
+                or not authority.source_snapshot_digest or type(revision) is not int):
+            raise CharacterStateConflictError("Character source proof is unavailable.")
+        return cls(prior_record.committed_revision,
+                   cls._digest(prior_record.definition.to_dict()),
+                   cls._digest(prior_record.state_record.state),
+                   cls._digest(definition.to_dict()), cls._digest(desired_state),
+                   authority.source_snapshot_digest, authority.identity, revision,
+                   tuple(json.loads(json.dumps(marker)) for marker in page_feature_markers),
+                   source_digest, policy_digest, refresh_review_basis)
+
+    def prospective_authority(self, authority: Any, definition: CharacterDefinition,
+                              prior_state: dict[str, Any]) -> Any:
+        if self.page_feature_markers:
+            from .character_source_authority import with_pending_page_feature_witnesses
+            return with_pending_page_feature_witnesses(
+                authority, definition, prior_state, self.page_feature_markers,
+            )
+        return authority
+
+    def recheck(self, prior_record: CharacterRecord, definition: CharacterDefinition,
+                desired_state: dict[str, Any], authority: Any, config_revision: int) -> None:
+        if (prior_record.committed_revision != self.prior_revision
+                or self._digest(prior_record.definition.to_dict()) != self.prior_definition_digest
+                or self._digest(prior_record.state_record.state) != self.prior_state_digest
+                or self._digest(definition.to_dict()) != self.candidate_definition_digest
+                or self._digest(desired_state) != self.desired_state_digest
+                or authority is None or authority.identity != self.authority_identity
+                or authority.source_snapshot_digest != self.source_snapshot_digest
+                or config_revision != self.config_revision):
+            raise CharacterStateConflictError("Reviewed Character source changed before publication.")
+        if self.refresh_review_basis is not None and (
+            self.refresh_review_basis() != (
+                self.reviewed_source_digest, self.reviewed_policy_digest,
+            )
+        ):
+            raise CharacterStateConflictError("Reviewed Character policy changed before publication.")
+
+
+@dataclass(frozen=True, slots=True)
+class PendingNativeLevelUpAuthority:
+    """In-memory proof for one native publication; never journaled as a witness."""
+
+    prior_revision: int
+    prior_definition_digest: str
+    candidate_definition_digest: str
+    desired_state_digest: str
+    authority_identity: str
+    source_snapshot_digest: str
+    markers: tuple[dict[str, Any], ...]
+    refresh: Callable[[], Any] = field(repr=False, compare=False)
+    claimed: bool = field(default=False, repr=False, compare=False)
+    claim_lock: Lock = field(default_factory=Lock, repr=False, compare=False)
+
+    def claim(self) -> None:
+        with self.claim_lock:
+            if self.claimed:
+                raise CharacterStateConflictError("Native level-up proof was already used.")
+            object.__setattr__(self, "claimed", True)
+
+    @classmethod
+    def from_proof(
+        cls, *, prior_record: CharacterRecord, definition: CharacterDefinition,
+        desired_state: dict[str, Any], authority: Any,
+        markers: tuple[dict[str, Any], ...], refresh: Callable[[], Any],
+    ) -> PendingNativeLevelUpAuthority:
+        from .character_equipment_activation import definition_digest
+        from .character_source_authority import numeric_target_values, numeric_value_digest
+
+        if not markers or not callable(refresh) or authority is None:
+            raise CharacterStateConflictError("Native level-up proof is incomplete.")
+        values = numeric_target_values(definition, desired_state)
+        action_ids = {marker.get("action_id") for marker in markers}
+        if len(action_ids) != 1 or None in action_ids:
+            raise CharacterStateConflictError("Native level-up action identity is ambiguous.")
+        for marker in markers:
+            target = (marker.get("target_kind"), marker.get("target_id"), marker.get("metric"))
+            target_id = str(marker.get("target_id") or "")
+            if (marker.get("provenance") != "native_level_up"
+                    or target not in values
+                    or marker.get("value_digest") != numeric_value_digest(values[target])):
+                raise CharacterStateConflictError("Native level-up target changed before publication.")
+            if marker.get("target_kind") == "spell_metric":
+                status = None
+                if target_id not in authority.verified_formula_rows:
+                    raise CharacterStateConflictError("Native spell formula owner is unverified.")
+            elif marker.get("target_kind") == "spell_choice":
+                status = None
+                if target_id.removeprefix("spell_choice:") not in authority.verified_spell_choices:
+                    raise CharacterStateConflictError("Native spell choice is unverified.")
+            elif target_id == "stats.max_hp":
+                status = authority.field_status(target_id)
+            else:
+                kind, _, stable_id = target_id.partition(":")
+                status = authority.resource_status(kind, stable_id)
+            if status is not None and not status.is_effective:
+                raise CharacterStateConflictError("Native level-up owner is unverified.")
+        return cls(
+            prior_record.state_record.revision,
+            definition_digest(prior_record.definition), definition_digest(definition),
+            numeric_value_digest(desired_state), authority.identity,
+            authority.source_snapshot_digest, tuple(markers), refresh,
+        )
+
+    def recheck(
+        self, prior_record: CharacterRecord, definition: CharacterDefinition,
+        desired_state: dict[str, Any],
+    ) -> Any:
+        from .character_equipment_activation import definition_digest
+        from .character_source_authority import numeric_target_values, numeric_value_digest
+
+        if (not self.claimed or prior_record.state_record.revision != self.prior_revision
+                or definition_digest(prior_record.definition) != self.prior_definition_digest
+                or definition_digest(definition) != self.candidate_definition_digest
+                or numeric_value_digest(desired_state) != self.desired_state_digest):
+            raise CharacterStateConflictError("Native level-up proof changed before publication.")
+        values = numeric_target_values(definition, desired_state)
+        if any(
+            (marker.get("target_kind"), marker.get("target_id"), marker.get("metric")) not in values
+            or marker.get("value_digest") != numeric_value_digest(values.get((
+                marker.get("target_kind"), marker.get("target_id"), marker.get("metric")
+            )))
+            for marker in self.markers
+        ):
+            raise CharacterStateConflictError("Native level-up value changed before publication.")
+        authority = self.refresh()
+        if (authority is None or authority.identity != self.authority_identity
+                or authority.source_snapshot_digest != self.source_snapshot_digest):
+            raise CharacterStateConflictError("Native level-up source changed before publication.")
+        return authority
+
+
+@dataclass(frozen=True, slots=True)
 class CharacterReconciliationHooks:
     on_event: Callable[[str, str], None] | None = None
 
@@ -316,6 +483,7 @@ class CharacterPublicationCoordinator:
         self.repository = repository
         self.auth_store = auth_store
         self.hooks = hooks or CharacterReconciliationHooks()
+        self.numeric_authority_provider: Callable[[CharacterRecord, CharacterDefinition], Any] | None = None
 
     def create(
         self,
@@ -326,6 +494,12 @@ class CharacterPublicationCoordinator:
         operation_kind: str,
         updated_by_user_id: int | None = None,
     ) -> CharacterRecord:
+        from .committed_publication import active
+        if active():
+            from .committed_character_publication import publish_create
+            return publish_create(self, definition, import_metadata, initial_state,
+                                  operation_kind=operation_kind,
+                                  updated_by_user_id=updated_by_user_id)
         self._validate_create_input(definition, import_metadata, operation_kind)
         from .character_equipment_activation import analyze_activation
         from .system_policy import is_dnd_5e_system
@@ -360,6 +534,11 @@ class CharacterPublicationCoordinator:
         audit_actor_user_id: int | None = None,
         audit_target_user_id: int | None = None,
         audit_metadata: dict[str, Any] | None = None,
+        pending_numeric_authority: Any | None = None,
+        reviewed_source_proof: PendingReviewedSourceProof | None = None,
+        trusted_spell_choice_authoring: bool = False,
+        reconcile_reimport_state: bool = False,
+        reimport_source_authority: Any | None = None,
     ) -> CharacterRecord:
         self._validate_update_input(
             prior_record,
@@ -368,12 +547,126 @@ class CharacterPublicationCoordinator:
             expected_revision=expected_revision,
             operation_kind=operation_kind,
         )
+        from .committed_publication import active
+        committed_mode = active()
+        if reimport_source_authority is not None and (
+            not committed_mode or not reconcile_reimport_state
+            or operation_kind not in {"markdown_import", "pdf_import"}
+        ):
+            raise CharacterStateConflictError("Reimport source proof is unavailable for this update.")
+        if pending_numeric_authority is not None:
+            if not committed_mode:
+                raise CharacterStateConflictError("Pending authority is unavailable for this update.")
+            if operation_kind != "interactive_update" or not isinstance(
+                pending_numeric_authority, PendingNativeLevelUpAuthority
+            ):
+                raise CharacterStateConflictError("Pending authority is unavailable for this update.")
+            pending_numeric_authority.claim()
+        if reviewed_source_proof is not None and (
+            not committed_mode or not isinstance(reviewed_source_proof, PendingReviewedSourceProof)
+        ):
+            raise CharacterStateConflictError("Reviewed source proof is unavailable for this update.")
+        if committed_mode:
+            prior_markers = list(dict(prior_record.definition.source or {}).get(
+                "source_authorizations") or [])
+            candidate_markers = list(dict(definition.source or {}).get(
+                "source_authorizations") or [])
+            for marker in candidate_markers:
+                if not isinstance(marker, dict) or marker.get("provenance") != "page_feature_update":
+                    continue
+                if marker not in prior_markers and (
+                    operation_kind != "character_update_apply"
+                    or reviewed_source_proof is None
+                    or marker not in reviewed_source_proof.page_feature_markers
+                ):
+                    raise CharacterStateConflictError(
+                        "A page feature resource witness cannot be copied into this update."
+                    )
+        if trusted_spell_choice_authoring and operation_kind != "interactive_update":
+            raise CharacterStateConflictError("Spell choice authority is unavailable for this update.")
+        if committed_mode and operation_kind != "character_update_apply":
+            from .character_source_authority import (
+                manual_target_digest, numeric_target_owner_digest, numeric_target_values,
+            )
+            old_manual = list(dict(prior_record.definition.spellcasting or {}).get("manual_authorizations") or [])
+            new_manual = list(dict(definition.spellcasting or {}).get("manual_authorizations") or [])
+            for marker in new_manual:
+                if not isinstance(marker, dict):
+                    continue
+                kind, target_id = marker.get("target_kind"), marker.get("target_id")
+                if (marker not in old_manual or not isinstance(kind, str) or not isinstance(target_id, str)
+                        or manual_target_digest(prior_record.definition, kind, target_id) is None
+                        or manual_target_digest(prior_record.definition, kind, target_id)
+                        != manual_target_digest(definition, kind, target_id)):
+                    raise CharacterStateConflictError("A manager spell authorization cannot be copied into this update.")
+            old_numeric = list(dict(prior_record.definition.source or {}).get("source_authorizations") or [])
+            new_numeric = list(dict(definition.source or {}).get("source_authorizations") or [])
+            old_numeric_values = numeric_target_values(prior_record.definition, prior_record.state_record.state)
+            new_numeric_values = numeric_target_values(definition, desired_state)
+            for marker in new_numeric:
+                if not isinstance(marker, dict):
+                    continue
+                kind, target_id, metric = (marker.get("target_kind"), marker.get("target_id"),
+                                           marker.get("metric"))
+                key = (kind, target_id, metric)
+                provenance = marker.get("provenance")
+                if provenance in {"native_creation", "native_level_up", "native_spell_choice"}:
+                    if (pending_numeric_authority is not None and provenance == "native_level_up"
+                            and marker in pending_numeric_authority.markers
+                            or trusted_spell_choice_authoring and provenance == "native_spell_choice"):
+                        continue
+                    if (marker not in old_numeric or key not in old_numeric_values
+                            or key not in new_numeric_values
+                            or old_numeric_values[key] != new_numeric_values[key]):
+                        raise CharacterStateConflictError(
+                            "A native source authorization cannot be copied into this update.")
+                    continue
+                if provenance != "manager":
+                    continue
+                if (marker not in old_numeric or not all(isinstance(value, str)
+                                                         for value in (kind, target_id, metric))
+                        or numeric_target_owner_digest(
+                            prior_record.definition, prior_record.state_record.state,
+                            kind, target_id, metric) is None
+                        or numeric_target_owner_digest(
+                            prior_record.definition, prior_record.state_record.state,
+                            kind, target_id, metric)
+                        != numeric_target_owner_digest(definition, desired_state, kind, target_id, metric)):
+                    raise CharacterStateConflictError("A manager numeric authorization cannot be copied into this update.")
+        if committed_mode and pending_numeric_authority is None and not trusted_spell_choice_authoring:
+            from .character_source_authority import numeric_target_values
+            old_choices = numeric_target_values(prior_record.definition, prior_record.state_record.state)
+            new_choices = numeric_target_values(definition, desired_state)
+            markers = list(dict(definition.source or {}).get("source_authorizations") or [])
+            for key, value in new_choices.items():
+                if key[0] != "spell_choice" or old_choices.get(key) == value:
+                    continue
+                if any(isinstance(marker, dict) and
+                       (marker.get("target_kind"), marker.get("target_id"), marker.get("metric")) == key
+                       for marker in markers):
+                    raise CharacterStateConflictError(
+                        "A copied spell choice authorization cannot accompany a raw edit."
+                    )
         from .character_equipment_activation import analyze_activation
         from .system_policy import is_dnd_5e_system
         if (operation_kind != "activation_repair" and is_dnd_5e_system(definition.system)
                 and analyze_activation(definition, desired_state)["blocked"]):
             raise CharacterStateConflictError(
                 "Equipment activation identity needs manager repair before this Character update."
+            )
+        if committed_mode:
+            from .committed_character_publication import publish_update
+            return publish_update(
+                self, prior_record, definition, import_metadata, desired_state,
+                expected_revision=expected_revision, updated_by_user_id=updated_by_user_id,
+                operation_kind=operation_kind, audit_event_type=audit_event_type,
+                audit_actor_user_id=audit_actor_user_id,
+                audit_target_user_id=audit_target_user_id, audit_metadata=audit_metadata,
+                pending_numeric_authority=pending_numeric_authority,
+                reviewed_source_proof=reviewed_source_proof,
+                trusted_spell_choice_authoring=trusted_spell_choice_authoring,
+                reconcile_reimport_state=reconcile_reimport_state,
+                reimport_source_authority=reimport_source_authority,
             )
         key = (definition.campaign_slug, definition.character_slug)
         with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
@@ -390,6 +683,8 @@ class CharacterPublicationCoordinator:
                     audit_actor_user_id=audit_actor_user_id,
                     audit_target_user_id=audit_target_user_id,
                     audit_metadata=audit_metadata,
+                    pending_numeric_authority=pending_numeric_authority,
+                    trusted_spell_choice_authoring=trusted_spell_choice_authoring,
                 )
                 self._event("after_commit", operation.operation_id)
                 return self._continue_operation(operation.operation_id)
@@ -401,6 +696,8 @@ class CharacterPublicationCoordinator:
         *,
         expected_revision: int,
         updated_by_user_id: int | None,
+        item_id: str | None = None,
+        values: dict[str, Any] | None = None,
     ) -> CharacterStateRecord:
         """Serialize state activation with structural publication and deletion.
 
@@ -410,6 +707,44 @@ class CharacterPublicationCoordinator:
         from .character_equipment_activation import definition_digest
         from .character_equipment_migration import _assert_activation_only_delta
         from .character_service import validate_state
+        from .committed_publication import active
+
+        if active():
+            from .character_store import publication_source_write_transaction
+            from .committed_character_publication import load_for_write
+            from .character_equipment_state import build_reserved_equipment_state_update_result
+            from .character_editor import CharacterEditValidationError
+            key = (prior_record.definition.campaign_slug, prior_record.definition.character_slug)
+            if (not isinstance(item_id, str) or not item_id.strip()
+                    or len(item_id) > 256 or not isinstance(values, dict)):
+                raise CharacterEditValidationError("Equipment intent is unavailable.")
+            from .character_builder_equipment import _normalize_weapon_wield_mode_value
+            if any(field in values and not isinstance(values[field], bool)
+                   for field in ("is_equipped", "is_attuned")):
+                raise CharacterEditValidationError("Equipment intent is malformed.")
+            raw_mode = values.get("weapon_wield_mode")
+            if (raw_mode is not None and (not isinstance(raw_mode, str)
+                                          or len(raw_mode) > 64
+                                          or raw_mode.strip() and not _normalize_weapon_wield_mode_value(raw_mode))):
+                raise CharacterEditValidationError("Equipment wielding intent is malformed.")
+            with publication_source_write_transaction() as connection:
+                current = load_for_write(self.repository, *key)
+                if (current is None or current.committed_revision is None
+                        or current.committed_revision != prior_record.committed_revision):
+                    raise CharacterStateConflictError("Character definition changed before the action.")
+                if (current.state_record.revision != expected_revision
+                        or current.state_record.state != prior_record.state_record.state):
+                    raise CharacterStateConflictError("Character state changed before the action.")
+                desired_state = build_reserved_equipment_state_update_result(
+                    current, item_id, values, connection=connection,
+                )
+                validated_state = validate_state(current.definition, desired_state)
+                _assert_activation_only_delta(current.state_record.state, validated_state)
+                result = self.state_store.replace_state(
+                    current.definition, validated_state, expected_revision=expected_revision,
+                    updated_by_user_id=updated_by_user_id, commit=False,
+                )
+                return result
 
         key = (prior_record.definition.campaign_slug, prior_record.definition.character_slug)
         try:
@@ -421,6 +756,7 @@ class CharacterPublicationCoordinator:
                     if (
                         current.state_record.revision != expected_revision
                         or definition_digest(current.definition) != definition_digest(prior_record.definition)
+                        or current.committed_revision != prior_record.committed_revision
                     ):
                         raise CharacterStateConflictError("Character definition or state changed before the action.")
                     desired_state = build_state(current)
@@ -452,9 +788,20 @@ class CharacterPublicationCoordinator:
         operation_kind: str,
         desired_asset_ref: str = "",
         desired_asset_bytes: bytes = b"",
+        reviewed_source_proof: PendingReviewedSourceProof | None = None,
     ) -> CharacterRecord:
         if operation_kind not in PORTRAIT_OPERATION_KINDS:
             raise CharacterPublicationError("Unsupported character portrait operation.")
+        from .committed_publication import active
+        if active():
+            old_markers = [row for row in list(dict(prior_record.definition.source or {}).get(
+                "source_authorizations") or []) if isinstance(row, dict)
+                and row.get("provenance") == "page_feature_update"]
+            new_markers = [row for row in list(dict(definition.source or {}).get(
+                "source_authorizations") or []) if isinstance(row, dict)
+                and row.get("provenance") == "page_feature_update"]
+            if new_markers != old_markers:
+                raise CharacterStateConflictError("Portrait updates cannot change page feature witnesses.")
         self._validate_update_input(
             prior_record,
             definition,
@@ -462,6 +809,15 @@ class CharacterPublicationCoordinator:
             expected_revision=expected_revision,
             operation_kind=operation_kind,
         )
+        if active():
+            from .committed_character_publication import publish_update
+            return publish_update(
+                self, prior_record, definition, import_metadata, desired_state,
+                expected_revision=expected_revision, updated_by_user_id=updated_by_user_id,
+                operation_kind=operation_kind, desired_asset_ref=desired_asset_ref,
+                desired_asset_bytes=desired_asset_bytes,
+                reviewed_source_proof=reviewed_source_proof,
+            )
         key = (definition.campaign_slug, definition.character_slug)
         with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
             with self._character_lock(key):
@@ -481,6 +837,11 @@ class CharacterPublicationCoordinator:
 
     def recover_key(self, campaign_slug: str, character_slug: str) -> bool:
         validate_character_slug(character_slug)
+        from .committed_publication import active
+        if active():
+            from .committed_publication import replay_mirrors
+            replay_mirrors(self.campaigns_dir, campaign_slug=campaign_slug)
+            return False
         key = (campaign_slug, character_slug)
         with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
             with self._character_lock(key):
@@ -497,6 +858,12 @@ class CharacterPublicationCoordinator:
         retained_runtime_state_lease: object | None = None,
         runtime_state_lease_provider: Callable[[], object | None] | None = None,
     ) -> dict[str, int]:
+        from .committed_publication import active
+        if active():
+            from .committed_publication import replay_mirrors
+            result = replay_mirrors(self.campaigns_dir, limit=limit)
+            return {"recovered": result["recovered"], "conflict": result["conflict"],
+                    "pending": result["pending"]}
         if (
             retained_runtime_state_lease is not None
             and runtime_state_lease_provider is not None
@@ -855,6 +1222,8 @@ class CharacterPublicationCoordinator:
         audit_actor_user_id: int | None = None,
         audit_target_user_id: int | None = None,
         audit_metadata: dict[str, Any] | None = None,
+        pending_numeric_authority: Any | None = None,
+        trusted_spell_choice_authoring: bool = False,
     ) -> CharacterReconciliationOperation:
         definition_yaml = render_character_yaml(
             "definition.yaml",
@@ -874,7 +1243,17 @@ class CharacterPublicationCoordinator:
             raise CharacterPublicationError(
                 "Character recovery payload exceeds the durable storage limit."
             )
-        prepared_state = self.state_store.prepare_initial_state(definition, desired_state)
+        from .committed_publication import active
+        if active():
+            raise CharacterStateConflictError("Character publication mode changed before the legacy write.")
+        if pending_numeric_authority is not None:
+            raise CharacterStateConflictError("Pending authority is unavailable for this update.")
+        numeric_authority = None
+        prepared_state = self.state_store.prepare_initial_state(
+            definition, desired_state,
+            source_authority=numeric_authority,
+            previous_state=prior_record.state_record.state,
+        )
         definition_path, import_path = self._paths(
             definition.campaign_slug,
             definition.character_slug,
@@ -1811,6 +2190,14 @@ class CharacterPublicationCoordinator:
 class CharacterDeletionCoordinator:
     """Commit a character deletion in SQLite, then reconcile files forward."""
 
+    @staticmethod
+    def _reject_activated_legacy_recovery() -> None:
+        from .committed_publication import active
+        if active():
+            raise CharacterDeletionConflict(
+                "Legacy Character deletion journal requires manager repair."
+            )
+
     def __init__(
         self,
         *,
@@ -1836,6 +2223,8 @@ class CharacterDeletionCoordinator:
         operation_kind: str,
         actor_user_id: int | None = None,
         audit_source: str | None = None,
+        expected_definition_revision: int | None = None,
+        expected_state_revision: int | None = None,
     ) -> CharacterDeletionResult | None:
         validate_character_slug(character_slug)
         if operation_kind not in DELETE_OPERATION_KINDS:
@@ -1845,6 +2234,15 @@ class CharacterDeletionCoordinator:
                 raise CharacterDeletionError("Raw content deletion cannot create an audit event.")
         elif audit_source != operation_kind:
             raise CharacterDeletionError("Character deletion audit source is invalid.")
+        from .committed_publication import active
+        if active():
+            from .committed_character_publication import publish_delete
+            return publish_delete(self, campaign_slug, character_slug,
+                                  operation_kind=operation_kind,
+                                  actor_user_id=actor_user_id,
+                                  audit_source=audit_source,
+                                  expected_definition_revision=expected_definition_revision,
+                                  expected_state_revision=expected_state_revision)
         key = (campaign_slug, character_slug)
         with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
             with _character_process_lock(key):
@@ -1862,6 +2260,11 @@ class CharacterDeletionCoordinator:
 
     def recover_key(self, campaign_slug: str, character_slug: str) -> bool:
         validate_character_slug(character_slug)
+        from .committed_publication import active
+        if active():
+            # A preactivation journal is not a committed deletion. Leave it
+            # intact for manager comparison; replay cannot infer a tombstone.
+            return False
         key = (campaign_slug, character_slug)
         with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
             with _character_process_lock(key):
@@ -1878,6 +2281,17 @@ class CharacterDeletionCoordinator:
         retained_runtime_state_lease: object | None = None,
         runtime_state_lease_provider: Callable[[], object | None] | None = None,
     ) -> dict[str, int]:
+        from .committed_publication import active
+        if active():
+            rows = get_db().execute(
+                "SELECT state FROM character_deletion_operations "
+                "WHERE state IN ('prepared','repository_pending','conflict') "
+                "ORDER BY updated_at, operation_id LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+            return {"recovered": 0,
+                    "conflict": sum(row["state"] == "conflict" for row in rows),
+                    "pending": sum(row["state"] != "conflict" for row in rows)}
         if (
             retained_runtime_state_lease is not None
             and runtime_state_lease_provider is not None
@@ -1932,6 +2346,7 @@ class CharacterDeletionCoordinator:
         actor_user_id: int | None,
         audit_source: str | None,
     ) -> CharacterDeletionOperation | None:
+        self._reject_activated_legacy_recovery()
         definition_path, import_path = self._paths(campaign_slug, character_slug)
         operation_id = secrets.token_hex(16)
         connection = get_db()
@@ -2210,6 +2625,7 @@ class CharacterDeletionCoordinator:
                 )
 
     def _continue_operation(self, operation_id: str) -> CharacterDeletionResult:
+        self._reject_activated_legacy_recovery()
         operation = self._load_operation(operation_id)
         if operation is None:
             raise CharacterDeletionError("Character deletion operation is unavailable.")
@@ -2223,6 +2639,7 @@ class CharacterDeletionCoordinator:
         return self._refresh_and_cleanup(operation)
 
     def _move_files(self, operation: CharacterDeletionOperation) -> None:
+        self._reject_activated_legacy_recovery()
         definition_path, import_path = self._paths(
             operation.campaign_slug, operation.character_slug
         )
@@ -2297,6 +2714,7 @@ class CharacterDeletionCoordinator:
     def _transition_repository_pending(
         self, operation: CharacterDeletionOperation
     ) -> CharacterDeletionOperation:
+        self._reject_activated_legacy_recovery()
         connection = get_db()
         self._event("before_repository_pending", operation.operation_id)
         try:
@@ -2347,6 +2765,7 @@ class CharacterDeletionCoordinator:
     def _refresh_and_cleanup(
         self, operation: CharacterDeletionOperation
     ) -> CharacterDeletionResult:
+        self._reject_activated_legacy_recovery()
         if operation.state != "repository_pending":
             raise CharacterDeletionError("Character deletion has not reached its commit point.")
         self.repository.invalidate_character(operation.campaign_slug, operation.character_slug)
@@ -2473,6 +2892,7 @@ class CharacterDeletionCoordinator:
                 raise _AuthorityConflict(f"{label}_presence_conflict")
 
     def _cleanup_tombstones(self, operation: CharacterDeletionOperation) -> None:
+        self._reject_activated_legacy_recovery()
         definition_path, import_path = self._paths(
             operation.campaign_slug, operation.character_slug
         )

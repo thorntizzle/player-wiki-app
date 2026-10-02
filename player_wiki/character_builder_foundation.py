@@ -619,17 +619,44 @@ def _resolve_profile_entry_match(
     page_ref: Any = None,
     fallback_title: str = "",
 ) -> dict[str, Any]:
+    from .committed_publication import active
+
+    # This matcher is shared by readiness, repair and derivation. An absent
+    # authority argument or a normalization mode cannot establish closed mode.
+    activated = active()
     selected_page_ref = _extract_campaign_page_ref(page_ref)
     if selected_page_ref:
-        resolved = next((entry for entry in options if _entry_page_ref(entry) == selected_page_ref), None)
-        if resolved is not None:
-            return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_PAGE_REF, "candidate_count": 1}
+        candidates = [entry for entry in options if _entry_page_ref(entry) == selected_page_ref]
+        if len(candidates) == 1 or (candidates and not activated):
+            return {"entry": candidates[0], "match_mode": PROFILE_ENTRY_MATCH_PAGE_REF, "candidate_count": 1}
+        if activated:
+            return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED_SOURCE_LOCKED, "candidate_count": len(candidates)}
+
+    if activated:
+        selected_key = str(systems_ref.get("entry_key") or "").strip() if isinstance(systems_ref, dict) else ""
+        if selected_key:
+            candidates = [entry for entry in options if str(entry.entry_key or "").strip() == selected_key]
+            if len(candidates) == 1:
+                return {"entry": candidates[0], "match_mode": PROFILE_ENTRY_MATCH_SYSTEMS_SLUG, "candidate_count": 1}
+            return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED_SOURCE_LOCKED, "candidate_count": len(candidates)}
 
     selected_slug = _systems_ref_slug(systems_ref)
     if selected_slug:
+        if activated:
+            source_id = _systems_ref_source_id(systems_ref)
+            candidates = [entry for entry in options
+                          if str(entry.slug or "").strip() == selected_slug
+                          and (not source_id or str(entry.source_id or "").strip().upper() == source_id)]
+            if len(candidates) == 1:
+                return {"entry": candidates[0], "match_mode": PROFILE_ENTRY_MATCH_SYSTEMS_SLUG, "candidate_count": 1}
+            return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED_SOURCE_LOCKED, "candidate_count": len(candidates)}
         resolved = _resolve_selected_entry(options, selected_slug)
         if resolved is not None:
             return {"entry": resolved, "match_mode": PROFILE_ENTRY_MATCH_SYSTEMS_SLUG, "candidate_count": 1}
+
+    if activated:
+        # Titles cannot authenticate automatic derivation from current sources.
+        return {"entry": None, "match_mode": PROFILE_ENTRY_MATCH_UNRESOLVED, "candidate_count": 0}
 
     source_locked_title = _systems_ref_title(systems_ref) or str(fallback_title or "").strip()
     normalized_source_locked_title = normalize_lookup(source_locked_title)

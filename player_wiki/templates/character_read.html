@@ -4,6 +4,7 @@
 
 {% block content %}
   {% set projection_warnings = character.projection_warnings %}
+  {% set historical_numeric_rows = character.historical_numeric_rows %}
   {% include "_character_projection_warnings.html" %}
   {% set repair_warning_codes = [
     'activation_migration_required', 'conflicting_id_and_catalog_ref',
@@ -247,6 +248,7 @@
       {% set character_inline_state_controls_enabled = can_use_session_mode and native_character_tools_supported and not is_session_mode and not is_xianxia_sheet %}
 
       {% if rest_preview %}
+        <div id="character-rest-preview" aria-live="polite">
         {% with
           session_character_controls_scope = "overview",
           session_character_form_mode = "session",
@@ -255,6 +257,7 @@
         %}
           {% include "_character_session_panels.html" %}
         {% endwith %}
+        </div>
       {% endif %}
 
       {% if show_quick_sections %}
@@ -855,6 +858,7 @@
                   {% if item.tags %}
                     <p class="meta">{{ item.tags | join(", ") }}</p>
                   {% endif %}
+                  {% if item.charges_label %}<p class="meta">Charges: {{ item.charges_label }}</p>{% endif %}
                   {{ character_item_description_details(item, item_dialog_id) }}
                   {{ character_item_fallback_details(item) }}
                   {% if can_use_session_mode %}

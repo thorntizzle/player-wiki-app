@@ -139,6 +139,9 @@ def _advance_cursor(previous: dict | None, current: object, row_count: int) -> d
     elif old_window and row_count != old_window["count"] - old_window["offset"]:
         raise SourceHealthSnapshotUnavailable()
     if previous:
+        if (previous["character_epoch"] is not None
+                and current["character_epoch"] != previous["character_epoch"]):
+            raise SourceHealthSnapshotUnavailable()
         for key in ("saw_any_consumer", "saw_nonhealthy"):
             if previous["outcome"][key] and not current["outcome"][key]:
                 raise SourceHealthSnapshotUnavailable()
@@ -174,7 +177,8 @@ class _Snapshot:
 class SourceHealthSnapshotService:
     def __init__(self, *, signing_key: bytes, authorize: Callable,
                  build_report: Callable, validate_continuation: Callable,
-                 query_count: Callable[[], int]) -> None:
+                 query_count: Callable[[], int],
+                 character_epoch_reader: Callable[[str], str] | None = None) -> None:
         if len(signing_key) < 16:
             raise ValueError("Source Health snapshot key is unavailable.")
         self._key = bytes(signing_key)
@@ -182,6 +186,9 @@ class SourceHealthSnapshotService:
         self._build_report = build_report
         self._validate_continuation = validate_continuation
         self._query_count = query_count
+        if character_epoch_reader is not None and not callable(character_epoch_reader):
+            raise ValueError("Invalid Character inventory epoch reader.")
+        self._character_epoch_reader = character_epoch_reader
         self._lock = Lock()
         self._snapshots: dict[str, _Snapshot] = {}
         self._reservations: set[SourceHealthSnapshotContext] = set()
@@ -301,6 +308,14 @@ class SourceHealthSnapshotService:
 
     def _collect(self, campaign_slug: str, context: SourceHealthSnapshotContext,
                  start: float, initial_queries: int) -> dict[str, object]:
+        initial_character_epoch = (
+            self._character_epoch_reader(campaign_slug)
+            if self._character_epoch_reader is not None else None
+        )
+        if initial_character_epoch is not None and (
+                type(initial_character_epoch) is not str
+                or _HEX.fullmatch(initial_character_epoch) is None):
+            raise SourceHealthSnapshotUnavailable()
         rows: list[dict[str, object]] = []
         row_bytes = 0
         seen_cursors: set[str] = set()
@@ -379,6 +394,10 @@ class SourceHealthSnapshotService:
         self._check_budget(start, initial_queries)
         with self._lock:
             # Check again after lock acquisition: collection must never publish late.
+            self._check_budget(start, initial_queries)
+            if (initial_character_epoch is not None
+                    and self._character_epoch_reader(campaign_slug) != initial_character_epoch):
+                raise SourceHealthSnapshotUnavailable()
             self._check_budget(start, initial_queries)
             now = time.monotonic()
             self._expire(now)

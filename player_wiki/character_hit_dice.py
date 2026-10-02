@@ -83,6 +83,64 @@ def normalize_hit_dice_state_payload(definition: Any, state: dict[str, Any]) -> 
     return payload
 
 
+def normalize_verified_hit_dice_state_payload(
+    definition: Any, state: dict[str, Any], verified_faces: set[int],
+) -> dict[str, Any]:
+    """Normalize only proven pools; leave every disputed raw row byte-equivalent."""
+    payload = deepcopy(state or {})
+    if not verified_faces:
+        return payload
+    raw = dict(payload.get(HIT_DICE_STATE_KEY) or {})
+    pools = [deepcopy(pool) for pool in list(raw.get("pools") or [])]
+    derived = {pool["faces"]: pool["max"] for pool in derive_hit_dice_max_pools(definition)}
+    for faces in verified_faces:
+        maximum = derived.get(faces)
+        if maximum is None:
+            continue
+        matches = [pool for pool in pools if isinstance(pool, dict) and pool.get("faces") == faces]
+        if len(matches) == 1:
+            matches[0]["max"] = maximum
+            matches[0]["current"] = max(0, min(int(matches[0].get("current") or 0), maximum))
+        elif not matches:
+            pools.append({"faces": faces, "current": maximum, "max": maximum})
+    raw["pools"] = pools
+    payload[HIT_DICE_STATE_KEY] = raw
+    return payload
+
+
+def recover_verified_hit_dice_pools(
+    definition: Any, state: dict[str, Any], verified_faces: set[int],
+    *, verified_total_level: int,
+) -> dict[str, Any]:
+    payload = normalize_verified_hit_dice_state_payload(definition, state, verified_faces)
+    pools = list(dict(payload.get(HIT_DICE_STATE_KEY) or {}).get("pools") or [])
+    verified = [pool for pool in pools if isinstance(pool, dict) and pool.get("faces") in verified_faces]
+    # The long-rest allowance is half the verified character level, even
+    # when one class's Hit Die pool itself needs repair.
+    remaining = max(1, verified_total_level // 2) if verified_total_level else 0
+    for pool in sorted(verified, key=lambda row: int(row["faces"]), reverse=True):
+        missing = max(0, int(pool.get("max") or 0) - int(pool.get("current") or 0))
+        regained = min(missing, remaining)
+        pool["current"] = int(pool.get("current") or 0) + regained
+        remaining -= regained
+    return payload
+
+
+def set_verified_hit_dice_current_values(
+    definition: Any, state: dict[str, Any], values_by_faces: dict[int, Any],
+    verified_faces: set[int],
+) -> dict[str, Any]:
+    payload = normalize_verified_hit_dice_state_payload(definition, state, verified_faces)
+    for pool in list(dict(payload.get(HIT_DICE_STATE_KEY) or {}).get("pools") or []):
+        if not isinstance(pool, dict) or pool.get("faces") not in verified_faces:
+            continue
+        faces = pool["faces"]
+        if faces in values_by_faces and str(values_by_faces[faces]).strip():
+            maximum = int(pool.get("max") or 0)
+            pool["current"] = max(0, min(int(values_by_faces[faces]), maximum))
+    return payload
+
+
 def hit_dice_total_level(definition: Any) -> int:
     return sum(int(pool["max"]) for pool in derive_hit_dice_max_pools(definition))
 

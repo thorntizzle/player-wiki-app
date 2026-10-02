@@ -26,18 +26,23 @@ def render_dnd_character_markdown(
     *,
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
+    presented_character: dict[str, Any] | None = None,
 ) -> str:
     if not is_dnd_5e_system(record.definition.system):
         raise CharacterMarkdownExportError(
             f"Markdown export is currently supported for DND-5E characters only: {record.definition.name}"
         )
 
-    character = present_character_detail(
-        campaign,
-        record,
-        systems_service=systems_service,
-        campaign_page_records=campaign_page_records,
-    )
+    character = presented_character
+    if character is None:
+        character = present_character_detail(
+            campaign,
+            record,
+            systems_service=systems_service,
+            campaign_page_records=campaign_page_records,
+        )
+    elif character.get("state_revision") != record.state_record.revision:
+        raise CharacterMarkdownExportError("Presented character state revision does not match the export record.")
     lines: list[str] = []
     definition = record.definition
 
@@ -51,6 +56,7 @@ def render_dnd_character_markdown(
             ("System", definition.system),
             ("Status", definition.status),
             ("State revision", character.get("state_revision")),
+            ("Source authority snapshot", character.get("source_authority_identity")),
             ("Equipment activation", "Effective SQLite inventory state; definition YAML is historical"),
         ],
     )
@@ -64,6 +70,17 @@ def render_dnd_character_markdown(
     _write_attacks_section(lines, character)
     _write_features_section(lines, character, definition.features)
     _write_inventory_section(lines, character)
+    unverified = [
+        (path, row) for path, row in dict(character.get("numeric_statuses") or {}).items()
+        if isinstance(row, dict) and row.get("needs_repair")
+    ]
+    if unverified:
+        _heading(lines, 2, "Historical table values needing repair")
+        for path, row in sorted(unverified):
+            raw = row.get("raw")
+            label = f"Raw {_clean_text(raw)}" if raw is not None and not isinstance(raw, (dict, list)) else "Raw value on sheet"
+            lines.append(f"- {_clean_text(path)}: {label} · {_clean_text(row.get('status') or 'NEEDS REPAIR')}")
+        lines.append("")
     warnings = list(character.get("projection_warnings") or [])
     if warnings:
         _heading(lines, 2, "Character projection warnings")
@@ -117,7 +134,7 @@ def _write_abilities_section(lines: list[str], character: dict[str, Any]) -> Non
         ability_rows.append(
             [
                 ability.get("name"),
-                ability.get("score"),
+                ability.get("score_label", ability.get("score")),
                 ability.get("modifier"),
                 ability.get("save_bonus"),
                 skill_text,
@@ -164,7 +181,8 @@ def _write_resources_section(lines: list[str], character: dict[str, Any]) -> Non
             [
                 resource.get("label"),
                 resource.get("current"),
-                _display_optional(resource.get("max")),
+                (_display_optional(resource.get("max")) if resource.get("can_edit", True)
+                 else f"Raw {_display_optional(resource.get('raw_max'))} · {resource.get('authority_status') or 'NEEDS REPAIR'}"),
                 resource.get("reset_label"),
                 resource.get("notes"),
             ]
@@ -186,6 +204,7 @@ def _write_spellcasting_section(lines: list[str], character: dict[str, Any]) -> 
             ("Ability", spellcasting.get("spellcasting_ability")),
             ("Save DC", spellcasting.get("spell_save_dc")),
             ("Attack bonus", spellcasting.get("spell_attack_bonus")),
+            ("Math notes", "; ".join(spellcasting.get("spell_metric_notes") or [])),
         ],
     )
 
@@ -199,7 +218,8 @@ def _write_spellcasting_section(lines: list[str], character: dict[str, Any]) -> 
             lines,
             ["Slot", "Available", "Used", "Maximum"],
             [
-                [slot.get("label"), slot.get("available"), slot.get("used"), slot.get("max")]
+                [slot.get("label"), slot.get("available") if slot.get("can_edit", True) else slot.get("authority_status", "NEEDS REPAIR"),
+                 slot.get("used"), slot.get("max") if slot.get("can_edit", True) else f"Raw {slot.get('raw_max')}"]
                 for slot in list(pool.get("slots") or [])
             ],
         )
@@ -223,6 +243,7 @@ def _write_spell_rows(lines: list[str], title: str, sections: Any) -> None:
                 ("Ability", section.get("spellcasting_ability")),
                 ("Save DC", section.get("spell_save_dc")),
                 ("Attack bonus", section.get("spell_attack_bonus")),
+                ("Math notes", "; ".join(section.get("spell_metric_notes") or [])),
             ],
         )
         counts = list(section.get("counts") or [])
@@ -347,7 +368,7 @@ def _write_inventory_section(lines: list[str], character: dict[str, Any]) -> Non
     _heading(lines, 2, "Equipment and Inventory")
     _table(
         lines,
-        ["Item", "Quantity", "Weight", "Equipped", "Attuned", "Tags", "Notes"],
+        ["Item", "Quantity", "Weight", "Equipped", "Attuned", "Charges", "Tags", "Notes"],
         [
             [
                 _format_link(item.get("name"), item.get("href")),
@@ -355,6 +376,7 @@ def _write_inventory_section(lines: list[str], character: dict[str, Any]) -> Non
                 item.get("weight"),
                 _yes_no(item.get("is_equipped")),
                 _yes_no(item.get("is_attuned")),
+                item.get("charges_label"),
                 ", ".join(_clean_text(tag) for tag in list(item.get("tags") or [])),
                 item.get("notes"),
             ]

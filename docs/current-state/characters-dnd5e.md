@@ -1,6 +1,6 @@
 # Characters: DND-5E
 
-Last updated: 2026-09-29
+Last updated: 2026-10-01
 
 ## Owns
 
@@ -9,12 +9,12 @@ Last updated: 2026-09-29
 ## Current User-Facing Behavior
 
 - DND-5E character detail subpages: `Quick Reference`, `Resources`, `Spellcasting`, `Equipment`, `Inventory`, `Abilities and Skills`, `Personal`, `Portrait`, `Notes`, and `Controls`.
-- Quick Reference shows core overview rows, editable HP/temp HP/Hit Dice for authorized users, tracked resources, carrying capacity when derivable, and defensive rules when modeled.
+- Quick Reference shows core overview rows, HP/temp HP/Hit Dice controls where the target is authorized and, in activated committed-source mode, its numeric owner is verified, tracked resources, carrying capacity when derivable, and defensive rules when modeled. Unverified historical numeric values remain labeled table references; the existing Character and Session forms can still suppress controls for UNKNOWN owners in never-activated mode.
 - Combat reminders from `stats.attack_reminder_state` belong on combat-facing attack panels, not normal Character Quick Reference.
 - Spellcasting is the durable home for spell-list management. Prepared casters and wizards use local `Current spells` and `Preparation` subviews over the same durable rows.
 - Equipment is the durable home for equip/unequip, attunement, weapon wield mode, supported feature-state toggles such as Armorer Arcane Armor, and Artificer infusion activation. Bespoke stateful character boons remain in their owning feature section.
 - Inventory is the durable home for carried item rows, supplemental item adds, supported removals, quantity controls, and DND currency.
-- Resources shows tracked current/max resource cards. Authorized editors can change each current value through the existing resource state path with both blur autosave and a visible per-card `Save` action.
+- Resources shows tracked current/max resource cards. In activated committed-source mode, authorized editors can change a verified tracker through the existing resource state path with both blur autosave and a visible per-card `Save` action; an unverified owner/reset is read-only and labeled `NEEDS REPAIR`. Never-activated state writes retain saved-number and revision/CAS behavior, although the existing Character and Session forms can still suppress UNKNOWN-owner controls.
 - Spell detail popups include resolved upcasting text (e.g., `At Higher Levels`) when source-backed spell payload includes it; non-upcastable spells do not show an empty upcast section.
 - Personal displays physical description/background reference text. Physical description/background authoring belongs in Advanced Editor.
 - Notes displays player notes and imported/reference note sections. Editable users can save or confirmed-delete the mutable player note through the shared revision-checked notes path.
@@ -86,8 +86,11 @@ Last updated: 2026-09-29
 
 ## Current Data/API Contract
 
-- Save-time derivation is the authority for computed DND-5E sheet math on supported write paths.
-- Read-time projection is transient compatibility/preview: it reruns supported normalization for current render/API payloads without writing back to the character definition, and failed transient normalization returns projection warnings while falling back to the stored definition/state.
+- A revisioned DND-5E SourceAuthority classifies numeric fields, proficiency grants, resource owners and reset rules, spell slots, Hit Dice, and item charges separately. A copied source label, native-creation label, saved option, or plausible total does not prove ownership. Automatic spell grants match the current resolved spell identity and their own approved grant or choice; saved names cannot authorize another spell. Resource witnesses bind the exact feature, tracker, and class-row owner. In activated committed-source mode, unwitnessed historical values appear as raw table references with `NEEDS REPAIR`; disputed current sources show `NEEDS ATTENTION`. Neither status supplies an effective numeric zero, entitlement, reset, spend, Combat seed, or automatic derived effect in that mode. Related Character, Session, Combat, presented JSON, Markdown, and package views use the same read revision; unrelated verified effects remain available. Existing Combat snapshots retain unresolved numeric fields as historical table-managed values while a separately verified HP field can still be edited through Character state. Never-activated databases retain legacy saved-number Character state edits, rests, spell slots, and PC Combat and preset seeds with existing revision/CAS checks, even when numeric ownership is UNKNOWN or unattested.
+- Current page-source authority uses published, campaign-visible Mechanics, Items, and Spells records. Its source snapshot binds canonical record metadata and a monotonically advancing page-record revision, so selective body loading does not change authority. Page writes and deletions advance a durable campaign revision; recreating a deleted source, even with identical content, receives a new revision. Sessions and other page sections do not enter character source witnesses. Hiding, removing, changing the section, or revising an eligible source invalidates source-bound formula and spell-choice witnesses until reverified.
+- In activated committed-source mode, HP, per-pool Hit Dice, tracked resource, spell-slot, rest, and Combat movement controls reflect these per-target statuses, and service writes recheck authority with revision/CAS protection. Mixed Hit Die long rests use half the verified total character level as the recovery allowance, apply it only to verified pools, and preserve UNKNOWN pool rows unchanged. Item charge current/max values remain visibly raw until their owner is proved; their raw values do not become verified uses. Native creation and level-up can retain a target-specific owner through a durable post-confirmed private audit witness; a failed witness insert leaves the marker untrusted and the target in repair status. Manager attestation uses the same independent-audit rule for a specific current value or owner/reset rule.
+- Supported save-time derivation records historical DND-5E sheet values. Current source authority and trusted owner evidence determine which of those values can participate in effective mechanics.
+- Read-time projection derives current effective values without rewriting the raw definition or SQLite state. If current source authority cannot prove a component, the presenter exposes its stored value as a labeled table reference and withholds that component from effective automation.
 - The integrated 10A mechanics-impact extension can compare one explicitly
   selected, separately authorized Character against current and proposed
   versions of one Systems `item`. It requires the Character's exact
@@ -112,13 +115,18 @@ Last updated: 2026-09-29
 
 ## Current Spellcasting Contract
 
+- DND-5E reads build one effective source-authority view from the current approved Systems or published campaign-page source, the character's exact link or selection, and reconciled SQLite equipment activation. Saved spell, feature-manager, item-option, and source-row copies are historical provenance, not proof of an automatic grant. Stale explicit links do not fall back to matching titles. Conflicting current source records pause only their disputed effects and require manager attention; unrelated verified grants continue.
+- A legacy spell whose source cannot be verified stays visible for table play with `NEEDS REPAIR` on Character, Session Character, Combat, presented JSON, and exports. It supplies no automatic source row, spell bonus, always-prepared status, or free-use entitlement. An independently manager-authorized entry is labeled `MANUAL`; its versioned authorization binds the character, entry or row, metric or availability, manager action, and audit provenance. A generic manual label or import cannot authorize it. Managers can preview the gained and lost effects of an exact relink before a guarded apply.
+- Effective spell attack and save DC values retain per-row, per-metric `spell_metric_provenance`. Approved typed `spellcasting_modifiers` from currently active items apply only to proven formula rows. An imported or manual total without proven formula provenance stays final, even if its number matches the formula; the sheet discloses that item bonuses are not automated for it. A sourced `final_override` wins over formula and item effects, while an `adjustment` adds only to proven formula and applicable item effects. Divine Avatar's transient bonus applies once after effective base math without changing saved definition values.
+- Approved item modifiers name an `effect_id` and separate integer `spell_attack_bonus` and `spell_save_dc` values. An optional `class_row_id`, `source_row_id`, or `class_selector` narrows the target; only an absent scope applies to all proven spell rows. Invalid or ambiguous typed scope, value, source, or target warns and applies nothing. Equip is required, and attunement-required items also require attunement. Distinct applicable effects add, while identical canonical duplicates count once. Effective values appear only in presentation; the raw definition remains historical through reads and equipment state changes.
+
 - Shared-slot multiclass spellcasting is limited to supported `full`, `1/2`, `artificer`, and currently supported `1/3` subclass-only lanes.
 - Warlock Pact Magic remains a separate lane.
 - Subclass-only spellcasting requires supported Systems metadata or bundled fallback coverage for PHB Eldritch Knight and Arcane Trickster.
 - Spell add/update/remove actions route through an explicit target class row.
-- Combat and Session Character consume only the Current spell set; unprepared candidates do not appear as castable spells there.
+- Combat and Session Character consume the Current spell set. Unprepared ordinary candidates stay in Preparation; provisional legacy spells stay visible for table or GM use with `NEEDS REPAIR`. There is no one-click per-spell Cast control.
 - Always-prepared grants stay out of manual prepared counts and should not render as separate source-package cards when each spell card already carries the badge.
-- Always-prepared grants come from Systems metadata, explicit spell-support grants, supported class/subclass progression, or the bounded table-backed feature interpreter. The old subclass-title-only fallback is retired; legacy imported source labels such as `Cleric (Always Prepared)` still backfill durable always-prepared flags for older rows.
+- Always-prepared grants require current verified source authority. Historical flags and legacy imported source labels such as `Cleric (Always Prepared)` may remain in the raw definition but do not authenticate an effective always-prepared or free-use entitlement.
 - Spell detail popups show `At Higher Levels` upcasting mechanics from presenter spell payloads when available and suppress the section when not present.
 
 ## Current Equipment, AC, And Attack Contract

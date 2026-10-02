@@ -2,7 +2,7 @@
   <p>Removing {{ item.name }} deletes its complete inventory row, including these saved values:</p>
   <ul>
     <li>Quantity: {{ item.quantity }}</li>
-    <li>Charges: {{ item.charges_current if item.charges_current is not none else "None" }} / {{ item.charges_max if item.charges_max is not none else "None" }}</li>
+    <li>Raw charges (table reference): {{ item.charges_current if item.charges_current is not none else "None" }} / {{ item.charges_max if item.charges_max is not none else "None" }}</li>
     <li>Attuned: {{ "Yes" if item.is_attuned else "No" }}</li>
     <li>Notes: {{ item.notes or "None" }}</li>
     <li>Active infusions:

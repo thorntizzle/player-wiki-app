@@ -8,7 +8,7 @@ from types import MappingProxyType
 from typing import Any
 
 import markdown
-from flask import g, has_request_context
+from flask import g, has_app_context, has_request_context
 
 from .character_builder import (
     SKILL_ABILITY_KEYS,
@@ -18,7 +18,6 @@ from .character_builder import (
     _load_phb_armor_profiles,
     _load_phb_weapon_profiles,
     _spell_access_badge_label,
-    _spell_payload_is_always_prepared,
     _spellcasting_mode_for_class,
 )
 from .character_mechanics_projection import (
@@ -33,6 +32,7 @@ from .character_mechanics_projection import (
     resolve_projected_item_metadata,
 )
 from .character_models import CharacterRecord
+from .character_page_companion import blocks_page_companion_heuristics
 from .character_hit_dice import hit_dice_summary_from_state
 from .character_profile import (
     profile_class_level_text,
@@ -258,10 +258,16 @@ DND_COMMON_PRESENTATION_FIELDS = (
     "slug",
     "name",
     "state_revision",
+    "source_authority_identity",
     "current_hp",
     "max_hp",
     "temp_hp",
     "hit_dice",
+    "numeric_statuses",
+    "historical_numeric_rows",
+    "hp_edit_allowed",
+    "hit_dice_edit_allowed",
+    "max_hp_raw",
     "class_level_text",
     "header_segments",
     "species",
@@ -488,7 +494,14 @@ def _presented_spell_remove_label(*, mode: str, is_cantrip: bool, is_prepared: b
     return "Remove spell"
 
 
-def present_character_roster(records: list[CharacterRecord]) -> list[dict[str, Any]]:
+def present_character_roster(
+    records: list[CharacterRecord], *, campaign: Campaign | None = None,
+    systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+) -> list[dict[str, Any]]:
+    from .committed_publication import active
+
+    activated = active()
     cards: list[dict[str, Any]] = []
     for record in records:
         definition = record.definition
@@ -496,17 +509,106 @@ def present_character_roster(records: list[CharacterRecord]) -> list[dict[str, A
         state = dict(record.state_record.state or {})
         vitals = dict(state.get("vitals") or {})
         hit_dice = hit_dice_summary_from_state(definition, state)
+        authority = None
+        projected_definition = definition
+        projected_state = state
+        needs_authority = activated and is_dnd_5e_system(definition.system)
+        if (needs_authority and campaign is not None and systems_service is not None
+                and campaign_page_records is not None
+                and campaign.slug == definition.campaign_slug):
+            try:
+                projection = build_character_mechanics_projection(
+                    campaign=campaign, definition=definition, state=state,
+                    state_revision=record.state_record.revision,
+                    systems_service=systems_service,
+                    campaign_page_records=campaign_page_records,
+                )
+                if not any(
+                    row.get("code") in {"read_time_projection_failed", "transient_mechanics_projection_failed"}
+                    for row in projection.get("projection_warnings") or []
+                ):
+                    candidate = projection.get("source_authority")
+                    if candidate is not None and candidate.state_revision == record.state_record.revision:
+                        authority = candidate
+                        projected_definition = projection["definition"]
+                        projected_state = projection["state"]
+            except (RuntimeError, TypeError, ValueError):
+                # An incomplete read context cannot authenticate historical numbers.
+                pass
+
+        def status_label(status: Any) -> str:
+            return "NEEDS ATTENTION" if status is not None and status.status == "CONFLICT" else "NEEDS REPAIR"
+
+        def raw_label(value: Any, status: Any) -> str:
+            return f"Raw {value} · table reference · {status_label(status)}"
+
+        max_hp: int | str = int(definition.stats.get("max_hp") or 0)
+        if needs_authority:
+            hp_status = authority.field_status("stats.max_hp") if authority is not None else None
+            effective_hp = hp_status.effective if hp_status is not None else None
+            if hp_status is not None and hp_status.is_effective and type(effective_hp) is int:
+                max_hp = effective_hp
+            else:
+                max_hp = raw_label(
+                    definition.stats.get("max_hp") if definition.stats.get("max_hp") is not None else "—",
+                    hp_status,
+                )
+
         resources = sorted(
             list(record.state_record.state.get("resources") or []),
             key=lambda item: (int(item.get("display_order") or 0), str(item.get("label") or "").lower()),
         )
-        resource_preview = [
-            {
-                "label": str(resource.get("label") or "Resource"),
-                "value": summarize_resource_value(resource),
+        projected_resources = {
+            str(row.get("id") or ""): row
+            for row in projected_state.get("resources") or [] if isinstance(row, dict)
+        }
+        resource_preview = []
+        for resource in resources[:3]:
+            value = summarize_resource_value(resource)
+            if needs_authority:
+                stable_id = str(resource.get("id") or "")
+                status = authority.resource_status("resource", stable_id) if authority is not None else None
+                projected = projected_resources.get(stable_id)
+                if status is not None and status.is_effective and projected is not None:
+                    value = summarize_resource_value(projected)
+                else:
+                    value = raw_label(value, status)
+            resource_preview.append({"label": str(resource.get("label") or "Resource"), "value": value})
+
+        if needs_authority:
+            projected_hit_dice = hit_dice_summary_from_state(projected_definition, projected_state)
+            projected_pools = {pool["faces"]: pool for pool in projected_hit_dice["pools"]}
+            raw_pools = {
+                pool.get("faces"): pool for pool in dict(state.get("hit_dice") or {}).get("pools") or []
+                if isinstance(pool, dict)
             }
-            for resource in resources[:3]
-        ]
+            pools = []
+            display_pools = list(hit_dice["pools"])
+            display_faces = {pool["faces"] for pool in display_pools}
+            for faces, raw_pool in raw_pools.items():
+                if type(faces) is int and faces > 0 and faces not in display_faces:
+                    display_pools.append({
+                        "faces": faces, "label": f"d{faces}",
+                        "current": raw_pool.get("current"), "max": raw_pool.get("max"),
+                    })
+            for pool in display_pools:
+                faces = pool["faces"]
+                status = authority.resource_status("hit_die", str(faces)) if authority is not None else None
+                effective_pool = projected_pools.get(faces)
+                if status is not None and status.is_effective and effective_pool is not None:
+                    pools.append(effective_pool)
+                else:
+                    raw_pool = raw_pools.get(faces, pool)
+                    raw_value = f"d{faces} {raw_pool.get('current', '—')}/{raw_pool.get('max', '—')}"
+                    pools.append({**pool, "value": raw_label(raw_value, status), "unresolved": True})
+            hit_dice = {
+                **hit_dice, "pools": pools,
+                "value": " | ".join(
+                    pool["value"] if pool.get("unresolved") else
+                    f"d{pool['faces']} {pool['current']}/{pool['max']}"
+                    for pool in pools
+                ) or "--",
+            }
 
         search_parts = [
             definition.name,
@@ -523,7 +625,7 @@ def present_character_roster(records: list[CharacterRecord]) -> list[dict[str, A
                 "species": str(profile.get("species") or ""),
                 "background": str(profile.get("background") or ""),
                 "current_hp": int(vitals.get("current_hp") or 0),
-                "max_hp": int(definition.stats.get("max_hp") or 0),
+                "max_hp": max_hp,
                 "temp_hp": int(vitals.get("temp_hp") or 0),
                 "hit_dice": hit_dice,
                 "resource_preview": resource_preview,
@@ -594,6 +696,7 @@ def present_dnd_character_section_counts(
         campaign=campaign,
         definition=record.definition,
         state=record.state_record.state or {},
+        state_revision=record.state_record.revision,
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
         components=frozenset(
@@ -838,13 +941,18 @@ def _count_presented_dnd_spells(
             or spell.get("spell_source_row_id")
             or fallback_row_id
         ).strip()
+        authority_status = str(spell.get("authority_status") or "NEEDS REPAIR").strip().upper()
         action_state = project_spell_action_state(
             spell=spell,
             row_payload=dict(rows_by_id.get(target_row_id) or {}),
             spell_level=spell_level,
             mark=str(spell.get("mark") or "").strip(),
-            always_prepared=_spell_payload_is_always_prepared(spell),
+            always_prepared=(
+                bool(spell.get("is_always_prepared")) if authority_status == "VERIFIED" else False
+            ),
         )
+        if authority_status in {"NEEDS REPAIR", "NEEDS ATTENTION", "MANUAL"}:
+            action_state["can_show_in_current_view"] = True
         count += int(bool(action_state.get("can_show_in_current_view")))
     return count
 
@@ -892,14 +1000,17 @@ def _count_presented_dnd_features(
             str(feature.get("category") or ""),
             humanize_value(feature.get("category")) or "Features",
         )
-        tracker_ref = str(feature.get("tracker_ref") or "").strip()
-        linked_resource = resources_by_id.get(tracker_ref) if tracker_ref else None
-        feature_systems_ref = dict(feature.get("systems_ref") or {})
-        feature_has_page_ref = bool(normalize_page_ref_slug(feature.get("page_ref")))
+        suppressed = _suppressed_activated_feature(feature)
+        tracker_ref = "" if suppressed else str(feature.get("tracker_ref") or "").strip()
+        linked_resource = resources_by_id.get(tracker_ref) if tracker_ref and not suppressed else None
+        feature_systems_ref = {} if suppressed else dict(feature.get("systems_ref") or {})
+        feature_has_page_ref = not suppressed and bool(normalize_page_ref_slug(feature.get("page_ref")))
         feature_presentation_systems_ref = feature_systems_ref
         feature_name = str(feature.get("name") or "Feature")
         normalized_feature_name = normalize_feature_name(feature_name)
         is_potential_empty_armorer_component = bool(
+            not blocks_page_companion_heuristics(feature) and not suppressed
+            and
             any(
                 normalized_feature_name.startswith(prefix)
                 for prefix in ARMORER_ARMOR_MODEL_PARENT_NAMES
@@ -920,7 +1031,9 @@ def _count_presented_dnd_features(
             {
                 "id": str(feature.get("id") or "").strip(),
                 "name": feature_name,
-                "href": build_character_entry_href(
+                "page_choice_display": blocks_page_companion_heuristics(feature),
+                "suppressed_historical": suppressed,
+                "href": "" if suppressed else build_character_entry_href(
                     campaign.slug,
                     systems_ref=feature_presentation_systems_ref,
                     page_ref=feature.get("page_ref"),
@@ -932,7 +1045,7 @@ def _count_presented_dnd_features(
                 "metadata": [
                     part
                     for part in (
-                        humanize_value(feature.get("activation_type")),
+                        "Needs source repair" if suppressed else humanize_value(feature.get("activation_type")),
                         summarize_linked_resource(linked_resource),
                     )
                     if part
@@ -958,16 +1071,19 @@ def _count_top_level_feature_entries(
     entries_by_name: dict[str, list[dict[str, Any]]] = {}
     entries_by_id: dict[str, dict[str, Any]] = {}
     for entry in entries:
-        entries_by_name.setdefault(
-            normalize_feature_name(entry.get("name")),
-            [],
-        ).append(entry)
+        if not entry.get("page_choice_display") and not entry.get("suppressed_historical"):
+            entries_by_name.setdefault(
+                normalize_feature_name(entry.get("name")),
+                [],
+            ).append(entry)
         entry_id = str(entry.get("id") or "").strip()
         if entry_id:
             entries_by_id.setdefault(entry_id, entry)
 
     hidden_ids: set[int] = set()
     for entry in entries:
+        if entry.get("page_choice_display") or entry.get("suppressed_historical"):
+            continue
         name = str(entry.get("name") or "").strip()
         normalized_name = normalize_feature_name(name)
         if not any(
@@ -1025,7 +1141,7 @@ def _count_top_level_feature_entries(
             move_to_parent(first_entry(parent_name), child)
 
     for entry in entries:
-        if id(entry) in hidden_ids or id(entry) in moved_ids:
+        if id(entry) in hidden_ids or id(entry) in moved_ids or entry.get("page_choice_display") or entry.get("suppressed_historical"):
             continue
 
         parent_feature_id = ""
@@ -1077,6 +1193,7 @@ def _present_character_detail(
         "campaign": campaign,
         "definition": record.definition,
         "state": record.state_record.state or {},
+        "state_revision": record.state_record.revision,
         "systems_service": systems_service,
         "campaign_page_records": campaign_page_records,
     }
@@ -1121,6 +1238,54 @@ def _present_character_detail(
     )
     vitals = dict(state.get("vitals") or {})
     stats = dict(definition.stats or {})
+    raw_stats = dict(record.definition.stats or {})
+    source_authority = mechanics_projection.get("source_authority")
+
+    def numeric_status(path: str, *, resource: bool = False) -> dict[str, Any]:
+        if source_authority is None:
+            return {"status": "VERIFIED", "effective": None, "raw": None, "needs_repair": False}
+        if resource:
+            kind, stable_id = path.split(":", 1)
+            row = source_authority.resource_status(kind, stable_id)
+        else:
+            row = source_authority.field_status(path)
+        status = "NEEDS ATTENTION" if row.status == "CONFLICT" else (
+            "NEEDS REPAIR" if not row.is_effective else row.status
+        )
+        return {"status": status, "raw": row.raw, "effective": row.effective,
+                "needs_repair": not row.is_effective}
+
+    def numeric_display(path: str, effective: Any, raw: Any, *, signed: bool = False) -> str:
+        status = numeric_status(path)
+        if source_authority is None or (not status["needs_repair"] and effective is not None):
+            return format_signed(effective) if signed else str(effective)
+        label = status["status"]
+        return f"Raw {raw} · {label}" if raw is not None else label
+
+    numeric_statuses = {
+        row.path: numeric_status(row.path, resource=row.path.startswith(("resource:", "spell_slot:", "hit_die:", "item_charge:")))
+        for row in (*getattr(source_authority, "field_statuses", ()),
+                    *getattr(source_authority, "resource_statuses", ()))
+    }
+    historical_numeric_rows = []
+    for path, status in sorted(numeric_statuses.items()):
+        if not status["needs_repair"]:
+            continue
+        raw = status["raw"]
+        if isinstance(raw, dict):
+            summary = ", ".join(
+                f"{key} {raw[key]}" for key in
+                ("score", "bonus", "proficiency_level", "current", "max", "reset_on")
+                if raw.get(key) is not None
+            ) or "recorded row"
+        elif raw is None:
+            summary = "no recorded value"
+        else:
+            summary = str(raw)
+        historical_numeric_rows.append({
+            "label": path.replace("stats.", "").replace("_", " "),
+            "raw": summary[:160], "status": status["status"],
+        })
     profile = dict(definition.profile or {})
     is_xianxia_character = bool(mechanics_projection.get("is_xianxia_character"))
     hit_dice = (
@@ -1128,6 +1293,18 @@ def _present_character_detail(
         if is_xianxia_character
         else hit_dice_summary_from_state(definition, state)
     )
+    if not is_xianxia_character and source_authority is not None:
+        hit_dice = dict(hit_dice)
+        hit_dice["pools"] = [
+            {**pool, "raw_max": pool["max"],
+             "max": pool["max"] if not numeric_status(f"hit_die:{pool['faces']}", resource=True)["needs_repair"] else None,
+             "status": numeric_status(f"hit_die:{pool['faces']}", resource=True)["status"],
+             "can_edit": not numeric_status(f"hit_die:{pool['faces']}", resource=True)["needs_repair"]}
+            for pool in hit_dice["pools"]
+        ]
+        if any(not pool["can_edit"] for pool in hit_dice["pools"]):
+            hit_dice["value"] = f"Raw {hit_dice['value']} · NEEDS REPAIR"
+            hit_dice["full_value"] = f"Raw {hit_dice['full_value']} · NEEDS REPAIR"
     xianxia_projection = dict(mechanics_projection.get("xianxia") or {})
     xianxia_defense = xianxia_projection.get("defense") if is_xianxia_character else None
     xianxia_actions = xianxia_projection.get("actions") if is_xianxia_character else None
@@ -1183,7 +1360,7 @@ def _present_character_detail(
         mechanics_projection.get("divine_avatar_forms_state") or {}
     )
 
-    display_max_hp = int(stats.get("max_hp") or 0)
+    display_max_hp = stats.get("max_hp")
     overview_stats: list[dict[str, str]] = []
     overview_stat_rows: list[list[dict[str, str]]] = []
     if is_xianxia_character:
@@ -1214,21 +1391,22 @@ def _present_character_detail(
         ]
         overview_stat_rows = []
     elif build_overview:
+        raw_max_hp = raw_stats.get("max_hp")
         quick_row_1 = [
-            {"label": "Current HP", "value": f"{int(vitals.get('current_hp') or 0)} / {int(stats.get('max_hp') or 0)}"},
+            {"label": "Current HP", "value": f"{int(vitals.get('current_hp') or 0)} / {numeric_display('stats.max_hp', stats.get('max_hp'), raw_max_hp)}"},
             {"label": "Temp HP", "value": str(int(vitals.get("temp_hp") or 0))},
             {"label": "Hit Dice", "value": str(hit_dice.get("value") or "--")},
         ]
         quick_row_2 = [
-            {"label": "Armor Class", "value": str(int(stats.get("armor_class") or 0))},
-            {"label": "Initiative", "value": format_signed(stats.get("initiative_bonus"))},
-            {"label": "Speed", "value": str(stats.get("speed") or "--")},
+            {"label": "Armor Class", "value": numeric_display("stats.armor_class", stats.get("armor_class"), raw_stats.get("armor_class"))},
+            {"label": "Initiative", "value": numeric_display("stats.initiative_bonus", stats.get("initiative_bonus"), raw_stats.get("initiative_bonus"), signed=True)},
+            {"label": "Speed", "value": numeric_display("stats.speed", stats.get("speed"), raw_stats.get("speed"))},
         ]
         quick_row_3 = [
-            {"label": "Proficiency", "value": format_signed(stats.get("proficiency_bonus"))},
-            {"label": "Passive Perception", "value": str(int(stats.get("passive_perception") or 0))},
-            {"label": "Passive Insight", "value": str(int(stats.get("passive_insight") or 0))},
-            {"label": "Passive Investigation", "value": str(int(stats.get("passive_investigation") or 0))},
+            {"label": "Proficiency", "value": numeric_display("stats.proficiency_bonus", stats.get("proficiency_bonus"), raw_stats.get("proficiency_bonus"), signed=True)},
+            {"label": "Passive Perception", "value": numeric_display("stats.passive_perception", stats.get("passive_perception"), raw_stats.get("passive_perception"))},
+            {"label": "Passive Insight", "value": numeric_display("stats.passive_insight", stats.get("passive_insight"), raw_stats.get("passive_insight"))},
+            {"label": "Passive Investigation", "value": numeric_display("stats.passive_investigation", stats.get("passive_investigation"), raw_stats.get("passive_investigation"))},
         ]
         quick_row_4: list[dict[str, str]] = []
         exhaustion_level = max(0, min(6, int(state.get("exhaustion_level") or 0)))
@@ -1277,23 +1455,47 @@ def _present_character_detail(
         ABILITY_ORDER if build_ability_skill_projection else ()
     ):
         ability = resolve_ability_score_payload(ability_scores, ability_key, legacy_key)
+        raw_ability = resolve_ability_score_payload(
+            dict(raw_stats.get("ability_scores") or {}), ability_key, legacy_key
+        )
+        ability_path = f"stats.ability_scores.{ability_key}"
         abilities.append(
             {
                 "key": ability_key,
                 "abbr": ability_key.upper(),
                 "name": ability_name,
-                "score": int(ability.get("score") or 0),
-                "modifier": format_signed(ability.get("modifier")),
-                "save_bonus": format_signed(ability.get("save_bonus")),
+                "score": ability.get("score"),
+                "score_label": numeric_display(f"{ability_path}.score", ability.get("score"), raw_ability.get("score")),
+                "modifier": numeric_display(f"{ability_path}.modifier", ability.get("modifier"), raw_ability.get("modifier"), signed=True),
+                "save_bonus": numeric_display(f"{ability_path}.save_bonus", ability.get("save_bonus"), raw_ability.get("save_bonus"), signed=True),
+                "authority_status": numeric_status(f"{ability_path}.score")["status"],
             }
         )
 
+    raw_skill_lookup = {
+        str(row.get("name") or "").strip().casefold(): row
+        for row in list(record.definition.skills or []) if isinstance(row, dict)
+    }
     skills = [
         {
             "name": str(skill.get("name") or "Skill"),
-            "bonus": format_signed(skill.get("bonus")),
-            "proficiency_label": humanize_value(skill.get("proficiency_level")),
-            "is_proficient": str(skill.get("proficiency_level") or "none") != "none",
+            "bonus": numeric_display(
+                f"skills.{str(skill.get('name') or '').strip().casefold()}",
+                skill.get("bonus"),
+                raw_skill_lookup.get(str(skill.get('name') or '').strip().casefold(), {}).get("bonus"),
+                signed=True,
+            ),
+            "proficiency_label": (
+                humanize_value(skill.get("proficiency_level"))
+                if (skill.get("proficiency_level") not in (None, "")
+                    and not numeric_status(f"skills.{str(skill.get('name') or '').strip().casefold()}")["needs_repair"])
+                else numeric_status(f"skills.{str(skill.get('name') or '').strip().casefold()}")["status"]
+            ),
+            "is_proficient": (
+                str(skill.get("proficiency_level") or "none") != "none"
+                and not numeric_status(f"skills.{str(skill.get('name') or '').strip().casefold()}")["needs_repair"]
+            ),
+            "authority_status": numeric_status(f"skills.{str(skill.get('name') or '').strip().casefold()}")["status"],
             "ability_key": SKILL_ABILITY_KEYS.get(normalize_lookup(str(skill.get("name") or ""))),
         }
         for skill in (
@@ -1322,30 +1524,31 @@ def _present_character_detail(
         else []
     )
 
-    resources = [
-        {
-            "id": str(resource.get("id") or ""),
+    resources = []
+    for resource in (sorted(
+        list(state.get("resources") or []),
+        key=lambda item: (int(item.get("display_order") or 0),
+                          str(item.get("label") or "").lower()),
+    ) if build_resources else []):
+        resource_id = str(resource.get("id") or "")
+        status = numeric_status(f"resource:{resource_id}", resource=True)
+        raw_max = resource.get("max")
+        can_edit = not status["needs_repair"]
+        resources.append({
+            "id": resource_id,
             "label": str(resource.get("label") or "Resource"),
             "current": int(resource.get("current") or 0),
-            "max": int(resource.get("max")) if resource.get("max") is not None else None,
-            "value": summarize_resource_value(resource),
-            "reset_on": str(resource.get("reset_on") or ""),
-            "reset_label": humanize_value(resource.get("reset_on")),
+            "max": int(raw_max) if can_edit and raw_max is not None else None,
+            "raw_max": raw_max,
+            "value": summarize_resource_value(resource) if can_edit else
+                     f"Raw {summarize_resource_value(resource)} · {status['status']}",
+            "reset_on": str(resource.get("reset_on") or "") if can_edit else "",
+            "reset_label": humanize_value(resource.get("reset_on")) if can_edit else status["status"],
             "is_manual": str(resource.get("reset_on") or "").lower() in {"manual", "other"},
             "notes": str(resource.get("notes") or "").strip(),
-        }
-        for resource in (
-            sorted(
-                list(state.get("resources") or []),
-                key=lambda item: (
-                    int(item.get("display_order") or 0),
-                    str(item.get("label") or "").lower(),
-                ),
-            )
-            if build_resources
-            else []
-        )
-    ]
+            "authority_status": status["status"],
+            "can_edit": can_edit,
+        })
 
     spellcasting_payload = dict(definition.spellcasting or {}) if build_spellcasting else {}
     spellcasting = None
@@ -1381,13 +1584,18 @@ def _present_character_detail(
                     state_slot = legacy_slots_by_level[level].pop(0)
                 state_slot = state_slot or {}
                 used = int(state_slot.get("used") or 0)
+                slot_status = numeric_status(f"spell_slot:{lane_id}:{level}", resource=True)
+                slot_can_edit = not slot_status["needs_repair"]
                 pool_slots.append(
                     {
                         "level": level,
                         "label": spell_level_label(level),
-                        "available": max_slots - used,
+                        "available": max_slots - used if slot_can_edit else None,
                         "used": used,
-                        "max": max_slots,
+                        "max": max_slots if slot_can_edit else None,
+                        "raw_max": state_slot.get("max", max_slots),
+                        "authority_status": slot_status["status"],
+                        "can_edit": slot_can_edit,
                         "slot_lane_id": lane_id,
                     }
                 )
@@ -1424,19 +1632,11 @@ def _present_character_detail(
                 "level": 0,
                 "spellcasting_ability": str(
                     dict(row or {}).get("spellcasting_ability")
-                    or spellcasting_payload.get("spellcasting_ability")
                     or ""
                 ).strip(),
-                "spell_save_dc": (
-                    dict(row or {}).get("spell_save_dc")
-                    if dict(row or {}).get("spell_save_dc") is not None
-                    else spellcasting_payload.get("spell_save_dc")
-                ),
-                "spell_attack_bonus": (
-                    dict(row or {}).get("spell_attack_bonus")
-                    if dict(row or {}).get("spell_attack_bonus") is not None
-                    else spellcasting_payload.get("spell_attack_bonus")
-                ),
+                "spell_save_dc": dict(row or {}).get("spell_save_dc"),
+                "spell_attack_bonus": dict(row or {}).get("spell_attack_bonus"),
+                "spell_metric_notes": list(dict(row or {}).get("spell_metric_notes") or []),
                 "spell_mode": str(dict(row or {}).get("spell_mode") or "").strip(),
                 "row_kind": str(dict(row or {}).get("source_row_kind") or "source").strip() or "source",
             }
@@ -1514,9 +1714,21 @@ def _present_character_detail(
                 linked_systems_entry=linked_systems_entry,
                 linked_systems_metadata=linked_systems_metadata,
             )
-            always_prepared = _spell_payload_is_always_prepared(dict(spell or {}))
+            authority_status = str(spell.get("authority_status") or "NEEDS REPAIR").strip().upper()
+            player_status = "NEEDS REPAIR" if authority_status == "NEEDS ATTENTION" else authority_status
+            authority_note = (
+                "Source needs repair; use this spell with your GM. Automatic benefits are unavailable."
+                if authority_status == "NEEDS ATTENTION"
+                else str(spell.get("authority_note") or "").strip()
+            )
+            if player_status == "NEEDS REPAIR" and not authority_note:
+                authority_note = "Source needs repair; use this spell with your GM. Automatic benefits are unavailable."
+            verified_source = authority_status == "VERIFIED"
+            always_prepared = verified_source and bool(spell.get("is_always_prepared"))
             badges = []
-            if bool(spell.get("is_bonus_known")):
+            if authority_status in {"NEEDS REPAIR", "NEEDS ATTENTION", "MANUAL"}:
+                badges.append(player_status)
+            if verified_source and bool(spell.get("is_bonus_known")):
                 badges.append("Feature granted")
             if always_prepared:
                 badges.append("Always prepared")
@@ -1524,17 +1736,19 @@ def _present_character_detail(
                 badges.append("Ritual")
             if spell_payload_has_concentration(dict(spell or {}), linked_systems_metadata=linked_systems_metadata):
                 badges.append("Concentration")
-            access_badge = _spell_access_badge_label(dict(spell or {}))
+            access_badge = _spell_access_badge_label(dict(spell or {})) if verified_source else ""
             if access_badge and access_badge not in badges:
                 badges.append(access_badge)
             mark = str(spell.get("mark") or "").strip()
-            if mark and mark not in badges:
+            if mark and not (not verified_source and mark.casefold() == "granted") and mark not in badges:
                 badges.append(mark)
             source_label = str(spell.get("grant_source_label") or spell.get("source") or "").strip()
             management_note = ""
-            if always_prepared and source_label:
+            if authority_note:
+                management_note = authority_note
+            elif always_prepared and source_label:
                 management_note = f"Always prepared from {source_label}."
-            elif bool(spell.get("is_bonus_known")) and source_label:
+            elif verified_source and bool(spell.get("is_bonus_known")) and source_label:
                 management_note = f"Granted by {source_label}."
 
             spell_href = build_character_entry_href(
@@ -1563,6 +1777,8 @@ def _present_character_detail(
                     "source": str(spell.get("source") or "").strip(),
                     "reference": str(spell.get("reference") or "").strip(),
                     "badges": badges,
+                    "authority_status": player_status,
+                    "authority_note": authority_note,
                     "class_row_id": str(
                         spell.get("class_row_id") or spell.get("spell_source_row_id") or fallback_row_id
                     ).strip(),
@@ -1627,6 +1843,8 @@ def _present_character_detail(
                 mark=mark,
                 always_prepared=always_prepared,
             )
+            if authority_status in {"NEEDS REPAIR", "NEEDS ATTENTION", "MANUAL"}:
+                spell_action_state["can_show_in_current_view"] = True
             presented_spell.update(spell_action_state)
             presented_spell["remove_label"] = _presented_spell_remove_label(
                 mode=row_mode,
@@ -1663,6 +1881,7 @@ def _present_character_detail(
                 "spellcasting_ability": str(row.get("spellcasting_ability") or "").strip(),
                 "spell_save_dc": row.get("spell_save_dc"),
                 "spell_attack_bonus": format_signed(row.get("spell_attack_bonus")),
+                "spell_metric_notes": list(row.get("spell_metric_notes") or []),
                 "row_kind": str(row.get("row_kind") or "class").strip() or "class",
                 "spell_mode": str(row.get("spell_mode") or "").strip(),
             }
@@ -1780,6 +1999,7 @@ def _present_character_detail(
                         "spellcasting_ability",
                         "spell_save_dc",
                         "spell_attack_bonus",
+                        "spell_metric_notes",
                         "row_kind",
                         "spell_mode",
                     )
@@ -1794,6 +2014,7 @@ def _present_character_detail(
             "spellcasting_ability": str(spellcasting_payload.get("spellcasting_ability") or ""),
             "spell_save_dc": spellcasting_payload.get("spell_save_dc"),
             "spell_attack_bonus": format_signed(spellcasting_payload.get("spell_attack_bonus")),
+            "spell_metric_notes": list(spellcasting_payload.get("spell_metric_notes") or []),
             "slots": list((slot_pools[0] or {}).get("slots") or []) if len(slot_pools) == 1 else [],
             "slots_title": str((slot_pools[0] or {}).get("title") or "Spell slots") if len(slot_pools) == 1 else "",
             "slot_pools": slot_pools,
@@ -1839,6 +2060,7 @@ def _present_character_detail(
         if str(feature.get("category") or "").strip() == "feat"
     )
     for feature in list(definition.features or []) if build_features else []:
+        suppressed = _suppressed_activated_feature(feature)
         if should_hide_redundant_choice_feature(
             feature,
             has_hit_point_details=has_hit_point_details,
@@ -1853,16 +2075,16 @@ def _present_character_detail(
             humanize_value(feature.get("category")) or "Features",
         )
         feature_groups_ordered.setdefault(group_title, [])
-        tracker_ref = str(feature.get("tracker_ref") or "").strip()
+        tracker_ref = "" if suppressed else str(feature.get("tracker_ref") or "").strip()
         linked_resource = resource_lookup.get(tracker_ref) if tracker_ref else None
-        metadata = [
+        metadata = (["Needs source repair"] if suppressed else [
             humanize_value(feature.get("activation_type")),
             summarize_linked_resource(linked_resource),
-        ]
-        feature_systems_ref = dict(feature.get("systems_ref") or {})
-        feature_has_page_ref = bool(normalize_page_ref_slug(feature.get("page_ref")))
+        ])
+        feature_systems_ref = {} if suppressed else dict(feature.get("systems_ref") or {})
+        feature_has_page_ref = not suppressed and bool(normalize_page_ref_slug(feature.get("page_ref")))
         feature_presentation_systems_ref = feature_systems_ref
-        if not feature_presentation_systems_ref and not feature_has_page_ref:
+        if not suppressed and not feature_presentation_systems_ref and not feature_has_page_ref:
             feature_presentation_systems_ref = resolve_feature_presentation_systems_ref(
                 campaign,
                 feature,
@@ -1871,21 +2093,30 @@ def _present_character_detail(
         feature_payload = dict(feature)
         if feature_presentation_systems_ref:
             feature_payload["systems_ref"] = feature_presentation_systems_ref
-        description_html = resolve_feature_description_html(
-            campaign,
-            feature,
-            systems_service=systems_service,
-            campaign_page_records=campaign_page_records,
-        )
-        description_html = cleanup_feature_description_html(
-            feature_payload,
-            description_html,
-        )
+        if suppressed:
+            historical_description = str(feature.get("description_markdown") or "").strip()
+            description_html = (
+                render_campaign_markdown(campaign, historical_description)
+                if historical_description else ""
+            )
+        else:
+            description_html = resolve_feature_description_html(
+                campaign,
+                feature,
+                systems_service=systems_service,
+                campaign_page_records=campaign_page_records,
+            )
+            description_html = cleanup_feature_description_html(
+                feature_payload,
+                description_html,
+            )
         feature_groups_ordered[group_title].append(
             {
                 "id": str(feature.get("id") or "").strip(),
                 "name": str(feature.get("name") or "Feature"),
-                "href": build_character_entry_href(
+                "page_choice_display": blocks_page_companion_heuristics(feature),
+                "suppressed_historical": suppressed,
+                "href": "" if suppressed else build_character_entry_href(
                     campaign.slug,
                     systems_ref=feature_presentation_systems_ref,
                     page_ref=feature.get("page_ref"),
@@ -1896,10 +2127,10 @@ def _present_character_detail(
                 "systems_ref": feature_presentation_systems_ref,
                 "native_edit_parent_feature_id": str(feature.get("native_edit_parent_feature_id") or "").strip(),
                 "parent_feature_id": str(feature.get("parent_feature_id") or "").strip(),
-                "activation_type": str(feature.get("activation_type") or "").strip().lower(),
+                "activation_type": "passive" if suppressed else str(feature.get("activation_type") or "").strip().lower(),
                 "metadata": [part for part in metadata if part],
-                "combat_availability": build_armorer_combat_availability(
-                    feature.get("name"),
+                "combat_availability": {"available": False, "reason": "Source needs repair."} if suppressed else build_armorer_combat_availability(
+                    "" if blocks_page_companion_heuristics(feature) else feature.get("name"),
                     arcane_armor_state,
                 ),
                 "description_html": description_html,
@@ -1957,6 +2188,20 @@ def _present_character_detail(
     item_use_actions = [
         dict(item or {}) for item in list(mechanics_projection.get("item_use_actions") or [])
     ]
+    if source_authority is not None:
+        for action in item_use_actions:
+            options = []
+            for option in list(action.get("slot_options") or []):
+                lane_id = normalize_spell_slot_lane_id(option.get("slot_lane_id"))
+                level = option.get("level")
+                safe = numeric_status(f"spell_slot:{lane_id}:{level}", resource=True)
+                if not safe["needs_repair"]:
+                    options.append(option)
+            if len(options) != len(list(action.get("slot_options") or [])):
+                action["slot_options"] = options
+                if not any(int(option.get("available") or 0) > 0 for option in options):
+                    action["enabled"] = False
+                    action["disabled_reason"] = "Spell slot owner needs manager repair before this action."
     projection_warnings = [
         dict(item or {}) for item in list(mechanics_projection.get("projection_warnings") or [])
     ]
@@ -1964,6 +2209,9 @@ def _present_character_detail(
     inventory = []
     for item in list(state.get("inventory") or []) if build_inventory else []:
         item_ref = str(item.get("catalog_ref") or item.get("id") or "").strip()
+        inventory_item_id = str(item.get("id") or "").strip()
+        charge_status = numeric_status(f"item_charge:{inventory_item_id}", resource=True)
+        charge_safe = not charge_status["needs_repair"]
         definition_item = equipment_catalog_lookup.get(item_ref, {})
         href = build_character_entry_href(
             campaign.slug,
@@ -1972,7 +2220,7 @@ def _present_character_detail(
         )
         inventory.append(
             {
-                "id": str(item.get("id") or ""),
+                "id": inventory_item_id,
                 "item_ref": item_ref,
                 "name": str(item.get("name") or "Item"),
                 "href": href,
@@ -1992,8 +2240,16 @@ def _present_character_detail(
                 "tags": [str(tag).strip() for tag in list(item.get("tags") or []) if str(tag).strip()],
                 "is_equipped": bool(item.get("is_equipped", False)),
                 "is_attuned": bool(item.get("is_attuned", False)),
-                "charges_current": item.get("charges_current"),
-                "charges_max": item.get("charges_max"),
+                "charges_current": item.get("charges_current") if charge_safe else None,
+                "charges_max": item.get("charges_max") if charge_safe else None,
+                "charges_raw_current": item.get("charges_current"),
+                "charges_raw_max": item.get("charges_max"),
+                "charges_authority_status": charge_status["status"],
+                "charges_label": (
+                    f"{item.get('charges_current')} / {item.get('charges_max')}"
+                    if charge_safe else
+                    f"Raw {item.get('charges_current')} / {item.get('charges_max')} · {charge_status['status']}"
+                ) if item.get("charges_current") is not None or item.get("charges_max") is not None else "",
                 "active_infusions": [dict(value) for value in list(item.get("active_infusions") or []) if isinstance(value, dict)],
             }
         )
@@ -2086,12 +2342,18 @@ def _present_character_detail(
         "slug": definition.character_slug,
         "name": definition.name,
         "state_revision": record.state_record.revision,
+        "source_authority_identity": str(mechanics_projection.get("source_authority_identity") or ""),
         "current_hp": int(vitals.get("current_hp") or 0),
         "max_hp": (
             display_max_hp
             if is_xianxia_character
-            else int(stats.get("max_hp") or 0)
+            else stats.get("max_hp")
         ),
+        "max_hp_raw": raw_stats.get("max_hp") if not is_xianxia_character else display_max_hp,
+        "numeric_statuses": numeric_statuses,
+        "historical_numeric_rows": historical_numeric_rows,
+        "hp_edit_allowed": is_xianxia_character or not numeric_status("stats.max_hp")["needs_repair"],
+        "hit_dice_edit_allowed": is_xianxia_character or any(pool.get("can_edit", True) for pool in hit_dice.get("pools", [])),
         "temp_hp": int(vitals.get("temp_hp") or 0),
         "hit_dice": hit_dice,
         "player_notes_markdown": player_notes_markdown,
@@ -4409,6 +4671,8 @@ def should_hide_redundant_choice_feature(
     has_skill_details: bool,
     has_named_feats: bool,
 ) -> bool:
+    if blocks_page_companion_heuristics(feature) or _suppressed_activated_feature(feature):
+        return False
     if str(feature.get("tracker_ref") or "").strip():
         return False
     activation_type = str(feature.get("activation_type") or "").strip().lower()
@@ -4433,6 +4697,16 @@ def should_hide_redundant_choice_feature(
     return False
 
 
+def _suppressed_activated_feature(feature: dict[str, Any]) -> bool:
+    status = str(feature.get("authority_status") or "").strip().upper()
+    if not (feature.get("mechanics_suppressed") or status and status != "VERIFIED"):
+        return False
+    if not has_app_context():
+        return False
+    from .committed_publication import active
+    return active()
+
+
 def nest_feature_components(
     entries: list[dict[str, Any]],
     *,
@@ -4443,11 +4717,15 @@ def nest_feature_components(
         return
 
     def extract_selected_replicate_magic_item_name(entry: dict[str, Any]) -> str:
+        if entry.get("page_choice_display") or entry.get("suppressed_historical"):
+            return ""
         if not _is_replicate_magic_item_feature(entry):
             return ""
         return _replicate_magic_item_selection_name(entry.get("name"))
 
     def attach_replicate_magic_item_child(entry: dict[str, Any]) -> None:
+        if entry.get("page_choice_display") or entry.get("suppressed_historical"):
+            return
         if not _is_replicate_magic_item_feature(entry):
             return
         item_name = extract_selected_replicate_magic_item_name(entry)
@@ -4481,7 +4759,8 @@ def nest_feature_components(
     entries_by_name: dict[str, list[dict[str, Any]]] = {}
     entries_by_id: dict[str, dict[str, Any]] = {}
     for entry in entries:
-        entries_by_name.setdefault(normalize_feature_name(entry.get("name")), []).append(entry)
+        if not entry.get("page_choice_display") and not entry.get("suppressed_historical"):
+            entries_by_name.setdefault(normalize_feature_name(entry.get("name")), []).append(entry)
         entry_id = str(entry.get("id") or "").strip()
         if entry_id:
             entries_by_id.setdefault(entry_id, entry)
@@ -4515,7 +4794,7 @@ def nest_feature_components(
             attach_child(parent_name, child)
 
     for entry in entries:
-        if id(entry) in hidden_ids or id(entry) in moved_ids:
+        if id(entry) in hidden_ids or id(entry) in moved_ids or entry.get("page_choice_display") or entry.get("suppressed_historical"):
             continue
 
         entry_name = normalize_feature_name(entry.get("name"))
@@ -4543,9 +4822,10 @@ def nest_feature_components(
     for entry in entries:
         attach_replicate_magic_item_child(entry)
 
-    if not moved_ids and not hidden_ids:
-        return
-    entries[:] = [entry for entry in entries if id(entry) not in moved_ids and id(entry) not in hidden_ids]
+    if moved_ids or hidden_ids:
+        entries[:] = [entry for entry in entries if id(entry) not in moved_ids and id(entry) not in hidden_ids]
+    for entry in entries:
+        entry.pop("page_choice_display", None)
 
 
 def nest_armorer_feature_components(entries: list[dict[str, Any]]) -> None:
@@ -4556,6 +4836,8 @@ def should_hide_empty_armorer_mode_component(
     entry: dict[str, Any],
     entries_by_name: dict[str, list[dict[str, Any]]],
 ) -> bool:
+    if entry.get("page_choice_display") or entry.get("suppressed_historical"):
+        return False
     name = str(entry.get("name") or "").strip()
     normalized_name = normalize_feature_name(name)
     if not any(normalized_name.startswith(prefix) for prefix in ARMORER_ARMOR_MODEL_PARENT_NAMES):
@@ -4582,11 +4864,11 @@ def normalize_feature_name(value: Any) -> str:
 
 
 def _is_artificer_infusions_parent(feature: dict[str, Any]) -> bool:
-    return normalize_feature_name(feature.get("name")) == ARTIFICER_INFUSIONS_PARENT_NAME
+    return not (feature.get("page_choice_display") or feature.get("suppressed_historical") or blocks_page_companion_heuristics(feature)) and normalize_feature_name(feature.get("name")) == ARTIFICER_INFUSIONS_PARENT_NAME
 
 
 def _is_replicate_magic_item_feature(feature: dict[str, Any]) -> bool:
-    return normalize_feature_name(feature.get("name")).startswith(
+    return not (feature.get("page_choice_display") or feature.get("suppressed_historical") or blocks_page_companion_heuristics(feature)) and normalize_feature_name(feature.get("name")).startswith(
         REPLICATE_MAGIC_ITEM_FEATURE_NAME
     )
 
@@ -4604,6 +4886,8 @@ def resolve_feature_presentation_systems_ref(
     *,
     systems_service: Any | None = None,
 ) -> dict[str, str]:
+    if blocks_page_companion_heuristics(feature) or _suppressed_activated_feature(feature):
+        return {}
     if _is_artificer_infusions_parent(feature):
         return resolve_systems_ref_by_exact_title(
             campaign,
@@ -4915,7 +5199,9 @@ def resolve_ability_score_payload(
 
 
 def format_signed(value: Any) -> str:
-    return f"{int(value or 0):+d}"
+    if value in (None, ""):
+        return "--"
+    return f"{int(value):+d}"
 
 
 def humanize_value(value: Any) -> str:

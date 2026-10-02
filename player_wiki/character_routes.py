@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import BytesIO
+from pathlib import Path
 from typing import Any, Callable
 
 from flask import abort, current_app, g, make_response, redirect, render_template, request, send_file, url_for
@@ -140,6 +142,23 @@ def character_portrait_asset(campaign_slug: str, character_slug: str):
     portrait = dependencies.build_character_portrait_context(campaign, record.definition)
     if portrait is None:
         abort(404)
+    from .committed_publication import active
+    if active():
+        from .committed_character_publication import portrait_bytes
+        from .committed_publication import CommittedSourceConflict
+        try:
+            proof = portrait_bytes(campaign_slug, character_slug)
+        except CommittedSourceConflict:
+            abort(404)
+        if proof is None or proof[0] != portrait["asset_ref"]:
+            abort(404)
+        media_type = validated_campaign_asset_media_type(Path(proof[0]), data_blob=proof[1])
+        if media_type is None:
+            abort(404)
+        response = send_file(BytesIO(proof[1]), mimetype=media_type,
+                             download_name=Path(proof[0]).name)
+        response.headers["Cache-Control"] = "no-store"
+        return response
     asset_file = dependencies.get_campaign_asset_file(campaign, portrait["asset_ref"])
     if asset_file is None:
         abort(404)
@@ -173,7 +192,8 @@ def character_roster_view(campaign_slug: str):
 
     query = request.args.get("q", "").strip()
     character_cards = dependencies.present_character_roster(
-        dependencies.get_character_repository().list_visible_characters(campaign_slug)
+        dependencies.get_character_repository().list_visible_characters(campaign_slug),
+        campaign=campaign,
     )
     if query:
         normalized_query = query.lower()

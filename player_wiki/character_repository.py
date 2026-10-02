@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
+import sqlite3
 from typing import Any, Callable, Mapping
 
 import yaml
@@ -28,6 +30,7 @@ from .source_health import (
 from .system_policy import DND_5E_SYSTEM_CODE, normalize_system_code
 
 SOURCE_HEALTH_DEFINITION_FILE_MAX_BYTES = 524_288
+SOURCE_HEALTH_INACTIVE_CHARACTER_EPOCH = sha256(b"source-health-character-inactive-v1").hexdigest()
 SESSION_READINESS_CHARACTER_LIMIT = 50
 
 
@@ -118,6 +121,10 @@ def _campaign_character_config_from_bytes(
 
 def load_campaign_character_config(campaigns_dir: Path, campaign_slug: str) -> CampaignCharacterConfig:
     config_path = campaigns_dir / campaign_slug / "campaign.yaml"
+    from .committed_publication import active, config
+    if active():
+        row, _ = config(campaign_slug)
+        return _campaign_character_config_from_bytes(config_path, campaign_slug, row["primary_bytes"])
     if not config_path.exists():
         raise FileNotFoundError(f"Campaign config not found: {config_path}")
     return _campaign_character_config_from_bytes(
@@ -193,12 +200,17 @@ def _source_health_character_continuation(offset: int, character_slug: str) -> s
 def _source_health_character_start(
     continuation: str,
     definition_paths: list[tuple[str, Path]],
+    *,
+    snapshot_digest: str = "",
 ) -> tuple[int, tuple[str, str] | None]:
     raw_continuation = str(continuation or "").strip()
     if not raw_continuation:
         return (0, None)
     parts = raw_continuation.split(":")
-    if len(parts) != 4 or parts[:2] != ["character", "v1"]:
+    version = "v2" if snapshot_digest else "v1"
+    if (len(parts) != (5 if snapshot_digest else 4)
+            or parts[:2] != ["character", version]
+            or snapshot_digest and parts[4] != snapshot_digest):
         raise ValueError("Invalid Character Source Health continuation.")
     if not parts[2].isdigit() or str(int(parts[2])) != parts[2]:
         raise ValueError("Invalid Character Source Health continuation.")
@@ -218,7 +230,13 @@ def _source_health_character_start(
     ]
     if len(prior_keys) != 1:
         raise ValueError("Stale Character Source Health continuation.")
+    if offset > len(definition_paths):
+        raise ValueError("Stale Character Source Health continuation.")
     return (offset, prior_keys[0])
+
+
+def _committed_character_cursor(offset: int, slug: str, digest: str) -> str:
+    return f"character:v2:{offset}:{_source_health_character_order_digest(slug)}:{digest}"
 
 
 def _source_health_exact_character_slug(
@@ -395,6 +413,161 @@ class CharacterRepository:
             _CampaignCharacterConfigCacheRecord,
         ] = {}
 
+    @contextmanager
+    def _committed_character_snapshot(self, campaign_slug: str):
+        """Bind config, pointer membership and exact pairs to one SQLite read view."""
+        from .committed_publication import CommittedSourceConflict, active, config
+        from .db import get_db
+
+        connection = get_db()
+        owned = not connection.in_transaction
+        if owned:
+            connection.execute("BEGIN")
+        try:
+            if not active(connection):
+                raise CommittedSourceConflict("Committed Character proof needs repair.")
+            config_row, settings = config(campaign_slug, connection=connection)
+            rows = connection.execute(
+                "SELECT object_ref, revision FROM committed_source_current "
+                "WHERE campaign_slug=? AND object_kind='character'",
+                (campaign_slug,),
+            ).fetchall()
+            pointers = {}
+            for pointer in rows:
+                slug = pointer["object_ref"]
+                try:
+                    validate_character_slug(slug)
+                except CharacterPathSafetyError as exc:
+                    raise CommittedSourceConflict("Committed Character proof needs repair.") from exc
+                pointers[slug] = int(pointer["revision"])
+            yield connection, config_row, settings, pointers
+        finally:
+            if owned:
+                connection.rollback()
+
+    @staticmethod
+    def _committed_definition(campaign_slug, slug, source, settings):
+        from .committed_publication import CommittedSourceConflict
+
+        try:
+            definition = yaml.safe_load(source["primary_bytes"].decode("utf-8"))
+            if (not isinstance(definition, dict)
+                    or definition.get("campaign_slug") != campaign_slug
+                    or definition.get("character_slug") != slug
+                    or normalize_system_code(definition.get("system"))
+                    != normalize_system_code(settings.get("system"))):
+                raise ValueError("Invalid Character definition identity.")
+            return definition
+        except (UnicodeError, yaml.YAMLError, ValueError, TypeError) as exc:
+            raise CommittedSourceConflict("Committed Character proof needs repair.") from exc
+
+    @staticmethod
+    def _committed_import(campaign_slug, slug, source):
+        from .committed_publication import CommittedSourceConflict
+
+        try:
+            imported = yaml.safe_load(source["secondary_bytes"].decode("utf-8"))
+            if (not isinstance(imported, dict)
+                    or imported.get("campaign_slug") != campaign_slug
+                    or imported.get("character_slug") != slug):
+                raise ValueError("Invalid Character import identity.")
+            return imported
+        except (UnicodeError, yaml.YAMLError, ValueError, TypeError) as exc:
+            raise CommittedSourceConflict("Committed Character proof needs repair.") from exc
+
+    @staticmethod
+    def _committed_source(campaign_slug, slug, revision, connection):
+        from .committed_character_publication import exact_character
+        from .committed_publication import CommittedSourceConflict
+
+        source = exact_character(campaign_slug, slug, connection=connection,
+                                 allow_tombstone=True)
+        if source is None or source["revision"] != revision:
+            raise CommittedSourceConflict("Committed Character proof needs repair.")
+        return source
+
+    @staticmethod
+    def _committed_inventory_digest(config_row, pointers, connection, campaign_slug):
+        proofs = connection.execute(
+            "SELECT c.object_ref, c.revision, a.status, a.revision, "
+            "g.primary_sha256, g.secondary_sha256, g.tombstone "
+            "FROM committed_source_current c "
+            "LEFT JOIN committed_source_admission a ON a.campaign_slug=c.campaign_slug "
+            "AND a.object_kind=c.object_kind AND a.object_ref=c.object_ref "
+            "LEFT JOIN committed_source_generations g ON g.campaign_slug=c.campaign_slug "
+            "AND g.object_kind=c.object_kind AND g.object_ref=c.object_ref "
+            "AND g.revision=c.revision "
+            "WHERE c.campaign_slug=? AND c.object_kind='character'",
+            (campaign_slug,),
+        ).fetchall()
+        if len(proofs) != len(pointers):
+            raise ValueError("Committed Character inventory changed; repair required.")
+        digest = sha256(repr((
+            config_row["revision"], sorted(tuple(row) for row in proofs),
+        )).encode("utf-8"))
+        digest.update(b"\0character-journals-v1")
+        try:
+            for journal_type, query in (
+                (
+                    "reconciliation",
+                    "SELECT character_slug, operation_id, state "
+                    "FROM character_reconciliation_operations WHERE campaign_slug=? "
+                    "AND state IN ('prepared','repository_pending','conflict') "
+                    "ORDER BY character_slug, operation_id, state",
+                ),
+                (
+                    "deletion",
+                    "SELECT character_slug, operation_id, state "
+                    "FROM character_deletion_operations WHERE campaign_slug=? "
+                    "AND state IN ('prepared','repository_pending','conflict') "
+                    "ORDER BY character_slug, operation_id, state",
+                ),
+                (
+                    "publication",
+                    "SELECT object_ref, operation_id, state "
+                    "FROM committed_source_publications WHERE campaign_slug=? "
+                    "AND object_kind='character' AND state IN ('prepared','conflict') "
+                    "ORDER BY object_ref, operation_id, state",
+                ),
+            ):
+                for slug, operation_id, state in connection.execute(query, (campaign_slug,)):
+                    validate_character_slug(slug)
+                    if (len(slug.encode("utf-8")) > 255
+                            or not isinstance(operation_id, str)
+                            or len(operation_id) != 32
+                            or any(char not in "0123456789abcdef" for char in operation_id)
+                            or state not in {"prepared", "repository_pending", "conflict"}
+                            or (journal_type == "publication" and state == "repository_pending")):
+                        raise ValueError("Invalid Character journal identity.")
+                    evidence = repr((journal_type, slug, operation_id, state)).encode("utf-8")
+                    digest.update(len(evidence).to_bytes(4, "big"))
+                    digest.update(evidence)
+        except (sqlite3.Error, CharacterPathSafetyError, TypeError, ValueError, UnicodeError):
+            raise ValueError("Committed Character inventory needs repair.") from None
+        return digest.hexdigest()
+
+    def source_health_inventory_epoch(self, campaign_slug: str) -> str:
+        """Return only the Character inventory metadata identity in one read view."""
+        from .committed_publication import active
+        from .db import get_db
+
+        connection = get_db()
+        owned = not connection.in_transaction
+        if owned:
+            connection.execute("BEGIN")
+        try:
+            if not active(connection):
+                return SOURCE_HEALTH_INACTIVE_CHARACTER_EPOCH
+            with self._committed_character_snapshot(campaign_slug) as (
+                snapshot, config_row, _settings, pointers,
+            ):
+                return self._committed_inventory_digest(
+                    config_row, pointers, snapshot, campaign_slug,
+                )
+        finally:
+            if owned:
+                connection.rollback()
+
     @staticmethod
     def _file_signature(path: Path) -> tuple[int, int]:
         stats = path.stat()
@@ -426,6 +599,9 @@ class CharacterRepository:
         config_payload: bytes | None = None,
         config_signature: tuple[int, int, str] | None = None,
     ) -> CampaignCharacterConfig:
+        from .committed_publication import active
+        if active():
+            return load_campaign_character_config(self.campaigns_dir, campaign_slug)
         campaigns_root = self.campaigns_dir.resolve()
         config_path = campaigns_root / campaign_slug / "campaign.yaml"
         resolved_config_path = (
@@ -634,6 +810,23 @@ class CharacterRepository:
         self._character_payload_cache.pop((campaign_slug, character_slug), None)
 
     def list_characters(self, campaign_slug: str) -> list[CharacterRecord]:
+        from .committed_publication import active, CommittedSourceConflict
+        if active():
+            with self._committed_character_snapshot(campaign_slug) as (connection, _, settings, pointers):
+                records = []
+                for slug in sorted(pointers):
+                    source = self._committed_source(campaign_slug, slug, pointers[slug], connection)
+                    if source["tombstone"]:
+                        continue
+                    self._committed_definition(campaign_slug, slug, source, settings)
+                    record = self._load_character(
+                        campaign_slug, slug, allow_reconciliation=False,
+                        initialize_missing_state=False,
+                    )
+                    if record is None:
+                        raise CommittedSourceConflict("Committed Character proof needs repair.")
+                    records.append(record)
+                return records
         config = self._get_campaign_character_config(campaign_slug)
         if not config.characters_dir.exists():
             return []
@@ -671,6 +864,27 @@ class CharacterRepository:
         parsed_limit = int(limit)
         if parsed_limit < 1 or parsed_limit > SESSION_READINESS_CHARACTER_LIMIT:
             raise ValueError("Session readiness Character limit is invalid.")
+
+        from .committed_publication import active
+        if active():
+            with self._committed_character_snapshot(campaign_slug) as (connection, _, settings, pointers):
+                if len(pointers) > parsed_limit:
+                    raise ValueError("Session readiness Character definitions exceed their cap.")
+                available_slugs = []
+                definition_bytes = 0
+                for slug in sorted(pointers):
+                    source = self._committed_source(campaign_slug, slug, pointers[slug], connection)
+                    if source["tombstone"]:
+                        continue
+                    payload = source["primary_bytes"]
+                    if (len(payload) > SOURCE_HEALTH_DEFINITION_FILE_MAX_BYTES
+                            or definition_bytes + len(payload) > SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES):
+                        raise ValueError("Session readiness Character definitions exceed their byte cap.")
+                    definition_bytes += len(payload)
+                    definition = self._committed_definition(campaign_slug, slug, source, settings)
+                    if definition.get("status") == "active":
+                        available_slugs.append(slug)
+                return SessionReadinessCharacterSummary(tuple(available_slugs))
 
         config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
         if not config.characters_dir.exists():
@@ -726,9 +940,63 @@ class CharacterRepository:
         """Read one stable page of definitions without imports, state, derivation, or caches."""
 
         page_limit = min(max(int(limit), 1), 50)
+        from .committed_publication import active
+        if active():
+            with self._committed_character_snapshot(campaign_slug) as (connection, config_row, settings, pointers):
+                ordered = sorted(pointers, key=_source_health_character_order_key)
+                digest = self._committed_inventory_digest(config_row, pointers, connection, campaign_slug)
+                paths = [(slug, Path()) for slug in ordered]
+                offset, prior_key = _source_health_character_start(
+                    continuation, paths, snapshot_digest=digest,
+                )
+                if prior_key is not None and (
+                    offset > len(ordered)
+                    or _source_health_character_order_key(ordered[offset - 1]) != prior_key
+                ):
+                    raise ValueError("Stale Character Source Health continuation.")
+                selected = ordered[offset:offset + page_limit]
+                consumers = []
+                targets = []
+                definitions = {}
+                byte_count = 0
+                file_count = 0
+                for slug in selected:
+                    source = self._committed_source(campaign_slug, slug, pointers[slug], connection)
+                    if source["tombstone"]:
+                        continue
+                    payload = source["primary_bytes"]
+                    if (len(payload) > SOURCE_HEALTH_DEFINITION_FILE_MAX_BYTES
+                            or byte_count + len(payload) > SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES):
+                        raise ValueError("Character Source Health definitions exceed their byte cap.")
+                    byte_count += len(payload)
+                    file_count += 1
+                    definition = self._committed_definition(campaign_slug, slug, source, settings)
+                    status = str(definition.get("status") or "").strip()
+                    targets.append(_source_health_character_target(
+                        campaign_slug, slug, system_code=normalize_system_code(definition.get("system")),
+                        enabled=status == "active",
+                    ))
+                    if status == "active":
+                        definitions[slug] = dict(definition)
+                        consumers.extend(_character_source_health_consumers(
+                            campaign_slug, slug, normalize_system_code(definition.get("system")), definition,
+                        ))
+                next_offset = offset + len(selected)
+                return SourceHealthInventoryPage(
+                    consumers=tuple(consumers), targets=tuple(targets),
+                    continuation=(
+                        _committed_character_cursor(next_offset, selected[-1], digest)
+                        if next_offset < len(ordered) and selected else ""
+                    ),
+                    definition_file_count=file_count, definition_bytes=byte_count,
+                    character_definitions=definitions,
+                    character_epoch=digest,
+                )
         config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
         if not config.characters_dir.exists():
-            return SourceHealthInventoryPage()
+            return SourceHealthInventoryPage(
+                character_epoch=SOURCE_HEALTH_INACTIVE_CHARACTER_EPOCH,
+            )
 
         definition_paths: list[tuple[str, Path]] = []
         for discovered_path in config.characters_dir.glob("*/definition.yaml"):
@@ -855,6 +1123,7 @@ class CharacterRepository:
             definition_file_count=definition_file_count,
             definition_bytes=definition_bytes,
             character_definitions=character_definitions,
+            character_epoch=SOURCE_HEALTH_INACTIVE_CHARACTER_EPOCH,
         )
 
     def resolve_source_health_character_targets(
@@ -877,6 +1146,41 @@ class CharacterRepository:
             raise ValueError("Character Source Health exact resolution is capped at 50 refs.")
         if not references_by_slug:
             return SourceHealthResolutionBatch(resolutions=resolutions)
+
+        from .committed_publication import active
+        if active():
+            with self._committed_character_snapshot(campaign_slug) as (connection, _, settings, pointers):
+                count = 0
+                byte_count = 0
+                definitions = {}
+                for slug, matching in references_by_slug.items():
+                    resolution = SourceHealthResolution()
+                    if slug in pointers:
+                        source = self._committed_source(campaign_slug, slug, pointers[slug], connection)
+                        if not source["tombstone"]:
+                            payload = source["primary_bytes"]
+                            if (len(payload) > SOURCE_HEALTH_DEFINITION_FILE_MAX_BYTES
+                                    or byte_count + len(payload) > SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES):
+                                raise ValueError("Character Source Health definitions exceed their byte cap.")
+                            byte_count += len(payload)
+                            count += 1
+                            definition = self._committed_definition(campaign_slug, slug, source, settings)
+                            status = str(definition.get("status") or "").strip()
+                            resolution = SourceHealthResolution(targets=(
+                                _source_health_character_target(
+                                    campaign_slug, slug,
+                                    system_code=normalize_system_code(definition.get("system")),
+                                    enabled=status == "active",
+                                ),
+                            ))
+                            if status == "active":
+                                definitions[slug] = dict(definition)
+                    for reference in matching:
+                        resolutions[reference] = resolution
+                return SourceHealthResolutionBatch(
+                    resolutions=resolutions, definition_file_count=count,
+                    definition_bytes=byte_count, character_definitions=definitions,
+                )
 
         config = load_campaign_character_config(self.campaigns_dir, campaign_slug)
         definition_file_count = 0
@@ -1031,6 +1335,66 @@ class CharacterRepository:
             refs_by_slug.setdefault(character_slug, []).append(reference)
         if len(refs_by_slug) > 50:
             raise ValueError("Character fingerprint batch exceeds its cap.")
+
+        from .committed_publication import active, CommittedSourceConflict
+        if active():
+            with self._committed_character_snapshot(campaign_slug) as (connection, _, settings, pointers):
+                protected = self.state_store.list_reconciliation_protected_slugs(
+                    campaign_slug, tuple(refs_by_slug),
+                )
+                import_count = 0
+                import_bytes = 0
+                for slug, matching in refs_by_slug.items():
+                    if slug not in pointers:
+                        raise CommittedSourceConflict("Committed Character proof needs repair.")
+                    source = self._committed_source(campaign_slug, slug, pointers[slug], connection)
+                    if source["tombstone"]:
+                        raise CommittedSourceConflict("Committed Character proof needs repair.")
+                    definition = self._committed_definition(campaign_slug, slug, source, settings)
+                    if (definition != character_definitions.get(slug)
+                            or definition.get("status") != "active"):
+                        raise CommittedSourceConflict("Committed Character snapshot changed; repair required.")
+                    if slug in protected:
+                        for reference in matching:
+                            ordinary = overlaid[reference]
+                            overlaid[reference] = replace(
+                                ordinary,
+                                targets=tuple(replace(target, accessible=False, destination="")
+                                              for target in ordinary.targets),
+                                contains_inaccessible=True,
+                            )
+                        continue
+                    payload = source["secondary_bytes"]
+                    if (len(payload) > SOURCE_HEALTH_DEFINITION_FILE_MAX_BYTES
+                            or prior_definition_bytes + import_bytes + len(payload)
+                            > SOURCE_HEALTH_DEFINITION_AGGREGATE_MAX_BYTES):
+                        raise ValueError("Character Source Health imports exceed their byte cap.")
+                    import_count += 1
+                    import_bytes += len(payload)
+                    imported = self._committed_import(campaign_slug, slug, source)
+                    state = self.state_store.get_state(campaign_slug, slug)
+                    if state is None:
+                        raise CommittedSourceConflict("Committed Character state needs repair.")
+                    record = CharacterRecord(
+                        definition=CharacterDefinition.from_dict(dict(definition)),
+                        import_metadata=CharacterImportMetadata.from_dict(imported),
+                        state_record=state, committed_revision=int(source["revision"]),
+                    )
+                    version = str(target_version_adapter(record))
+                    if len(version) != 64 or any(c not in "0123456789abcdef" for c in version):
+                        raise ValueError("Invalid Character combat-seed fingerprint.")
+                    for reference in matching:
+                        ordinary = overlaid[reference]
+                        overlaid[reference] = replace(
+                            ordinary,
+                            targets=tuple(replace(target, target_version=version,
+                                                  version_scheme="combat-seed-v1-sha256")
+                                          for target in ordinary.targets),
+                        )
+                return SourceHealthResolutionBatch(
+                    resolutions=overlaid, import_file_count=import_count,
+                    import_bytes=import_bytes,
+                )
 
         protected_slugs = self.state_store.list_reconciliation_protected_slugs(
             campaign_slug,
@@ -1213,6 +1577,10 @@ class CharacterRepository:
             validate_character_slug(character_slug)
         except CharacterPathSafetyError:
             return None
+        from .committed_publication import active
+        if active():
+            from .committed_character_publication import load_for_write
+            return load_for_write(self, campaign_slug, character_slug)
         if (
             not allow_reconciliation
             and self._is_reconciliation_protected(campaign_slug, character_slug)

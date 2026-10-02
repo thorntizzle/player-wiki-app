@@ -3961,6 +3961,8 @@ def _spell_payload_has_legacy_always_prepared_source_label(spell_payload: dict[s
 
 
 def _spell_payload_is_always_prepared(spell_payload: dict[str, Any]) -> bool:
+    if str(spell_payload.get("authority_status") or "") in {"NEEDS REPAIR", "NEEDS ATTENTION", "MANUAL"}:
+        return False
     return bool(spell_payload.get("is_always_prepared")) or _spell_payload_has_legacy_always_prepared_source_label(
         spell_payload
     )

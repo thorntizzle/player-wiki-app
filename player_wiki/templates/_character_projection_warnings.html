@@ -1,4 +1,5 @@
-{% if projection_warnings %}
+{% set historical_numeric_rows = historical_numeric_rows | default([], true) %}
+{% if projection_warnings or historical_numeric_rows %}
   <aside class="notice warning" role="status" aria-label="Character projection warnings">
     <strong>Character projection needs review</strong>
     <ul>
@@ -6,5 +7,15 @@
         <li>{{ warning.message }}</li>
       {% endfor %}
     </ul>
+    {% if historical_numeric_rows %}
+      <details>
+        <summary>Historical table values needing manager repair ({{ historical_numeric_rows|length }})</summary>
+        <ul>
+          {% for row in historical_numeric_rows %}
+            <li>{{ row.label }}: raw {{ row.raw }} · {{ row.status }}</li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
   </aside>
 {% endif %}

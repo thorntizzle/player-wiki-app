@@ -8,6 +8,7 @@ from flask import Blueprint, current_app, request
 from .character_builder import CharacterBuildError
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError
+from .character_reconciliation import PendingReviewedSourceProof
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,27 @@ class CharacterProgressionRepairApiDependencies:
     apply_imported_progression_repairs: Callable[..., tuple[Any, Any]]
     merge_state_with_definition: Callable[..., dict[str, Any]]
     character_publication_coordinator: object
+
+
+def _prospective_numeric_authority(
+    coordinator: object, record: object, definition: object,
+) -> object | None:
+    from .committed_publication import active
+
+    if not active():
+        return None
+    provider = coordinator.numeric_authority_provider
+    if not callable(provider):
+        raise ValueError("Character numeric authority is unavailable.")
+    return provider(record, definition)
+
+
+def _reviewed_config_revision(definition: object) -> int | None:
+    from .committed_publication import active
+    if not active():
+        return None
+    from .committed_character_publication import config
+    return config(definition.campaign_slug)[0]["revision"]
 
 
 def register_character_progression_repair_api_routes(
@@ -118,8 +140,13 @@ def register_character_progression_repair_api_routes(
                 campaign_slug,
                 definition,
             )
+            config_revision = _reviewed_config_revision(definition)
+            prospective_authority = _prospective_numeric_authority(
+                dependencies.character_publication_coordinator, record, definition,
+            )
             merged_state = dependencies.merge_state_with_definition(
-                definition, record.state_record.state
+                definition, record.state_record.state,
+                source_authority=prospective_authority,
             )
             dependencies.character_publication_coordinator.update(
                 record,
@@ -128,6 +155,10 @@ def register_character_progression_repair_api_routes(
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
+                reviewed_source_proof=(PendingReviewedSourceProof.capture(
+                    record, definition, merged_state, prospective_authority,
+                    config_revision=config_revision,
+                ) if prospective_authority is not None else None),
             )
         except CharacterStateConflictError:
             return dependencies.json_error(

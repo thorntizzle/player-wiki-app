@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from .repository import normalize_lookup, slugify
+from .character_page_companion import blocks_page_companion_heuristics
 
 ARTIFICER_INFUSIONS_FEATURE_NAME = "Artificer Infusions"
 ARTIFICER_INFUSIONS_FEATURE_KEY = normalize_lookup(ARTIFICER_INFUSIONS_FEATURE_NAME)
@@ -163,6 +164,7 @@ def known_artificer_infusions(definition: Any) -> list[dict[str, Any]]:
     parent_ids = {
         str(feature.get("id") or "").strip()
         for feature in features
+        if not blocks_page_companion_heuristics(feature)
         if normalize_lookup(feature.get("name")) == ARTIFICER_INFUSIONS_FEATURE_KEY
         if str(feature.get("id") or "").strip()
     }
@@ -178,6 +180,8 @@ def known_artificer_infusions(definition: Any) -> list[dict[str, Any]]:
         known.append(active_infusion_payload(clean_name, feature_id=feature_id))
 
     for feature in features:
+        if blocks_page_companion_heuristics(feature):
+            continue
         feature_name = str(feature.get("name") or "").strip()
         normalized_name = normalize_lookup(feature_name)
         if normalized_name == ARTIFICER_INFUSIONS_FEATURE_KEY:
@@ -197,6 +201,7 @@ def known_artificer_infusions(definition: Any) -> list[dict[str, Any]]:
 
 def has_artificer_infusion_feature(definition: Any) -> bool:
     return any(
+        not blocks_page_companion_heuristics(dict(feature or {})) and
         normalize_lookup(dict(feature or {}).get("name")) == ARTIFICER_INFUSIONS_FEATURE_KEY
         for feature in list(getattr(definition, "features", []) or [])
     )

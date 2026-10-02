@@ -262,6 +262,7 @@ def suppress_unresolved_linked_sources(
             "bonus", "bonus_ac", "bonus_attack_rolls", "bonus_damage_rolls",
             "bonus_weapon", "bonus_weapon_attack", "bonus_weapon_damage",
             "defensive_rules", "attack_reminder_rules", "spell_support",
+            "spellcasting_modifiers",
             "resource_template_bonuses", "item_use_actions", "item_uses",
         }
         for field in CAMPAIGN_ITEM_METADATA_KEYS:

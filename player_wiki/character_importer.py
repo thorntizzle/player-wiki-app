@@ -1266,6 +1266,10 @@ def render_character_yaml(path_name: str, payload: dict[str, Any]) -> str:
 
 
 def write_yaml(path: Path, payload: dict[str, Any]) -> None:
+    if path.name in {"definition.yaml", "import.yaml"}:
+        from .committed_publication import active
+        if active():
+            raise CharacterImportError("Activated Character sources require the publication coordinator.")
     atomic_write_text(
         path,
         render_character_yaml(path.name, payload),
@@ -1281,7 +1285,20 @@ def _hash_import_identity(prefix: str, identity: str) -> str:
     return f"{prefix}:{sha1(identity.encode('utf-8')).hexdigest()[:16]}"
 
 
-def _load_existing_character_definition(character_dir: Path) -> CharacterDefinition | None:
+def _load_existing_character_definition(
+    character_dir: Path, *, campaign_slug: str | None = None,
+    character_slug: str | None = None,
+) -> CharacterDefinition | None:
+    from .committed_publication import active
+    if active():
+        from .committed_character_publication import exact_character
+        if not campaign_slug or not character_slug:
+            raise CharacterImportError("Activated Character lookup requires exact campaign and Character identity.")
+        source = exact_character(campaign_slug, character_slug)
+        if source is None:
+            return None
+        payload = yaml.safe_load(source["primary_bytes"].decode("utf-8"))
+        return CharacterDefinition.from_dict(payload)
     definition_path = character_dir / "definition.yaml"
     if not definition_path.exists():
         return None
@@ -2003,7 +2020,10 @@ def preserve_existing_character_overrides(
     systems_service: Any | None = None,
     campaign_page_records: list[Any] | None = None,
 ) -> CharacterDefinition:
-    existing_definition = _load_existing_character_definition(character_dir)
+    existing_definition = _load_existing_character_definition(
+        character_dir, campaign_slug=definition.campaign_slug,
+        character_slug=definition.character_slug,
+    )
     return converge_imported_definition(
         definition,
         existing_definition=existing_definition,
@@ -2046,7 +2066,14 @@ def reconcile_imported_state(
     existing_state: dict[str, Any],
     *,
     previous_definition: CharacterDefinition | None = None,
+    source_authority: Any | None = None,
 ) -> dict[str, Any]:
+    from .committed_publication import active
+    from .system_policy import is_dnd_5e_system
+    if active() and is_dnd_5e_system(definition.system) and source_authority is None:
+        raise CharacterImportError(
+            "Reimport needs current Character numeric source proof. Repair source links and retry."
+        )
     previous_resource_ids = {
         str(template.get("id") or "").strip()
         for template in list((previous_definition.resource_templates if previous_definition is not None else []) or [])
@@ -2057,11 +2084,14 @@ def reconcile_imported_state(
         for template in list(definition.resource_templates or [])
         if str(template.get("id") or "").strip()
     }
-    reconciled_state = merge_state_with_definition(definition, existing_state)
+    reconciled_state = merge_state_with_definition(
+        definition, existing_state, source_authority=source_authority,
+    )
     if previous_resource_ids:
         reconciled_state = merge_state_with_definition(
             definition,
             existing_state,
+            source_authority=source_authority,
             removed_resource_ids=previous_resource_ids - current_resource_ids,
         )
     return reconciled_state
@@ -2099,8 +2129,14 @@ def import_character(
             raise CharacterImportError(str(exc)) from exc
         coordinator = app.extensions["character_publication_coordinator"]
         coordinator.recover_key(campaign_slug, definition.character_slug)
-        definition_exists = (character_dir / "definition.yaml").exists()
-        import_exists = (character_dir / "import.yaml").exists()
+        from .committed_publication import active
+        activated = active()
+        if activated:
+            prior_committed = repository.get_character(campaign_slug, definition.character_slug)
+            definition_exists = import_exists = prior_committed is not None
+        else:
+            definition_exists = (character_dir / "definition.yaml").exists()
+            import_exists = (character_dir / "import.yaml").exists()
         existing_state = state_store.get_state(campaign_slug, definition.character_slug)
         if (definition_exists, import_exists, existing_state is not None) not in {
             (False, False, False),
@@ -2144,11 +2180,21 @@ def import_character(
             raise CharacterImportError(
                 "The character target is incomplete and requires repair before import."
             )
-        desired_state = reconcile_imported_state(
-            definition,
-            prior_record.state_record.state,
-            previous_definition=prior_record.definition,
-        )
+        try:
+            reimport_authority = (
+                coordinator.numeric_authority_provider(prior_record, definition)
+                if activated and coordinator.numeric_authority_provider is not None else None
+            )
+            desired_state = reconcile_imported_state(
+                definition,
+                prior_record.state_record.state,
+                previous_definition=prior_record.definition,
+                source_authority=reimport_authority,
+            )
+        except ValueError as exc:
+            raise CharacterImportError(
+                "Reimport needs current Character source or state repair. Inspect the Character and repair the affected source links before retrying."
+            ) from exc
         coordinator.update(
             prior_record,
             definition,
@@ -2157,6 +2203,8 @@ def import_character(
             expected_revision=prior_record.state_record.revision,
             updated_by_user_id=None,
             operation_kind="markdown_import",
+            reconcile_reimport_state=activated,
+            reimport_source_authority=reimport_authority,
         )
         return CharacterImportResult(
             definition=definition,
