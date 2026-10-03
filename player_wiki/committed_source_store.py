@@ -32,7 +32,8 @@ _BLOCK_CODES = frozenset({
     "page_not_eligible", "page_deprecated", "page_reveal_pending",
     "pending_journal", "mirror_conflict", "existing_generation",
     "legacy_enum_invalid", "oversize_primary", "oversize_import",
-    "schema_unavailable",
+    "schema_unavailable", "missing_portrait", "unexpected_portrait",
+    "invalid_portrait", "portrait_ref_mismatch",
 })
 
 
@@ -64,6 +65,122 @@ def _receipt_digest(kind: str, primary: bytes, secondary: bytes | None) -> str:
         digest.update(len(value).to_bytes(8, "big"))
         digest.update(value)
     return digest.hexdigest()
+
+
+def _portrait_receipt_digest(
+    primary: bytes, secondary: bytes, asset_ref: str, image: bytes,
+) -> str:
+    """Keep historical portrait-free receipt identities byte-for-byte stable."""
+    digest = hashlib.sha256()
+    for value in (
+        b"character-portrait-admission-v1", primary, secondary,
+        asset_ref.encode("utf-8"), image,
+    ):
+        digest.update(len(value).to_bytes(8, "big"))
+        digest.update(value)
+    return digest.hexdigest()
+
+
+def _definition_portrait_ref(
+    primary: bytes, character_slug: str,
+) -> tuple[str | None, str | None]:
+    """Return a validated exact claim, or a bounded reason, without file access."""
+    from .character_assets import validate_character_portrait_asset_ref
+
+    payload = _decode_mapping(primary)
+    if payload is None:
+        return "malformed_primary", None
+    if payload.get("character_slug") != character_slug:
+        return "ownership_mismatch", None
+    profile = payload.get("profile")
+    raw = profile.get("portrait_asset_ref") if isinstance(profile, dict) else None
+    if raw is None or raw == "":
+        return None, None
+    if not isinstance(raw, str) or raw != raw.strip():
+        return "invalid_portrait", None
+    try:
+        validate_character_portrait_asset_ref(character_slug, raw)
+    except ValueError:
+        return "invalid_portrait", None
+    return None, raw
+
+
+def _stage_portrait(
+    object_kind: str, object_ref: str, primary: bytes | None,
+    asset_ref: str | None, image: bytes | None,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Do image decode before reserving the SQLite writer."""
+    if object_kind != "character":
+        return ("unexpected_portrait" if asset_ref is not None or image is not None else None,
+                None, None, None)
+    if type(primary) is not bytes or not primary or len(primary) > _MAX_SOURCE_BYTES:
+        return None, None, None, None  # _classify owns the primary error.
+    reason, claimed = _definition_portrait_ref(primary, object_ref)
+    if reason is not None:
+        return reason, None, None, None
+    if claimed is None:
+        return ("unexpected_portrait" if asset_ref is not None or image is not None else None,
+                None, None, None)
+    if asset_ref is None or image is None:
+        return "missing_portrait", claimed, None, None
+    if type(asset_ref) is not str or asset_ref != claimed:
+        return "portrait_ref_mismatch", claimed, None, None
+    if type(image) is not bytes or not image or len(image) > 8 * 1024 * 1024:
+        return "invalid_portrait", claimed, None, None
+    from .campaign_content_service import validated_campaign_asset_media_type
+
+    media_type = validated_campaign_asset_media_type(PurePosixPath(asset_ref), data_blob=image)
+    if media_type is None:
+        return "invalid_portrait", claimed, None, None
+    return None, claimed, _digest(image), media_type
+
+
+def _portrait_storage_state(connection: sqlite3.Connection) -> str:
+    """Distinguish an actual v15 database from missing newer portrait storage."""
+    applied = connection.execute(
+        "SELECT 1 FROM schema_migrations WHERE version = 17"
+    ).fetchone() is not None
+    table = connection.execute(
+        """SELECT 1 FROM sqlite_master WHERE type = 'table'
+           AND name = 'committed_character_portraits'"""
+    ).fetchone() is not None
+    if not applied and not table:
+        return "legacy"
+    return "ready" if applied and table else "unavailable"
+
+
+def _portrait_row_proved(
+    connection: sqlite3.Connection, campaign_slug: str, character_slug: str,
+    revision: int, claimed_ref: str | None, image: bytes | None = None,
+    image_digest: str | None = None, media_type: str | None = None,
+) -> bool:
+    storage = _portrait_storage_state(connection)
+    if storage != "ready":
+        return storage == "legacy" and claimed_ref is None
+    rows = connection.execute(
+        """SELECT asset_ref, sha256, image_bytes FROM committed_character_portraits
+           WHERE campaign_slug = ? AND character_slug = ? AND revision = ?""",
+        (campaign_slug, character_slug, revision),
+    ).fetchall()
+    if claimed_ref is None:
+        return not rows
+    if len(rows) != 1:
+        return False
+    stored_ref, stored_digest, stored_image = rows[0]
+    if (stored_ref != claimed_ref or type(stored_image) is not bytes
+            or not stored_image or len(stored_image) > 8 * 1024 * 1024
+            or stored_digest != _digest(stored_image)):
+        return False
+    if image is not None and (stored_image != image or stored_digest != image_digest):
+        return False
+    if image is not None:
+        return media_type is not None  # Exact stored bytes match prevalidated input.
+    from .campaign_content_service import validated_campaign_asset_media_type
+
+    stored_media = validated_campaign_asset_media_type(
+        PurePosixPath(claimed_ref), data_blob=stored_image,
+    )
+    return stored_media is not None
 
 
 def _decode_mapping(value: bytes) -> dict[str, Any] | None:
@@ -301,6 +418,7 @@ def admit_legacy_object(
     object_ref: str = "", primary_bytes: bytes | None,
     secondary_bytes: bytes | None = None, pending_journal: bool = False,
     mirror_conflict: bool = False, actor_user_id: int | None = None,
+    portrait_asset_ref: str | None = None, portrait_bytes: bytes | None = None,
 ) -> AdmissionResult:
     """Admit one complete synthetic legacy object, or persist an actionable block.
 
@@ -325,6 +443,11 @@ def admit_legacy_object(
         raise ValueError("Invalid actor.")
     if connection.in_transaction:
         raise ValueError("Admission needs its own SQLite transaction.")
+    portrait_reason, claimed_portrait_ref, portrait_digest, portrait_media = _stage_portrait(
+        object_kind, object_ref, primary_bytes, portrait_asset_ref, portrait_bytes,
+    )
+    primary_digest = _digest(primary_bytes) if type(primary_bytes) is bytes else None
+    secondary_digest = _digest(secondary_bytes) if type(secondary_bytes) is bytes else None
     connection.execute("BEGIN IMMEDIATE")
     try:
         marker = connection.execute(
@@ -345,6 +468,23 @@ def admit_legacy_object(
         else:
             reason = _classify(connection, campaign_slug, object_kind, object_ref,
                                primary_bytes, secondary_bytes)
+        if reason is None:
+            reason = portrait_reason
+        if reason is None and object_kind == "character":
+            # The definition and exact caller input remain the ones validated outside
+            # the writer reservation; no portrait from another revision can qualify.
+            locked_reason, locked_ref = _definition_portrait_ref(primary_bytes, object_ref)
+            if (locked_reason is not None or locked_ref != claimed_portrait_ref
+                    or _digest(primary_bytes) != primary_digest
+                    or _digest(secondary_bytes) != secondary_digest
+                    or (claimed_portrait_ref is not None
+                        and _digest(portrait_bytes) != portrait_digest)):
+                reason = "invalid_portrait"
+        if reason is None and object_kind == "character":
+            portrait_storage = _portrait_storage_state(connection)
+            if (portrait_storage == "unavailable"
+                    or (portrait_storage == "legacy" and claimed_portrait_ref is not None)):
+                reason = "schema_unavailable"
         current = connection.execute(
             """SELECT revision FROM committed_source_current
                WHERE campaign_slug = ? AND object_kind = ? AND object_ref = ?""",
@@ -352,7 +492,12 @@ def admit_legacy_object(
         ).fetchone()
         receipt = None
         if reason is None:
-            receipt = _receipt_digest(object_kind, primary_bytes, secondary_bytes)
+            receipt = (
+                _portrait_receipt_digest(
+                    primary_bytes, secondary_bytes, claimed_portrait_ref, portrait_bytes,
+                ) if claimed_portrait_ref is not None
+                else _receipt_digest(object_kind, primary_bytes, secondary_bytes)
+            )
             prior = connection.execute(
                 """SELECT revision FROM committed_source_admission_receipts
                    WHERE campaign_slug = ? AND object_kind = ? AND object_ref = ?
@@ -369,7 +514,11 @@ def admit_legacy_object(
                 if (stored is not None and bytes(stored[0]) == primary_bytes
                         and (bytes(stored[1]) if stored[1] is not None else None) == secondary_bytes
                         and stored[2] == _digest(primary_bytes)
-                        and stored[3] == (_digest(secondary_bytes) if secondary_bytes is not None else None)):
+                        and stored[3] == (_digest(secondary_bytes) if secondary_bytes is not None else None)
+                        and (object_kind != "character" or _portrait_row_proved(
+                            connection, campaign_slug, object_ref, int(prior[0]),
+                            claimed_portrait_ref, portrait_bytes, portrait_digest, portrait_media,
+                        ))):
                     result = AdmissionResult("admitted", "already_admitted", int(prior[0]))
                     _record_status(connection, campaign_slug, object_kind, object_ref,
                                    result.status, result.reason_code, result.revision)
@@ -400,6 +549,13 @@ def admit_legacy_object(
              _digest(secondary_bytes) if secondary_bytes is not None else None,
              actor_user_id, timestamp),
         )
+        if claimed_portrait_ref is not None:
+            connection.execute(
+                """INSERT INTO committed_character_portraits
+                   (campaign_slug, object_kind, character_slug, revision, asset_ref, sha256, image_bytes)
+                   VALUES (?, 'character', ?, 1, ?, ?, ?)""",
+                (campaign_slug, object_ref, claimed_portrait_ref, portrait_digest, portrait_bytes),
+            )
         connection.execute(
             """INSERT INTO committed_source_current
                (campaign_slug, object_kind, object_ref, revision) VALUES (?, ?, ?, 1)""",
@@ -438,7 +594,7 @@ def read_current_committed_bytes(
         return None
     row = connection.execute(
         """SELECT g.revision, g.primary_bytes, g.secondary_bytes, g.primary_sha256,
-                  g.secondary_sha256, g.tombstone, a.status
+                  g.secondary_sha256, g.tombstone, a.status, a.revision
            FROM committed_source_current AS c
            JOIN committed_source_generations AS g
              ON (g.campaign_slug, g.object_kind, g.object_ref, g.revision)
@@ -449,11 +605,18 @@ def read_current_committed_bytes(
            WHERE c.campaign_slug = ? AND c.object_kind = ? AND c.object_ref = ?""",
         (campaign_slug, object_kind, object_ref),
     ).fetchone()
-    if row is None or row[5] or row[6] != "admitted" or row[1] is None:
+    if (row is None or row[5] or row[6] != "admitted"
+            or row[7] != row[0] or row[1] is None):
         return None
     primary = bytes(row[1]); secondary = bytes(row[2]) if row[2] is not None else None
     if _digest(primary) != row[3] or (secondary is None) != (row[4] is None):
         return None
     if secondary is not None and _digest(secondary) != row[4]:
         return None
+    if object_kind == "character":
+        claim_reason, claimed_ref = _definition_portrait_ref(primary, object_ref)
+        if claim_reason is not None or not _portrait_row_proved(
+            connection, campaign_slug, object_ref, int(row[0]), claimed_ref,
+        ):
+            return None
     return int(row[0]), primary, secondary
