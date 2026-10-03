@@ -1,6 +1,6 @@
 # Published Wiki And Publishing
 
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 ## Owns
 
@@ -30,6 +30,7 @@ Last updated: 2026-10-02
   `main` commit and contained the same contract. At that review, the Phase 8
   head was local-only and had not been pushed, deployed, or observed live.
 - `Overview` pages and `type: overview` pages are legacy artifacts and are not visible through public wiki discovery, section navigation, search, section routes, or direct page routes.
+- The local Stage 7 C70 candidate permits one operator-proven, deprecated `Overview` page to remain hidden as sealed legacy source. A unique, exact `legacy_excluded:` admission marker binds its page row and Markdown file; readiness rejects a changed or ambiguous proof. Ordinary app writes cannot change or promote the marked page while its marker remains present. The excluded page stays out of committed page reads, search, navigation, links, Session pulls, and managed-image delivery. Its `index` route is not reserved: with no eligible redirect, Flask and API detail reads return 404; another visible page may use `redirect_from: index` and receive the ordinary 308 redirect, so an old bookmark may open that other page. The retained guide row still occupies the canonical `index` route slug for page uniqueness. Backup and cutover custody retain the exact file and raw database row; cutover labels both operator-only sealed preservation rather than player projection. Manual database or file tampering requires operator repair and is outside the app-controlled guarantee. This is local candidate behavior, not a deployed or live content change; marker insertion and activation require separate operator authority.
 
 ## Current Content Conventions
 

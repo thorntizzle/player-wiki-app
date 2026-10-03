@@ -20,6 +20,7 @@ from .committed_source_store import (
     _decode_mapping, _page_parity, _validate_config_payload, _validated_character_dir,
 )
 from .system_policy import normalize_system_code
+from .legacy_page_exclusion import proved_exclusions, is_exclusion_claim
 
 
 class SnapshotCoherenceError(ValueError):
@@ -93,6 +94,7 @@ def inspect_snapshot_coherence(
         if path in file_map or type(size) is not int or size < 0 or not isinstance(digest, str):
             raise SnapshotCoherenceError("The file inventory is ambiguous.")
         file_map[path] = (size, digest)
+    excluded = proved_exclusions(connection, file_map, visible_campaigns=visible_campaigns)
 
     activation = connection.execute(
         "SELECT activated,activated_at,coverage_version,schema_version "
@@ -194,6 +196,10 @@ def inspect_snapshot_coherence(
         admissions[obj] = row
         if row["status"] == "admitted" and (obj not in current or row["revision"] != current[obj]["revision"]):
             raise SnapshotCoherenceError("An admission points away from current source.")
+        if (activation[0]["activated"] and is_exclusion_claim(row["reason_code"])
+                and (visible_campaigns is None or obj[0] in visible_campaigns)
+                and obj not in excluded):
+            raise SnapshotCoherenceError("An excluded legacy page lost its sealed proof.")
     if activation[0]["activated"]:
         from .campaign_content_service import validated_campaign_asset_media_type
         from .managed_wiki_images import is_canonical_managed_wiki_image_ref
@@ -418,18 +424,25 @@ def inspect_snapshot_coherence(
             raise SnapshotCoherenceError("Committed mirror targets collide.")
         expected[path] = (slug, obj_kind, ref, binding["revision"], binding["sha256"])
     file_dispositions = []
+    excluded_paths = {proof["path"]: proof for proof in excluded.values()}
     for path in sorted(set(file_map) | set(expected)):
         observed = file_map.get(path)
         source = expected.get(path)
-        state = ("file_only_draft" if source is None else "missing" if observed is None
+        state = ("excluded_legacy_page" if path in excluded_paths and observed is not None
+                 else "file_only_draft" if source is None else "missing" if observed is None
                  else "matching" if observed[1] == source[-1] else "recoverable_draft_conflict")
         file_dispositions.append({"path": path, "state": state,
                                   "size": observed[0] if observed else None,
                                   "sha256": observed[1] if observed else None,
-                                  "canonical_sha256": source[-1] if source else None})
+                                  "canonical_sha256": (excluded_paths[path]["sha256"]
+                                                       if path in excluded_paths else
+                                                       source[-1] if source else None)})
     if visible_campaigns is not None:
         blob_bindings = [item for item in blob_bindings if item["campaign_slug"] in visible_campaigns]
-    return {"version": 1, "schema_version": version, "mode": "committed",
+    canonical = {"generations": generation_proofs, "objects": objects,
+                 "blobs": blob_bindings, "files": file_dispositions,
+                 "operation_journals": operation_journals}
+    result = {"version": 1, "schema_version": version, "mode": "committed",
             "activation": {"activated": bool(activation[0]["activated"]),
                            "coverage_version": activation[0]["coverage_version"]},
             "operation_journals": operation_journals,
@@ -437,7 +450,11 @@ def inspect_snapshot_coherence(
             "generations_sha256": _json_sha(generation_proofs),
             "file_dispositions": file_dispositions,
             "blob_bindings": blob_bindings,
-            "canonical_sha256": _json_sha({"generations": generation_proofs,
-                                            "objects": objects, "blobs": blob_bindings,
-                                            "files": file_dispositions,
-                                            "operation_journals": operation_journals})}
+            "canonical_sha256": ""}
+    if excluded:
+        evidence = [{"campaign_slug": key[0], "object_ref": key[2], **proof}
+                    for key, proof in sorted(excluded.items())]
+        result["excluded_legacy_pages"] = evidence
+        canonical["excluded_legacy_pages"] = evidence
+    result["canonical_sha256"] = _json_sha(canonical)
+    return result

@@ -432,6 +432,9 @@ def publish_page(reconciler, campaign, prepared, *, operation_kind, prepared_ima
     audit = reconciler._prepare_audit(audit_event_type,audit_actor_user_id,audit_metadata)
     _reserve(connection)
     try:
+        from .legacy_page_exclusion import has_exclusion_claim
+        if has_exclusion_claim(connection, slug, ref):
+            raise CommittedSourceConflict("The excluded legacy page cannot be changed.")
         locked=current(slug,"config",connection=connection)
         if locked is None or locked["revision"]!=config_generation["revision"] or capture_page_publication_snapshot(slug,ref)!=observed:
             raise PlayerWikiStalePageConflict("Publication inputs changed; reload before saving.")

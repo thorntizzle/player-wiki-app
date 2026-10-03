@@ -291,6 +291,9 @@ class PlayerWikiReconciler:
             )
             self._event("after_delete_prepare", operation.operation_id)
             try:
+                from .legacy_page_exclusion import has_exclusion_claim
+                if has_exclusion_claim(get_db(), operation.campaign_slug, operation.page_ref):
+                    raise CampaignContentError("The excluded legacy page cannot be deleted.")
                 self._event("before_tombstone_move", operation.operation_id)
                 atomic_move_file(source_path, tombstone_path)
                 self._event("after_tombstone_move", operation.operation_id)
@@ -793,6 +796,9 @@ class PlayerWikiReconciler:
         connection = get_db()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            from .legacy_page_exclusion import has_exclusion_claim
+            if has_exclusion_claim(connection, operation.campaign_slug, operation.page_ref):
+                raise CampaignContentError("The excluded legacy page cannot be changed.")
             if guard_page_snapshot and capture_page_publication_snapshot(
                 operation.campaign_slug, operation.page_ref
             ) != expected_page_snapshot:
@@ -871,7 +877,8 @@ class PlayerWikiReconciler:
                 ),
             )
             connection.commit()
-        except (PlayerWikiCreateConflict, PlayerWikiReconciliationConflict, PlayerWikiStalePageConflict):
+        except (CampaignContentError, PlayerWikiCreateConflict,
+                PlayerWikiReconciliationConflict, PlayerWikiStalePageConflict):
             connection.rollback()
             raise
         except sqlite3.IntegrityError as exc:
@@ -879,6 +886,9 @@ class PlayerWikiReconciler:
             raise PlayerWikiReconciliationConflict(
                 "This wiki page has a pending reconciliation operation and requires repair."
             ) from exc
+        except BaseException:
+            connection.rollback()
+            raise
         return operation, primary_path, primary_payload
 
     def _continue_prepared(
@@ -980,6 +990,9 @@ class PlayerWikiReconciler:
             self._raise_conflict(operation.operation_id, "recovery_payload_invalid_utf8")
         if _digest_bytes(desired_markdown) != operation.desired_markdown_digest:
             self._raise_conflict(operation.operation_id, "recovery_payload_digest_mismatch")
+        from .legacy_page_exclusion import has_exclusion_claim
+        if has_exclusion_claim(get_db(), operation.campaign_slug, operation.page_ref):
+            raise CampaignContentError("The excluded legacy page cannot be changed.")
 
         markdown_path = self._resolve_markdown_path(campaign, operation.page_ref)
         if operation.primary_authority == "image":
@@ -1042,6 +1055,8 @@ class PlayerWikiReconciler:
                 if page_record is None:
                     return None
                 return build_campaign_page_file_record(campaign, page_record)
+            if has_exclusion_claim(connection, operation.campaign_slug, operation.page_ref):
+                raise CampaignContentError("The excluded legacy page cannot be changed.")
             page_record = self.page_store.upsert_page(
                 operation.campaign_slug,
                 operation.page_ref,
@@ -1239,6 +1254,9 @@ class PlayerWikiReconciler:
         connection = get_db()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            from .legacy_page_exclusion import has_exclusion_claim
+            if has_exclusion_claim(connection, campaign_slug, page_ref):
+                raise CampaignContentError("The excluded legacy page cannot be deleted.")
             publication_guard = connection.execute(
                 """
                 SELECT 1
@@ -1287,6 +1305,9 @@ class PlayerWikiReconciler:
             raise PlayerWikiReconciliationConflict(
                 "This wiki page has a pending reconciliation operation and requires repair."
             ) from exc
+        except BaseException:
+            connection.rollback()
+            raise
         return operation, source_path, tombstone_path
 
     def _continue_deletion(
@@ -1361,6 +1382,10 @@ class PlayerWikiReconciler:
         if operation.state != "prepared":
             return False
 
+        from .legacy_page_exclusion import has_exclusion_claim
+        if has_exclusion_claim(get_db(), operation.campaign_slug, operation.page_ref):
+            raise CampaignContentError("The excluded legacy page cannot be deleted.")
+
         disposition = self._classify_deletion_files(
             source_path,
             tombstone_path,
@@ -1409,6 +1434,8 @@ class PlayerWikiReconciler:
         connection = get_db()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            if has_exclusion_claim(connection, operation.campaign_slug, operation.page_ref):
+                raise CampaignContentError("The excluded legacy page cannot be deleted.")
             guard = connection.execute(
                 """
                 SELECT state

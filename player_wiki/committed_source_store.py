@@ -456,6 +456,15 @@ def admit_legacy_object(
         from .committed_publication import active
         if marker is None or tuple(marker) not in ((0, 15), (0, 18)) or active(connection):
             raise ValueError("Committed-source admission requires trusted closed authority.")
+        if object_kind == "page":
+            from .legacy_page_exclusion import is_exclusion_claim
+            existing_admission = connection.execute(
+                "SELECT reason_code FROM committed_source_admission WHERE campaign_slug=? "
+                "AND object_kind='page' AND object_ref=?", (campaign_slug, object_ref),
+            ).fetchone()
+            if existing_admission is not None and is_exclusion_claim(existing_admission[0]):
+                connection.rollback()
+                return AdmissionResult("blocked", "page_deprecated", None)
         reason = None
         if not _legacy_enum_values_valid(connection):
             reason = "legacy_enum_invalid"

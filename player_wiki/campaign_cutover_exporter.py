@@ -29,6 +29,7 @@ from .migrations import (CURRENT_SCHEMA_SQL, SCHEMA_V15_SQL, SCHEMA_V16_SQL, SCH
                          MIGRATIONS, MigrationContext, MigrationHooks, _apply_payload)
 from .sqlite_safety import SQLiteSnapshotError, snapshot_sqlite_database
 from .snapshot_coherence import SnapshotCoherenceError, inspect_snapshot_coherence
+from .legacy_page_exclusion import proved_exclusions, is_exclusion_claim
 
 
 FORMAT_IDENTITY = "campaign-player-wiki-cutover-package"
@@ -448,7 +449,6 @@ def export_campaign_cutover_package(
     pre_database = _database_source_inventory(database_path)
     pre_topology = _campaign_topology_inventory(normalized_campaigns)
     pre_files, file_sources = _campaign_file_inventory(normalized_campaigns)
-    public_files = _public_file_inventory(pre_files)
     stage = Path(
         tempfile.mkdtemp(prefix=f".{output_dir.name}.cutover-stage-", dir=output_parent)
     )
@@ -477,6 +477,17 @@ def export_campaign_cutover_package(
             ) from exc
         _make_private(snapshot_path)
         shutil.rmtree(sqlite_input)
+
+        excluded = _cutover_exclusions(
+            snapshot_path, pre_files,
+            {campaign.campaign_slug for campaign in normalized_campaigns},
+        )
+        public_files = _public_file_inventory(pre_files)
+        excluded_paths = {proof["path"] for proof in excluded.values()}
+        for record in public_files:
+            if f"{record['campaign_slug']}/{record['logical_path']}" in excluded_paths:
+                record["disposition"] = "sealed_preservation"
+                record["audience"] = "operator"
 
         file_bindings = _copy_content_addressed_files(
             stage=stage,
@@ -1375,6 +1386,36 @@ def _public_file_inventory(records: Sequence[dict[str, Any]]) -> list[dict[str, 
     ]
 
 
+def _cutover_exclusions(snapshot_path: Path, records: Sequence[dict[str, Any]],
+                        campaign_slugs: set[str]) -> dict[tuple[str, str, str], dict[str, str]]:
+    with closing(sqlite3.connect(
+        f"{snapshot_path.resolve().as_uri()}?mode=ro&immutable=1", uri=True,
+    )) as connection:
+        connection.row_factory = sqlite3.Row
+        if connection.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' "
+            "AND name='committed_source_admission'"
+        ).fetchone() is None:
+            return {}
+        files = {
+            f"{item['campaign_slug']}/{item['logical_path']}":
+                (int(item["byte_count"]), str(item["sha256"]))
+            for item in records
+        }
+        excluded = proved_exclusions(connection, files, visible_campaigns=campaign_slugs)
+        claims = [row for row in connection.execute(
+            "SELECT campaign_slug,object_ref,reason_code FROM committed_source_admission "
+            "WHERE object_kind='page' AND reason_code LIKE 'legacy_excluded:%'"
+        ) if row["campaign_slug"] in campaign_slugs and is_exclusion_claim(row["reason_code"])]
+        if claims and (len(claims) != 1 or
+                       (claims[0]["campaign_slug"], "page", claims[0]["object_ref"]) not in excluded):
+            raise CampaignCutoverExportError(
+                "excluded_legacy_page_unproved",
+                "An excluded legacy page lacks exact sealed custody proof.",
+            )
+        return excluded
+
+
 def _campaign_file_custody(relative: str) -> tuple[str, str, str]:
     """Classify every safe regular campaign file without shape-based omission."""
 
@@ -1551,6 +1592,16 @@ def _project_snapshot(
                 raise CampaignCutoverExportError(
                     "query_only_unavailable", "The staged SQLite snapshot is not query-only."
                 )
+            excluded = _cutover_exclusions(snapshot_path, file_bindings, campaign_slugs)
+            excluded_paths = {proof["path"] for proof in excluded.values()}
+            if any(
+                f"{item['campaign_slug']}/{item['logical_path']}" in excluded_paths
+                and (item["disposition"] != "sealed_preservation" or item["audience"] != "operator")
+                for item in file_bindings
+            ):
+                raise CampaignCutoverExportError(
+                    "excluded_legacy_page_unsealed", "An excluded legacy page is not operator sealed."
+                )
             schema = _inspect_schema(connection)
             dependencies = _collect_scope_dependencies(connection, campaign_slugs)
             try:
@@ -1574,6 +1625,8 @@ def _project_snapshot(
                 file_bindings=file_bindings,
                 host_path_bindings=host_path_bindings,
                 approved_campaign_root_keys=approved_campaign_root_keys,
+                excluded_rows={(item["campaign_slug"], item["object_ref"])
+                               for item in coherence.get("excluded_legacy_pages", ())},
             )
             result["coherence"] = _public_coherence_summary(coherence)
             return result
@@ -2362,6 +2415,7 @@ def _build_projections(
     file_bindings: Sequence[dict[str, Any]],
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
     approved_campaign_root_keys: frozenset[tuple[str, str]],
+    excluded_rows: set[tuple[str, str]],
 ) -> dict[str, Any]:
     schema_by_table = {item["name"]: item for item in schema["tables"]}
     primary_keys_by_table = {
@@ -2425,6 +2479,7 @@ def _build_projections(
                 row=row,
                 campaign_slugs=campaign_slugs,
                 dependencies=dependencies,
+                excluded_rows=excluded_rows,
             )
             source_blob_bindings = _row_blob_bindings(
                 table_name=table_name,
@@ -2658,7 +2713,11 @@ def _row_disposition(
     row: sqlite3.Row,
     campaign_slugs: set[str],
     dependencies: Mapping[str, set[Any]],
+    excluded_rows: set[tuple[str, str]],
 ) -> tuple[str, str]:
+    if (table_name == "campaign_pages" and
+            (row["campaign_slug"], row["page_ref"]) in excluded_rows):
+        return "sealed_preservation", "excluded_legacy_page_operator_only"
     if table_name in _OPERATIONAL_TABLES:
         state = str(row["state"] or "").strip().lower()
         if state != "completed":
@@ -3695,6 +3754,7 @@ def _verify_field_quarantines_from_snapshot(
     tables_inventory: Sequence[Mapping[str, Any]],
     host_path_bindings: Mapping[tuple[str, str], Mapping[str, str]],
     approved_campaign_root_keys: frozenset[tuple[str, str]],
+    excluded_rows: set[tuple[str, str]],
 ) -> None:
     try:
         schema_by_table = {item["name"]: item for item in schema["tables"]}
@@ -3743,6 +3803,9 @@ def _verify_field_quarantines_from_snapshot(
                 projected_table = family_tables[table_name]
                 projected_rows = projected_table["rows"]
                 for row in rows:
+                    if (table_name == "campaign_pages" and
+                            (row["campaign_slug"], row["page_ref"]) in excluded_rows):
+                        continue
                     locator = {
                         column: _scalar_for_locator(row[column])
                         for column in primary_key
@@ -4237,6 +4300,9 @@ def _self_verify_package(
         "sha256",
     }
     artifact_by_path = {item["path"]: item for item in actual_artifacts}
+    excluded_rows = {(item["campaign_slug"], item["object_ref"])
+                     for item in recomputed.get("excluded_legacy_pages", ())}
+    excluded_paths = {item["path"] for item in recomputed.get("excluded_legacy_pages", ())}
     expected_object_paths: set[str] = set()
     try:
         for item in files:
@@ -4257,6 +4323,11 @@ def _self_verify_package(
                 or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])
             ):
                 raise TypeError("file")
+            path_key = f"{item['campaign_slug']}/{item['logical_path']}"
+            if path_key in excluded_paths and (
+                item["disposition"] != "sealed_preservation" or item["audience"] != "operator"
+            ):
+                raise ValueError("excluded file custody")
             if (
                 not _is_safe_relative_package_path(item["logical_path"])
             ):
@@ -4312,10 +4383,31 @@ def _self_verify_package(
             tables_inventory=tables,
             host_path_bindings=host_path_bindings,
             approved_campaign_root_keys=approved_campaign_root_keys,
+            excluded_rows=excluded_rows,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package file custody registry is invalid."
+        ) from exc
+    try:
+        replay = _project_snapshot(
+            snapshot_path=stage / "source" / "database.sqlite3",
+            campaign_slugs=campaign_slugs,
+            file_bindings=files,
+            host_path_bindings=host_path_bindings,
+            approved_campaign_root_keys=approved_campaign_root_keys,
+        )
+        if any(
+            replay[key] != json_payloads[f"inventory/{name}.json"]
+            for key, name in (("schema", "schema"), ("tables", "tables"),
+                              ("blobs", "blobs"), ("dispositions", "dispositions"),
+                              ("coherence", "coherence"))
+        ) or any(replay["families"][name] != json_payloads[f"families/{name}.json"]
+                 for name in FAMILY_NAMES):
+            raise ValueError("projection replay")
+    except (CampaignCutoverExportError, KeyError, TypeError, ValueError) as exc:
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package projection replay differs from its sealed snapshot."
         ) from exc
     expected_campaigns = []
     try:

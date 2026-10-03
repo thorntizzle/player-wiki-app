@@ -40,6 +40,7 @@ from .system_policy import default_systems_library_slug
 from .committed_character_publication import _create_source_links, _create_source_proof
 from .runtime_lease import acquire_exclusive_state_lease, RuntimeStateLeaseError
 from .snapshot_coherence import SnapshotCoherenceError
+from .legacy_page_exclusion import proved_exclusions
 
 
 class ActivationRefused(ValueError):
@@ -311,6 +312,11 @@ def _inventory(connection: sqlite3.Connection, campaigns_dir: Path, *,
             raise ActivationRefused("Legacy enum proof is invalid.")
         files = _scan_campaign_files(campaigns_dir, DEFAULT_LIMITS)
         file_map = {item[0]: item for item in files}
+        excluded = proved_exclusions(
+            connection,
+            {path: (size, digest) for path, _, size, digest, _ in files},
+            source_files={path: source for path, source, _, _, _ in files},
+        )
         coherence = inspect_snapshot_coherence(
             connection, files=((path, size, digest) for path, _, size, digest, _ in files),
             require_current=True,
@@ -344,9 +350,12 @@ def _inventory(connection: sqlite3.Connection, campaigns_dir: Path, *,
                 LEFT JOIN committed_source_admission a USING(campaign_slug,object_kind,object_ref)
                 ORDER BY c.campaign_slug,c.object_kind,c.object_ref"""):
             pointers[(row["campaign_slug"], row["object_kind"], row["object_ref"])] = row
-        for row in connection.execute("SELECT campaign_slug,object_kind,object_ref,status FROM committed_source_admission"):
-            if row["status"] != "admitted" or (row["campaign_slug"],row["object_kind"],row["object_ref"]) not in pointers:
-                issue(row["campaign_slug"],row["object_kind"],row["object_ref"],"unresolved_admission")
+        for row in connection.execute("SELECT campaign_slug,object_kind,object_ref,status,reason_code FROM committed_source_admission"):
+            key = (row["campaign_slug"],row["object_kind"],row["object_ref"])
+            if key in excluded:
+                continue
+            if row["status"] != "admitted" or key not in pointers:
+                issue(*key,"unresolved_admission")
         try:
             if connection.execute("""SELECT 1 FROM auth_audit_log
                     WHERE event_type='character_source_transition_confirmed' LIMIT 1""").fetchone():
@@ -390,6 +399,8 @@ def _inventory(connection: sqlite3.Connection, campaigns_dir: Path, *,
                 elif key[1] == "page":
                     source_file_paths.add(f"{slug}/{content_dir}/{key[2]}.md")
             for key in sorted(expected):
+                if key in excluded:
+                    continue
                 row = pointers.get(key)
                 if row is None:
                     issue(*key,"missing_committed_object")
@@ -583,10 +594,13 @@ def _inventory(connection: sqlite3.Connection, campaigns_dir: Path, *,
                 issue("","mirror",item["path"],item["state"])
         for path in file_map:
             if path in source_file_paths and not any(
-                    x["path"] == path and x["state"] == "matching" for x in coherence["file_dispositions"]):
+                    x["path"] == path and x["state"] in {"matching", "excluded_legacy_page"}
+                    for x in coherence["file_dispositions"]):
                 issue("","source",path,"unadmitted_file_source")
         issues.sort(key=lambda x:(x["campaign_slug"],x["kind"],x["ref"],x["reason_code"]))
         basis = {"campaigns":slugs,"coherence":coherence["canonical_sha256"],
+                 "excluded_legacy_pages": sorted((key, proof["path"], proof["sha256"],
+                                                   proof["marker"]) for key, proof in excluded.items()),
                  "authority":authority_evidence,
                  "transition_proofs":transition_proofs,
                  "files":[(p,size,digest) for p,_,size,digest,_ in files],"issues":issues}
