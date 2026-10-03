@@ -39,7 +39,7 @@ from .restore_transaction import (
 )
 from .sqlite_safety import SQLiteSnapshotEvidence, snapshot_sqlite_database
 
-BACKUP_FORMAT_VERSION = 2
+BACKUP_FORMAT_VERSION = 3
 
 
 @dataclass(slots=True)
@@ -281,9 +281,14 @@ def rehearse_restore_archive(
     archive_path: Path,
     limits: BackupArchiveLimits = DEFAULT_LIMITS,
 ) -> RestoreRehearsalResult:
-    """Exercise a named archive against synthetic state in a disposable root."""
+    """Exercise a named archive against a matching disposable target."""
 
     source = inspect_backup_archive(Path(archive_path), limits=limits)
+    if source.format_version != 3:
+        raise RestoreRehearsalError(
+            "Pre-rework archives are inspectable only. Open one in a separate "
+            "compatible old-app copy and use reviewed admission/import."
+        )
     workspace_path: Path | None = None
     result: RestoreRehearsalResult | None = None
     try:
@@ -293,20 +298,13 @@ def rehearse_restore_archive(
             target_db = target_root / "d"
             target_campaigns = target_root / "c"
             backup_root = workspace_path / "b"
-            target_campaigns.mkdir()
-
-            with closing(sqlite3.connect(target_db)) as connection:
-                connection.execute(
-                    "CREATE TABLE rehearsal_marker (value TEXT NOT NULL)"
-                )
-                connection.execute(
-                    "INSERT INTO rehearsal_marker VALUES ('synthetic-pre-restore-state')"
-                )
-                connection.commit()
-            (target_campaigns / "synthetic-marker.txt").write_text(
-                "synthetic-pre-restore-state\n",
-                encoding="utf-8",
-            )
+            with stage_backup_archive(Path(archive_path), limits=limits) as staged:
+                if staged.evidence != source:
+                    raise RestoreRehearsalError(
+                        "The source archive changed during rehearsal staging."
+                    )
+                shutil.copy2(staged.database_path, target_db)
+                shutil.copytree(staged.campaigns_dir, target_campaigns)
 
             restore_events: list[str] = []
             try:
@@ -340,8 +338,8 @@ def rehearse_restore_archive(
                     "The mandatory pre-restore backup failed reinspection."
                 )
             if (
-                prebackup.format_version != 2
-                or prebackup.verification_level != "verified_v2"
+                prebackup.format_version != 3
+                or prebackup.verification_level != "verified_v3"
                 or not prebackup.manifest_hashes_verified
             ):
                 raise RestoreRehearsalError(

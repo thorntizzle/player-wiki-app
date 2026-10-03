@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
+import sqlite3
+import tempfile
+from contextlib import closing
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
+from flask import g
 
 from .auth_store import isoformat, utcnow
 from .campaign_content_service import list_campaign_asset_files
@@ -22,8 +27,11 @@ from .db import get_db
 from .models import Campaign, Page, page_sort_key, section_sort_key, subsection_sort_key
 from .repository import load_page_content, render_page_content
 from .system_policy import is_dnd_5e_system
+from .backup_archive import DEFAULT_LIMITS, _scan_campaign_files
+from .snapshot_coherence import SnapshotCoherenceError, inspect_snapshot_coherence
+from .sqlite_safety import snapshot_sqlite_database
 
-EXPORT_FORMAT_VERSION = 1
+EXPORT_FORMAT_VERSION = 2
 SYSTEM_ENTRY_HREF_PATTERN = re.compile(r"/systems/entries/([a-zA-Z0-9._~/-]+)")
 
 
@@ -31,14 +39,23 @@ class CampaignPackageExportError(ValueError):
     pass
 
 
-def final_cutover_certification_status() -> dict[str, Any]:
-    """Describe legacy v1 without changing its reference-compatible payload."""
+def final_cutover_certification_status(*, committed: bool = False) -> dict[str, Any]:
+    """Describe the legacy or committed-source campaign package contract."""
 
     return {
-        "format_version": EXPORT_FORMAT_VERSION,
-        "verification_level": "legacy_v1",
-        "manifest_hashes_verified": False,
+        "format_version": EXPORT_FORMAT_VERSION if committed else 1,
+        "verification_level": "verified_v2" if committed else "legacy_v1",
+        "manifest_hashes_verified": committed,
     }
+
+
+def _activation_enabled(source_path: Path) -> bool:
+    with closing(sqlite3.connect(f"{source_path.resolve().as_uri()}?mode=ro", uri=True)) as connection:
+        from .committed_publication import active, CommittedSourceConflict
+        try:
+            return active(connection)
+        except CommittedSourceConflict as exc:
+            raise CampaignPackageExportError("The campaign activation proof is invalid.") from exc
 
 
 def export_campaign_package(
@@ -50,13 +67,97 @@ def export_campaign_package(
     base_url: str = "",
     include_inactive_characters: bool = True,
 ) -> dict[str, Any]:
+    source_path = Path(app.config["DB_PATH"])
+    campaign_root = Path(app.config["CAMPAIGNS_DIR"]) / campaign_slug
+    if not campaign_root.is_dir():
+        raise CampaignPackageExportError("The campaign source root is missing.")
+    if output_dir.resolve(strict=False).is_relative_to(campaign_root.resolve()):
+        raise CampaignPackageExportError("The package destination overlaps campaign files.")
+    preliminary_activated = _activation_enabled(source_path)
+    prepared_repository = None
+    if not preliminary_activated:
+        prepared_repository = app.extensions["repository_store"].get()
+        campaign = prepared_repository.get_campaign(campaign_slug)
+        if campaign is None:
+            raise CampaignPackageExportError(f"Unknown campaign slug: {campaign_slug}")
+        app.extensions["campaign_page_store"].sync_campaign_pages(
+            campaign_slug, Path(campaign.player_content_dir),
+        )
+    # Existing built-in Systems materialization may write; finish it before
+    # opening the query-only snapshot used for all package database reads.
+    app.extensions["systems_service"].get_campaign_library(campaign_slug)
+    with tempfile.TemporaryDirectory(prefix="cpw-package-view-") as temp_name:
+        snapshot_path = Path(temp_name) / "view.sqlite3"
+        snapshot = snapshot_sqlite_database(
+            source_path=source_path, destination_path=snapshot_path,
+        )
+        connection = sqlite3.connect(f"{snapshot_path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+        try:
+            activated = _activation_enabled(snapshot_path)
+            if activated != preliminary_activated:
+                raise CampaignPackageExportError("Campaign activation changed during export preparation.")
+            before = None
+            evidence = None
+            if activated:
+                before = _scan_campaign_files(campaign_root, DEFAULT_LIMITS)
+                evidence = inspect_snapshot_coherence(
+                    connection,
+                    files=((f"{campaign_slug}/{path}", size, digest)
+                           for path, _, size, digest, _ in before),
+                    require_current=True,
+                    visible_campaigns={campaign_slug},
+                )
+                if len(json.dumps(evidence, sort_keys=True).encode("utf-8")) > 16 * 1024 * 1024:
+                    raise CampaignPackageExportError("The canonical evidence exceeds its package bound.")
+            previous = g.pop("db_connection", None)
+            g.db_connection = connection
+            try:
+                result = _export_campaign_package_view(
+                    app=app, campaign_slug=campaign_slug, output_dir=output_dir,
+                    image_report_path=image_report_path, base_url=base_url,
+                    include_inactive_characters=include_inactive_characters,
+                    committed=activated,
+                    prepared_repository=prepared_repository,
+                )
+            finally:
+                g.pop("db_connection", None)
+                if previous is not None:
+                    g.db_connection = previous
+            if not activated:
+                return result
+            after = _scan_campaign_files(campaign_root, DEFAULT_LIMITS)
+            if before != after:
+                raise CampaignPackageExportError("Campaign files changed during package export.")
+            _write_json(output_dir / "canonical-evidence.json", evidence)
+            manifest_path = output_dir / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["snapshot"] = {"sha256": snapshot.sha256,
+                                    "canonical_sha256": evidence["canonical_sha256"]}
+            _write_json(manifest_path, manifest)
+            _self_verify_campaign_package(output_dir, snapshot.sha256, evidence)
+            return result
+        except SnapshotCoherenceError as exc:
+            raise CampaignPackageExportError("The campaign snapshot is incoherent.") from exc
+        finally:
+            connection.close()
+
+
+def _export_campaign_package_view(
+    *, app: Any, campaign_slug: str, output_dir: Path,
+    image_report_path: Path | None, base_url: str,
+    include_inactive_characters: bool,
+    committed: bool,
+    prepared_repository: Any | None,
+) -> dict[str, Any]:
     if output_dir.exists() and any(output_dir.iterdir()):
         raise CampaignPackageExportError(f"Output directory is not empty: {output_dir}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     base_url = base_url.rstrip("/")
 
-    repository = app.extensions["repository_store"].get()
+    repository = prepared_repository or app.extensions["repository_store"].get()
     campaign = repository.get_campaign(campaign_slug)
     if campaign is None:
         raise CampaignPackageExportError(f"Unknown campaign slug: {campaign_slug}")
@@ -75,6 +176,7 @@ def export_campaign_package(
         image_report_path=image_report_path,
         base_url=base_url,
         include_inactive_characters=include_inactive_characters,
+        committed=committed,
     )
     _write_json(output_dir / "manifest.json", manifest)
     _write_text(output_dir / "README.md", _render_readme(campaign))
@@ -85,6 +187,7 @@ def export_campaign_package(
         output_dir=output_dir,
         repository=repository,
         base_url=base_url,
+        committed=committed,
     )
     asset_records = _export_asset_metadata(
         campaign=campaign,
@@ -94,6 +197,7 @@ def export_campaign_package(
         report_entries=report_entries,
         base_url=base_url,
         image_report_path=image_report_path,
+        committed=committed,
     )
     systems_summary = _export_systems(app=app, campaign=campaign, output_dir=output_dir)
     character_summary = _export_characters(
@@ -101,6 +205,7 @@ def export_campaign_package(
         campaign=campaign,
         output_dir=output_dir,
         include_inactive_characters=include_inactive_characters,
+        committed=committed,
     )
     sqlite_table_summary = _export_campaign_sqlite_rows(campaign.slug, output_dir)
     audit = _build_audit(
@@ -110,6 +215,7 @@ def export_campaign_package(
         report_entries=report_entries,
         systems_summary=systems_summary,
         character_summary=character_summary,
+        committed=committed,
     )
     _write_json(output_dir / "audit" / "unresolved-references.json", audit)
     _write_text(output_dir / "audit" / "export-report.md", _render_audit_report(audit, manifest))
@@ -183,11 +289,12 @@ def _build_manifest(
     image_report_path: Path | None,
     base_url: str,
     include_inactive_characters: bool,
+    committed: bool,
 ) -> dict[str, Any]:
     config = app.config
     return {
         "export_format": "campaign-player-wiki-campaign-package",
-        "export_format_version": EXPORT_FORMAT_VERSION,
+        "export_format_version": EXPORT_FORMAT_VERSION if committed else 1,
         "exported_at": isoformat(utcnow()),
         "campaign": {
             "slug": campaign.slug,
@@ -196,12 +303,15 @@ def _build_manifest(
             "current_session": campaign.current_session,
             "systems_library_slug": campaign.systems_library_slug,
         },
-        "source": {
-            "campaigns_dir": str(Path(config["CAMPAIGNS_DIR"]).resolve()),
-            "db_path": str(Path(config["DB_PATH"]).resolve()),
-            "base_url": base_url,
-            "image_report_path": str(image_report_path.resolve()) if image_report_path else "",
-        },
+        "source": (
+            {"base_url": base_url, "source_view": "pinned_sqlite_snapshot"}
+            if committed else {
+                "campaigns_dir": str(Path(config["CAMPAIGNS_DIR"]).resolve()),
+                "db_path": str(Path(config["DB_PATH"]).resolve()),
+                "base_url": base_url,
+                "image_report_path": str(image_report_path.resolve()) if image_report_path else "",
+            }
+        ),
         "app": {
             "version": str(config.get("APP_VERSION", "")),
             "build_id": str(config.get("APP_BUILD_ID", "")),
@@ -226,13 +336,11 @@ def _export_campaign_pages(
     output_dir: Path,
     repository: Any,
     base_url: str,
+    committed: bool,
 ) -> list[dict[str, Any]]:
     page_store = app.extensions["campaign_page_store"]
-    content_dir = Path(campaign.player_content_dir)
-    page_store.sync_campaign_pages(campaign.slug, content_dir)
     records = page_store.list_page_records(
         campaign.slug,
-        content_dir=content_dir,
         include_body=True,
     )
 
@@ -241,9 +349,14 @@ def _export_campaign_pages(
     pages_html_dir = output_dir / "campaign" / "pages" / "html"
     pages_source_dir = output_dir / "campaign" / "pages" / "source"
 
-    campaign_config_path = Path(campaign.player_content_dir).parent / "campaign.yaml"
-    if campaign_config_path.exists():
-        _write_text(output_dir / "campaign" / "campaign.yaml", campaign_config_path.read_text(encoding="utf-8"))
+    if committed:
+        config_source = _current_source(campaign.slug, "config", "")
+        (output_dir / "campaign").mkdir(parents=True, exist_ok=True)
+        (output_dir / "campaign" / "campaign.yaml").write_bytes(config_source["primary_bytes"])
+    else:
+        campaign_config_path = Path(campaign.player_content_dir).parent / "campaign.yaml"
+        if campaign_config_path.exists():
+            _write_text(output_dir / "campaign" / "campaign.yaml", campaign_config_path.read_text(encoding="utf-8"))
 
     for record in records:
         page = campaign.pages.get(record.page.route_slug) or record.page
@@ -253,7 +366,7 @@ def _export_campaign_pages(
             campaign.slug,
         )
         is_visible = campaign.is_page_visible(page)
-        payload = _page_payload(record, page, body_markdown, rendered_html, is_visible, base_url)
+        payload = _page_payload(record, page, body_markdown, rendered_html, is_visible, base_url, committed)
         page_payloads.append(payload)
 
         output_page_path = _safe_relative_output_path(record.page_ref, ".md")
@@ -265,12 +378,14 @@ def _export_campaign_pages(
             pages_html_dir / output_page_path.with_suffix(".html"),
             rendered_html,
         )
-        source_path = Path(campaign.player_content_dir) / Path(*PurePosixPath(record.relative_path).parts)
-        if source_path.exists():
-            _write_text(
-                pages_source_dir / output_page_path,
-                source_path.read_text(encoding="utf-8"),
-            )
+        if committed:
+            source = _current_source(campaign.slug, "page", record.page_ref)
+            (pages_source_dir / output_page_path).parent.mkdir(parents=True, exist_ok=True)
+            (pages_source_dir / output_page_path).write_bytes(source["primary_bytes"])
+        else:
+            source_path = Path(campaign.player_content_dir) / Path(*PurePosixPath(record.relative_path).parts)
+            if source_path.exists():
+                _write_text(pages_source_dir / output_page_path, source_path.read_text(encoding="utf-8"))
 
     page_payloads.sort(key=lambda item: item["sort_key"])
     for item in page_payloads:
@@ -289,6 +404,7 @@ def _page_payload(
     rendered_html: str,
     is_visible: bool,
     base_url: str,
+    committed: bool,
 ) -> dict[str, Any]:
     page_url = f"{base_url}/campaigns/{record.campaign_slug}/pages/{page.route_slug}" if base_url else ""
     asset_url = (
@@ -321,7 +437,10 @@ def _page_payload(
         "source_ref": page.source_ref,
         "source": {
             "relative_path": record.relative_path,
-            "source_path": str(Path(record.file_path).resolve()) if getattr(record, "file_path", None) else "",
+            "source_path": (
+                f"db://{record.campaign_slug}/{record.page_ref}" if committed
+                else str(Path(record.file_path).resolve()) if getattr(record, "file_path", None) else ""
+            ),
             "updated_at": record.updated_at,
         },
         "metadata": dict(record.metadata),
@@ -416,20 +535,33 @@ def _export_asset_metadata(
     report_entries: list[dict[str, Any]],
     base_url: str,
     image_report_path: Path | None,
+    committed: bool,
 ) -> dict[str, Any]:
-    asset_files = list_campaign_asset_files(campaign)
-    asset_by_ref = {asset.asset_ref: asset for asset in asset_files}
-    asset_payloads = [
-        {
-            "asset_ref": asset.asset_ref,
-            "relative_path": asset.relative_path,
-            "asset_path": str(asset.file_path.resolve()),
-            "size_bytes": asset.size_bytes,
-            "media_type": asset.media_type,
-            "updated_at": asset.updated_at,
-        }
-        for asset in asset_files
-    ]
+    if committed:
+        asset_files = get_db().execute(
+            "SELECT i.page_ref,i.revision,i.asset_ref,i.sha256,LENGTH(i.image_bytes) AS size_bytes "
+            "FROM committed_page_images AS i JOIN committed_source_current AS c ON "
+            "c.campaign_slug=i.campaign_slug AND c.object_kind='page' AND c.object_ref=i.page_ref "
+            "AND c.revision=i.revision WHERE i.campaign_slug=? ORDER BY i.page_ref,i.asset_ref",
+            (campaign.slug,),
+        ).fetchall()
+        asset_by_ref = {asset["asset_ref"]: asset for asset in asset_files}
+        asset_payloads = [
+            {"asset_ref": asset["asset_ref"], "page_ref": asset["page_ref"],
+             "revision": asset["revision"], "sha256": asset["sha256"],
+             "size_bytes": asset["size_bytes"]}
+            for asset in asset_files
+        ]
+    else:
+        asset_files = list_campaign_asset_files(campaign)
+        asset_by_ref = {asset.asset_ref: asset for asset in asset_files}
+        asset_payloads = [
+            {"asset_ref": asset.asset_ref, "relative_path": asset.relative_path,
+             "asset_path": str(asset.file_path.resolve()),
+             "size_bytes": asset.size_bytes, "media_type": asset.media_type,
+             "updated_at": asset.updated_at}
+            for asset in asset_files
+        ]
     _write_jsonl(output_dir / "assets" / "assets-manifest.jsonl", asset_payloads)
 
     image_associations: list[dict[str, Any]] = []
@@ -437,12 +569,12 @@ def _export_asset_metadata(
         asset_ref = str(page["image"].get("asset_ref") or "")
         if not asset_ref:
             continue
-        report_entry = report_by_page_ref.get(page["route_slug"]) or report_by_page_ref.get(page["page_ref"])
+        report_entry = (report_by_page_ref.get(page["route_slug"])
+                        or report_by_page_ref.get(page["page_ref"])) if not committed else None
         asset_record = asset_by_ref.get(asset_ref)
         live_asset_url = (
-            str(report_entry.get("live_webp_asset_url") or "")
-            if report_entry
-            else (f"{base_url}/campaigns/{campaign.slug}/assets/{asset_ref}" if base_url else "")
+            str(report_entry.get("live_webp_asset_url") or "") if report_entry
+            else f"{base_url}/campaigns/{campaign.slug}/assets/{asset_ref}" if base_url else ""
         )
         source_png = str((report_entry or {}).get("source_png_path") or "")
         image_associations.append(
@@ -455,16 +587,16 @@ def _export_asset_metadata(
                 "page_url": page["url"],
                 "campaign_asset_ref": asset_ref,
                 "campaign_asset_path": (
-                    PurePosixPath("assets", asset_record.relative_path).as_posix()
-                    if asset_record
-                    else ""
+                    f"assets/{asset_ref}" if committed and asset_record
+                    else PurePosixPath("assets", asset_record.relative_path).as_posix()
+                    if asset_record else ""
                 ),
                 "campaign_asset_exists": asset_record is not None,
-                "live_webp_asset_ref": str((report_entry or {}).get("live_webp_asset_ref") or asset_ref),
+                "live_webp_asset_ref": asset_ref if committed else str((report_entry or {}).get("live_webp_asset_ref") or asset_ref),
                 "live_webp_asset_url": live_asset_url,
-                "source_png_path": source_png,
-                "source_png_exists": bool(source_png and Path(source_png).exists()),
-                "source_match": str((report_entry or {}).get("source_match") or "unresolved"),
+                "source_png_path": "" if committed else source_png,
+                "source_png_exists": bool(not committed and source_png and Path(source_png).exists()),
+                "source_match": "unresolved" if committed else str((report_entry or {}).get("source_match") or "unresolved"),
                 "image_alt": page["image"].get("alt") or "",
                 "image_caption": page["image"].get("caption") or "",
             }
@@ -475,7 +607,7 @@ def _export_asset_metadata(
         output_dir / "assets" / "image-associations.md",
         _render_image_associations_markdown(campaign, image_associations),
     )
-    if image_report_path is not None:
+    if not committed and image_report_path is not None:
         _write_text(
             output_dir / "assets" / "source-image-report.md",
             image_report_path.read_text(encoding="utf-8"),
@@ -484,7 +616,7 @@ def _export_asset_metadata(
     return {
         "asset_manifest": asset_payloads,
         "image_associations": image_associations,
-        "source_report_entries": report_entries,
+        "source_report_entries": [] if committed else report_entries,
     }
 
 
@@ -632,6 +764,7 @@ def _export_characters(
     campaign: Campaign,
     output_dir: Path,
     include_inactive_characters: bool,
+    committed: bool,
 ) -> dict[str, Any]:
     character_repository = app.extensions["character_repository"]
     records = (
@@ -656,8 +789,14 @@ def _export_characters(
     for record in records:
         slug = record.definition.character_slug
         structured_dir = output_dir / "characters" / "structured" / slug
-        _write_yaml(structured_dir / "definition.yaml", record.definition.to_dict())
-        _write_yaml(structured_dir / "import.yaml", record.import_metadata.to_dict())
+        if committed:
+            source = _current_source(campaign.slug, "character", slug)
+            structured_dir.mkdir(parents=True, exist_ok=True)
+            (structured_dir / "definition.yaml").write_bytes(source["primary_bytes"])
+            (structured_dir / "import.yaml").write_bytes(source["secondary_bytes"])
+        else:
+            _write_yaml(structured_dir / "definition.yaml", record.definition.to_dict())
+            _write_yaml(structured_dir / "import.yaml", record.import_metadata.to_dict())
         _write_json(
             structured_dir / "state.json",
             {
@@ -712,8 +851,7 @@ def _export_characters(
             },
         )
 
-        character_index.append(
-            {
+        index_entry = {
                 "character_slug": slug,
                 "name": record.definition.name,
                 "status": record.definition.status,
@@ -723,7 +861,20 @@ def _export_characters(
                 "structured_dir": f"characters/structured/{slug}",
                 "resolved_systems_path": f"characters/resolved-systems/{slug}.json",
             }
-        )
+        if committed:
+            index_entry.update({
+                "definition_basis": (
+                    "historical_raw_committed_generation"
+                    if record.committed_revision is not None else "historical_raw_mirror_definition"
+                ),
+                "source_authority_identity": presented.get("source_authority_identity") or "",
+                "projection_warning_codes": [
+                    str(warning.get("code") or "")
+                    for warning in presented.get("projection_warnings") or []
+                    if isinstance(warning, dict)
+                ],
+            })
+        character_index.append(index_entry)
 
     _write_jsonl(output_dir / "characters" / "characters.jsonl", character_index)
     return {
@@ -943,6 +1094,7 @@ def _build_audit(
     report_entries: list[dict[str, Any]],
     systems_summary: dict[str, Any],
     character_summary: dict[str, Any],
+    committed: bool,
 ) -> dict[str, Any]:
     page_refs = {page["page_ref"] for page in page_records}
     route_slugs = {page["route_slug"] for page in page_records}
@@ -974,24 +1126,15 @@ def _build_audit(
         for image in image_associations
         if image["campaign_asset_ref"] not in assets_by_ref and not image["live_webp_asset_url"]
     ]
-    unresolved_source_pngs = [
-        {
-            "page_ref": image["page_ref"],
-            "route_slug": image["route_slug"],
-            "campaign_asset_ref": image["campaign_asset_ref"],
-            "source_png_path": image["source_png_path"],
-            "source_match": image["source_match"],
-        }
-        for image in image_associations
-        if not image["source_png_path"]
+    unresolved_source_pngs = [] if committed else [
+        {"page_ref": image["page_ref"], "route_slug": image["route_slug"],
+         "campaign_asset_ref": image["campaign_asset_ref"],
+         "source_png_path": image["source_png_path"], "source_match": image["source_match"]}
+        for image in image_associations if not image["source_png_path"]
     ]
-    missing_source_pngs = [
-        {
-            "page_ref": image["page_ref"],
-            "route_slug": image["route_slug"],
-            "source_png_path": image["source_png_path"],
-            "source_match": image["source_match"],
-        }
+    missing_source_pngs = [] if committed else [
+        {"page_ref": image["page_ref"], "route_slug": image["route_slug"],
+         "source_png_path": image["source_png_path"], "source_match": image["source_match"]}
         for image in image_associations
         if image["source_png_path"] and not image["source_png_exists"]
     ]
@@ -1137,6 +1280,70 @@ def _write_yaml(path: Path, payload: Any) -> None:
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def _current_source(campaign_slug: str, kind: str, ref: str) -> sqlite3.Row:
+    row = get_db().execute(
+        "SELECT g.* FROM committed_source_current AS c "
+        "JOIN committed_source_generations AS g ON "
+        "g.campaign_slug=c.campaign_slug AND g.object_kind=c.object_kind "
+        "AND g.object_ref=c.object_ref AND g.revision=c.revision "
+        "WHERE c.campaign_slug=? AND c.object_kind=? AND c.object_ref=?",
+        (campaign_slug, kind, ref),
+    ).fetchone()
+    if row is None or row["tombstone"] or not isinstance(row["primary_bytes"], bytes):
+        raise CampaignPackageExportError("Effective content lacks committed source bytes.")
+    if hashlib.sha256(row["primary_bytes"]).hexdigest() != row["primary_sha256"]:
+        raise CampaignPackageExportError("Effective primary bytes changed during export.")
+    if kind == "character" and (
+        not isinstance(row["secondary_bytes"], bytes)
+        or hashlib.sha256(row["secondary_bytes"]).hexdigest() != row["secondary_sha256"]
+    ):
+        raise CampaignPackageExportError("Effective Character import bytes are incomplete.")
+    return row
+
+
+def _self_verify_campaign_package(
+    output_dir: Path, snapshot_sha256: str, coherence: dict[str, object],
+) -> None:
+    artifacts = []
+    for path in sorted(output_dir.rglob("*")):
+        if path.is_symlink():
+            raise CampaignPackageExportError("The package contains an unsafe link.")
+        if not path.is_file():
+            continue
+        size, digest = _hash_package_file(path)
+        artifacts.append({"path": path.relative_to(output_dir).as_posix(),
+                          "size": size, "sha256": digest})
+        if len(artifacts) > 100_000:
+            raise CampaignPackageExportError("The package contains too many artifacts.")
+    verification = {"version": 2, "snapshot_sha256": snapshot_sha256,
+                    "canonical_sha256": coherence["canonical_sha256"],
+                    "artifacts": artifacts}
+    _write_json(output_dir / "verification.json", verification)
+    for item in verification["artifacts"]:
+        if _hash_package_file(output_dir / item["path"]) != (item["size"], item["sha256"]):
+            raise CampaignPackageExportError("The package failed self-verification.")
+    if _json_ready(json.loads((output_dir / "canonical-evidence.json").read_text(encoding="utf-8"))) != coherence:
+        raise CampaignPackageExportError("The package canonical evidence changed.")
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("snapshot") != {
+        "sha256": snapshot_sha256,
+        "canonical_sha256": coherence["canonical_sha256"],
+    } or manifest.get("export_format_version") != EXPORT_FORMAT_VERSION:
+        raise CampaignPackageExportError("The package snapshot identity is invalid.")
+
+
+def _hash_package_file(path: Path) -> tuple[int, str]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            size += len(block)
+            if size > 16 * 1024**3:
+                raise CampaignPackageExportError("A package artifact exceeds its size bound.")
+            digest.update(block)
+    return size, digest.hexdigest()
 
 
 def _json_ready(value: Any) -> Any:

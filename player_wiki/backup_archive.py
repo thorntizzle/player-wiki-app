@@ -17,10 +17,13 @@ from typing import Callable, Iterator
 
 from .migrations import MigrationError, inspect_migration_ledger
 from .sqlite_safety import SQLiteSnapshotEvidence, snapshot_sqlite_database
+from .snapshot_coherence import SnapshotCoherenceError, inspect_snapshot_coherence
+from .version import read_app_version
 
 
 FORMAT_NAME = "campaign-player-wiki-backup"
 FORMAT_VERSION = 2
+VERIFIED_FORMAT_VERSION = 3
 DATABASE_MEMBER = "database/player_wiki.sqlite3"
 MANIFEST_MEMBER = "manifest.json"
 PRODUCER = "campaign-player-wiki"
@@ -135,6 +138,7 @@ def create_backup_archive_v2(
     limits: BackupArchiveLimits = DEFAULT_LIMITS,
     snapshotter: Callable[..., SQLiteSnapshotEvidence] = snapshot_sqlite_database,
     hooks: BackupArchiveHooks | None = None,
+    verified_committed: bool | None = None,
 ) -> BackupArchiveEvidence:
     hooks = hooks or BackupArchiveHooks()
     db_path = Path(db_path)
@@ -156,12 +160,39 @@ def create_backup_archive_v2(
             hooks.after_snapshot(snapshot_path)
 
         migration = _inspect_database(snapshot_path)
+        if verified_committed is None:
+            verified_committed = migration.applied_version >= 15
+        if verified_committed and migration.applied_version < 15:
+            raise BackupArchiveError("A committed-source backup requires schema v15 or newer.")
+        if not verified_committed and migration.applied_version >= 15:
+            raise BackupArchiveError("The prior backup format cannot capture an upgraded database.")
         campaign_files = _scan_campaign_files(campaigns_dir, limits)
         if hooks.after_campaign_scan:
             hooks.after_campaign_scan()
         _verify_campaign_sources(campaign_files)
 
         manifest = _build_manifest(created_at, snapshot, migration, campaign_files)
+        if verified_committed:
+            from .campaign_cutover_exporter import CampaignCutoverExportError, _inspect_supported_schema
+
+            with closing(sqlite3.connect(f"{snapshot_path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)) as connection:
+                try:
+                    connection.row_factory = sqlite3.Row
+                    _inspect_supported_schema(connection, migration.applied_version)
+                    manifest["coherence"] = inspect_snapshot_coherence(
+                        connection,
+                        files=((path, size, digest) for path, _, size, digest, _ in campaign_files),
+                        require_current=True,
+                    )
+                except (SnapshotCoherenceError, CampaignCutoverExportError) as exc:
+                    raise BackupArchiveError("The source snapshot is semantically incoherent.") from exc
+            manifest["format_version"] = VERIFIED_FORMAT_VERSION
+            manifest["application"] = {
+                "producer_version": read_app_version(Path(__file__).resolve().parent.parent),
+                "reader_schema_min": 15,
+                "reader_schema_max": 18,
+                "requires_verified_reader": VERIFIED_FORMAT_VERSION,
+            }
         manifest_bytes = canonical_json_bytes(manifest)
         if len(manifest_bytes) > limits.manifest_bytes:
             raise BackupArchiveError("The backup manifest exceeds its size limit.")
@@ -171,6 +202,8 @@ def create_backup_archive_v2(
 
         stage_path = _exclusive_temp_path(backup_root, ".zip")
         _write_v2_zip(stage_path, manifest_bytes, snapshot_path, campaign_files, limits, hooks)
+        if _scan_campaign_files(campaigns_dir, limits) != campaign_files:
+            raise BackupArchiveError("Campaign files changed during backup capture.")
         if hooks.before_archive_fsync:
             hooks.before_archive_fsync(stage_path)
         _sync_file(stage_path)
@@ -251,7 +284,7 @@ def stage_backup_archive(
             with zipfile.ZipFile(archive_path, "r") as archive:
                 infos = archive.infolist()
                 version, manifest = _load_and_classify_manifest(archive, infos, limits)
-                if version == 2:
+                if version >= 2:
                     staged = _stage_v2(archive_path, archive, infos, manifest, staging_root, limits)
                 else:
                     staged = _stage_v1(archive_path, archive, infos, manifest, staging_root, limits)
@@ -281,10 +314,10 @@ def _load_and_classify_manifest(
     raw = _read_member_limited(archive, manifest_info, limits.manifest_bytes)
     manifest = _load_json_object(raw)
     version = _strict_int(manifest.get("format_version"), "format_version", minimum=1)
-    if version not in (1, 2):
+    if version not in (1, 2, VERIFIED_FORMAT_VERSION):
         raise BackupArchiveError("The backup archive format is unsupported.")
-    if version == 2 and raw != canonical_json_bytes(manifest):
-        raise BackupArchiveError("The version 2 manifest is not canonically encoded.")
+    if version >= 2 and raw != canonical_json_bytes(manifest):
+        raise BackupArchiveError("The backup manifest is not canonically encoded.")
     return version, manifest
 
 
@@ -296,7 +329,9 @@ def _stage_v2(
     staging_root: Path,
     limits: BackupArchiveLimits,
 ) -> StagedBackupArchive:
-    _require_keys(manifest, {"format", "format_version", "created_at", "producer", "database", "campaigns", "totals"})
+    version = _strict_int(manifest.get("format_version"), "format_version", minimum=2)
+    _require_keys(manifest, {"format", "format_version", "created_at", "producer", "database", "campaigns", "totals"}
+                  | ({"coherence", "application"} if version == VERIFIED_FORMAT_VERSION else set()))
     if manifest["format"] != FORMAT_NAME or manifest["producer"] != PRODUCER:
         raise BackupArchiveError("The backup manifest identity is invalid.")
     created_at = _strict_string(manifest["created_at"], "created_at")
@@ -380,8 +415,34 @@ def _stage_v2(
     integrity, foreign_keys = _validate_database(database_path)
     migration = _inspect_database(database_path)
     migration = _validate_migration_evidence_compatibility(expected_migration, migration)
+    if version == VERIFIED_FORMAT_VERSION:
+        application = _strict_object(manifest["application"], "application")
+        _require_keys(application, {"producer_version", "reader_schema_min", "reader_schema_max", "requires_verified_reader"})
+        _strict_string(application["producer_version"], "producer_version")
+        if (
+            application["reader_schema_min"] != 15
+            or application["reader_schema_max"] not in (17, 18)
+            or application["requires_verified_reader"] != VERIFIED_FORMAT_VERSION
+        ):
+            raise BackupArchiveError("The archive application compatibility is unsupported.")
+        if not 15 <= migration.applied_version <= migration.current_version:
+            raise BackupArchiveError("The verified backup schema is incompatible.")
+        from .campaign_cutover_exporter import CampaignCutoverExportError, _inspect_supported_schema
+
+        with closing(sqlite3.connect(f"{database_path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)) as connection:
+            try:
+                connection.row_factory = sqlite3.Row
+                _inspect_supported_schema(connection, migration.applied_version)
+                coherence = inspect_snapshot_coherence(connection, files=expected_files, require_current=True)
+            except SnapshotCoherenceError as exc:
+                raise BackupArchiveError("The archived snapshot is semantically incoherent.") from exc
+            except CampaignCutoverExportError as exc:
+                raise BackupArchiveError("The archived schema is incompatible.") from exc
+        if manifest["coherence"] != coherence:
+            raise BackupArchiveError("The archived canonical and mirror evidence does not match.")
     evidence = BackupArchiveEvidence(
-        archive_path=archive_path.resolve(), format_version=2, verification_level="verified_v2",
+        archive_path=archive_path.resolve(), format_version=version,
+        verification_level="verified_v3" if version == VERIFIED_FORMAT_VERSION else "verified_v2",
         manifest_hashes_verified=True, created_at=created_at, database_filename="player_wiki.sqlite3",
         database_byte_count=database_size, database_sha256=database_hash,
         database_integrity_check=integrity, database_foreign_key_violations=foreign_keys,

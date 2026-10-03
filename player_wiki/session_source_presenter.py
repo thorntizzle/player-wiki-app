@@ -19,6 +19,13 @@ class SessionWikiArticlePayload:
     body_markdown: str
     source_page_ref: str
     image_upload: Any | None
+    legacy_image_omitted: bool = False
+
+
+LEGACY_WIKI_IMAGE_OMISSION_NOTICE = (
+    "The wiki page's legacy image was omitted. To include an image, convert the page image "
+    "to managed form and pull again, or upload one separately to this staged article."
+)
 
 
 def get_pullable_session_wiki_page_record(
@@ -90,15 +97,20 @@ def get_pullable_session_wiki_article_payload(
             return None
         managed_image = None
         asset_ref = record.page.image_path
-        if asset_ref and active() and is_managed_wiki_asset_target(campaign.assets_dir, asset_ref):
+        managed_target = bool(
+            asset_ref and activated
+            and is_managed_wiki_asset_target(campaign.assets_dir, asset_ref)
+        )
+        if managed_target:
             managed_image = page_image_payload(
                 campaign.slug, record.page_ref, record.page.committed_revision,
                 record.page.committed_config_revision, asset_ref,
             )
-        return record, managed_image
+        return record, managed_image, bool(asset_ref and activated and not managed_target)
 
     try:
-        if active():
+        activated = active()
+        if activated:
             @read_snapshot
             def committed_select():
                 return select()
@@ -111,7 +123,7 @@ def get_pullable_session_wiki_article_payload(
 
     if selected is None:
         return None
-    record, managed_image = selected
+    record, managed_image, legacy_image_omitted = selected
     image_upload = None
     asset_ref = record.page.image_path
     if managed_image is not None:
@@ -121,7 +133,7 @@ def get_pullable_session_wiki_article_payload(
             data_blob=data_blob, alt_text=record.page.image_alt,
             caption=record.page.image_caption,
         )
-    elif asset_ref:
+    elif asset_ref and not activated:
         image_path = get_campaign_asset_file(campaign, asset_ref)
         if image_path is not None:
             image_upload = session_service.prepare_article_image_upload(
@@ -136,6 +148,12 @@ def get_pullable_session_wiki_article_payload(
             )
     body = record.body_markdown.strip() or record.page.summary.strip()
     if not body and image_upload is None:
+        if legacy_image_omitted:
+            raise CampaignSessionValidationError(
+                "This wiki page has only a legacy image, which cannot be pulled into a session article. "
+                "Convert the page image to managed form and pull again, or create a manual "
+                "Session article with a separate image upload."
+            )
         raise CampaignSessionValidationError(
             "The selected wiki page does not have any body text, summary, or image to pull into the session store."
         )
@@ -143,6 +161,7 @@ def get_pullable_session_wiki_article_payload(
         title=record.page.title, body_markdown=body,
         source_page_ref=build_session_article_page_source_ref(record.page_ref),
         image_upload=image_upload,
+        legacy_image_omitted=legacy_image_omitted,
     )
 
 

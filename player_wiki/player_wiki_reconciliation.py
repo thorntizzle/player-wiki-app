@@ -21,7 +21,7 @@ from .campaign_content_service import (
 from .db import get_db
 from .incident_diagnostics import diagnose_operation, emit_incident
 from .file_publication import atomic_move_file, atomic_write_bytes, atomic_write_bytes_no_replace, durable_unlink_file
-from .input_limits import MAX_CONTENT_LENGTH
+from .input_limits import MAX_CONTENT_LENGTH, MAX_INGRESS_FILE_BYTES
 from .managed_wiki_images import (
     is_canonical_managed_wiki_image_ref,
     is_managed_wiki_asset_target,
@@ -131,6 +131,13 @@ class _ReconciliationStateChanged(RuntimeError):
         self.operation = operation
 
 
+class _ManagedPrimaryPathUnsafe(CampaignContentError):
+    """A prepared managed image has a proven unsafe original path."""
+
+    def __init__(self) -> None:
+        super().__init__("Managed wiki image path is unsafe.")
+
+
 class _DeletionAuthorityChanged(RuntimeError):
     pass
 
@@ -158,6 +165,8 @@ class PlayerWikiReconciler:
         self.hooks = hooks or ReconciliationHooks()
         self._locks_guard = Lock()
         self._page_locks: dict[tuple[str, str], Lock] = {}
+        self._conflict_retry_guard = Lock()
+        self._conflict_retry_available = True
 
     @diagnose_operation("wiki_publication")
     def mutate(
@@ -194,23 +203,47 @@ class PlayerWikiReconciler:
             )
             self._event("after_prepare", operation.operation_id)
 
-            actual_primary_digest = _digest_file(primary_path)
+            managed_primary = (operation.primary_authority == "image" and
+                               is_canonical_managed_wiki_image_ref(operation.desired_primary_ref))
+            try:
+                if managed_primary and _checked_managed_primary_path(
+                        campaign, operation.desired_primary_ref) != primary_path:
+                    raise CampaignContentError("Managed wiki image path changed before publication.")
+                actual_primary_digest = self._digest_prepared_primary_file(campaign, operation, primary_path)
+            except _ManagedPrimaryPathUnsafe:
+                self._raise_conflict(operation.operation_id, "primary_path_unsafe")
             if actual_primary_digest != operation.desired_primary_digest:
                 self._event("before_primary_publish", operation.operation_id)
-                primary_path.parent.mkdir(parents=True, exist_ok=True)
                 try:
-                    if operation.primary_authority == "image" and is_canonical_managed_wiki_image_ref(
-                        operation.desired_primary_ref
-                    ):
+                    if managed_primary:
+                        managed_wiki_image_path(
+                            campaign.assets_dir, operation.desired_primary_ref,
+                            require_absent=True, create_parents=True,
+                        )
                         managed_wiki_image_path(
                             campaign.assets_dir, operation.desired_primary_ref, require_absent=True
                         )
                         atomic_write_bytes_no_replace(primary_path, primary_payload)
+                        _checked_managed_primary_path(campaign, operation.desired_primary_ref)
                     else:
+                        primary_path.parent.mkdir(parents=True, exist_ok=True)
                         atomic_write_bytes(primary_path, primary_payload)
-                except BaseException:
+                except BaseException as primary_error:
+                    if managed_primary:
+                        if isinstance(primary_error, _ManagedPrimaryPathUnsafe):
+                            self._raise_conflict(operation.operation_id, "primary_path_unsafe")
+                        try:
+                            _checked_managed_primary_path(campaign, operation.desired_primary_ref)
+                        except _ManagedPrimaryPathUnsafe:
+                            self._raise_conflict(operation.operation_id, "primary_path_unsafe")
+                    try:
+                        primary_digest = self._digest_prepared_primary_file(
+                            campaign, operation, primary_path,
+                        )
+                    except _ManagedPrimaryPathUnsafe:
+                        self._raise_conflict(operation.operation_id, "primary_path_unsafe")
                     disposition = self._classify_digest(
-                        _digest_file(primary_path),
+                        primary_digest,
                         previous=operation.previous_primary_digest,
                         desired=operation.desired_primary_digest,
                     )
@@ -283,7 +316,20 @@ class PlayerWikiReconciler:
     def recover_pending(self, *, limit: int = 8) -> dict[str, int]:
         from .committed_publication import active, replay_mirrors
         if active():
-            return replay_mirrors(self.repository_store.campaigns_dir, limit=limit)
+            with self._conflict_retry_guard:
+                if not self._conflict_retry_available:
+                    return replay_mirrors(self.repository_store.campaigns_dir, limit=limit)
+                current_conflict = get_db().execute(
+                    "SELECT 1 FROM committed_source_outbox WHERE state='conflict' "
+                    "AND object_kind='page' LIMIT 1"
+                ).fetchone()
+                if current_conflict is None:
+                    self._conflict_retry_available = False
+                    return replay_mirrors(self.repository_store.campaigns_dir, limit=limit)
+                outcome = replay_mirrors(self.repository_store.campaigns_dir, limit=limit, retry_conflicts=True)
+                if outcome.pop("_conflict_retry_selected"):
+                    self._conflict_retry_available = False
+                return outcome
         rows = get_db().execute(
             """
             SELECT operation_id, campaign_slug, page_ref, state
@@ -424,9 +470,15 @@ class PlayerWikiReconciler:
                 raise CampaignContentError(
                     "The selected reconciliation operation changed before execution."
                 )
-            self._revalidate_exact_action(campaign, kind, current, action)
+            try:
+                self._revalidate_exact_action(campaign, kind, current, action)
+            except _ManagedPrimaryPathUnsafe:
+                self._raise_exact_unsafe_primary_conflict(operation_id)
             if action == "abandon-precommit":
-                self._delete_exact_precommit(campaign, kind, current)
+                try:
+                    self._delete_exact_precommit(campaign, kind, current)
+                except _ManagedPrimaryPathUnsafe:
+                    self._raise_exact_unsafe_primary_conflict(operation_id)
                 return "abandoned"
             if action == "resume-forward":
                 if kind == "publication":
@@ -475,6 +527,15 @@ class PlayerWikiReconciler:
                         )
                 return "completed"
         raise CampaignContentError("The selected reconciliation action is unsupported.")
+
+    def _raise_exact_unsafe_primary_conflict(self, operation_id: str) -> None:
+        # Manager prevalidation has released its BEGIN IMMEDIATE before this CAS.
+        try:
+            self._raise_conflict(operation_id, "primary_path_unsafe")
+        except _ReconciliationStateChanged as exc:
+            raise CampaignContentError(
+                "The selected reconciliation operation changed before execution."
+            ) from exc
 
     def _load_exact_operation(
         self, kind: str, operation_id: str
@@ -531,9 +592,9 @@ class PlayerWikiReconciler:
             raise CampaignContentError(
                 "The selected reconciliation action no longer matches current evidence."
             )
-        primary_path = self._resolve_primary_path(campaign, operation)
+        primary_path = self._resolve_prepared_primary_path(campaign, operation)
         primary = self._classify_digest(
-            _digest_file(primary_path),
+            self._digest_prepared_primary_file(campaign, operation, primary_path),
             previous=operation.previous_primary_digest,
             desired=operation.desired_primary_digest,
         )
@@ -830,11 +891,14 @@ class PlayerWikiReconciler:
         if selected_action not in {None, "resume-forward", "retry-refresh-cleanup"}:
             raise RuntimeError("Player wiki publication selected action is invalid.")
         try:
-            return self._continue_prepared_once(
-                campaign,
-                operation_id,
-                selected_action=selected_action,
-            )
+            try:
+                return self._continue_prepared_once(
+                    campaign,
+                    operation_id,
+                    selected_action=selected_action,
+                )
+            except _ManagedPrimaryPathUnsafe:
+                self._raise_conflict(operation_id, "primary_path_unsafe")
         except _ReconciliationStateChanged as exc:
             operation = exc.operation
             if operation is not None and operation.state == "repository_pending":
@@ -880,9 +944,9 @@ class PlayerWikiReconciler:
         if operation.state != "prepared":
             return None
 
-        primary_path = self._resolve_primary_path(campaign, operation)
+        primary_path = self._resolve_prepared_primary_path(campaign, operation)
         primary_disposition = self._classify_digest(
-            _digest_file(primary_path),
+            self._digest_prepared_primary_file(campaign, operation, primary_path),
             previous=operation.previous_primary_digest,
             desired=operation.desired_primary_digest,
         )
@@ -919,7 +983,7 @@ class PlayerWikiReconciler:
 
         markdown_path = self._resolve_markdown_path(campaign, operation.page_ref)
         if operation.primary_authority == "image":
-            if _digest_file(primary_path) != operation.desired_primary_digest:
+            if self._digest_prepared_primary_file(campaign, operation, primary_path) != operation.desired_primary_digest:
                 self._raise_conflict(operation.operation_id, "required_image_changed")
             markdown_disposition = self._classify_digest(
                 _digest_file(markdown_path),
@@ -938,7 +1002,7 @@ class PlayerWikiReconciler:
             self._raise_conflict(operation.operation_id, "markdown_not_desired")
         if (
             operation.primary_authority == "image"
-            and _digest_file(primary_path) != operation.desired_primary_digest
+            and self._digest_prepared_primary_file(campaign, operation, primary_path) != operation.desired_primary_digest
         ):
             self._raise_conflict(operation.operation_id, "required_image_changed")
 
@@ -1772,10 +1836,39 @@ class PlayerWikiReconciler:
                 self._raise_conflict(operation.operation_id, "primary_ref_mismatch")
             return self._resolve_markdown_path(campaign, operation.page_ref)
         if is_canonical_managed_wiki_image_ref(operation.desired_primary_ref):
-            return managed_wiki_image_path(campaign.assets_dir, operation.desired_primary_ref)
+            return _checked_managed_primary_path(campaign, operation.desired_primary_ref)
         if is_managed_wiki_asset_target(campaign.assets_dir, operation.desired_primary_ref):
             self._raise_conflict(operation.operation_id, "managed_image_ref_invalid")
         return _resolve_under(Path(campaign.assets_dir), operation.desired_primary_ref)
+
+    @staticmethod
+    def _prove_managed_primary_path_unsafe(campaign: Any, operation: ReconciliationOperation) -> None:
+        if (operation.primary_authority != "image" or
+                not is_canonical_managed_wiki_image_ref(operation.desired_primary_ref)):
+            return
+        _checked_managed_primary_path(campaign, operation.desired_primary_ref)
+
+    def _resolve_prepared_primary_path(
+        self, campaign: Any, operation: ReconciliationOperation,
+    ) -> Path:
+        try:
+            return self._resolve_primary_path(campaign, operation)
+        except _ManagedPrimaryPathUnsafe:
+            raise
+        except CampaignContentError:
+            self._prove_managed_primary_path_unsafe(campaign, operation)
+            raise
+
+    def _digest_prepared_primary_file(
+        self, campaign: Any, operation: ReconciliationOperation, path: Path,
+    ) -> str:
+        try:
+            return _digest_primary_file(campaign, operation, path)
+        except _ManagedPrimaryPathUnsafe:
+            raise
+        except (CampaignContentError, OSError):
+            self._prove_managed_primary_path_unsafe(campaign, operation)
+            raise
 
     @staticmethod
     def _resolve_markdown_path(campaign: Any, page_ref: str) -> Path:
@@ -1914,6 +2007,52 @@ def _digest_file(path: Path) -> str:
         data = path.read_bytes()
     except FileNotFoundError:
         return ""
+    return _digest_bytes(data)
+
+
+def _checked_managed_primary_path(campaign: Any, ref: str) -> Path:
+    try:
+        return managed_wiki_image_path(campaign.assets_dir, ref)
+    except CampaignContentError as exc:
+        raise _ManagedPrimaryPathUnsafe() from exc
+
+
+def _digest_primary_file(campaign: Any, operation: ReconciliationOperation, path: Path) -> str:
+    if (operation.primary_authority != "image" or
+            not is_canonical_managed_wiki_image_ref(operation.desired_primary_ref)):
+        return _digest_file(path)
+    ref = operation.desired_primary_ref
+    if _checked_managed_primary_path(campaign, ref) != path:
+        raise CampaignContentError("Managed wiki image path changed before publication.")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) |
+                             getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        _checked_managed_primary_path(campaign, ref)
+        return ""
+    except OSError:
+        _checked_managed_primary_path(campaign, ref)
+        raise
+    with os.fdopen(descriptor, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(before.st_mode)
+                or int(getattr(before, "st_file_attributes", 0)) & 0x400):
+            raise _ManagedPrimaryPathUnsafe()
+        if before.st_size > MAX_INGRESS_FILE_BYTES:
+            raise CampaignContentError("Managed wiki image file is unsafe.")
+        data = stream.read(MAX_INGRESS_FILE_BYTES + 1)
+        after = os.fstat(stream.fileno())
+    _checked_managed_primary_path(campaign, ref)
+    try:
+        named = path.lstat()
+    except FileNotFoundError as exc:
+        raise CampaignContentError("Managed wiki image changed during publication.") from exc
+    _checked_managed_primary_path(campaign, ref)
+    if (len(data) > MAX_INGRESS_FILE_BYTES
+            or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+            or (after.st_dev, after.st_ino) != (named.st_dev, named.st_ino)):
+        raise CampaignContentError("Managed wiki image changed during publication.")
     return _digest_bytes(data)
 
 

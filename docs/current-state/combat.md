@@ -1,6 +1,6 @@
 # Combat
 
-Last updated: 2026-09-27
+Last updated: 2026-10-02
 
 ## Owns
 
@@ -144,6 +144,7 @@ Last updated: 2026-09-27
 - Player resource/spell-slot edits and owner/DM selected-PC equipment-state edits use shared durable character-state paths and can bump combat tracker revision for live refresh.
 - Combat turn entry is transport-neutral: browser Advance, API Advance, browser/API Set Current, and compatibility views all use the same service transition. A real entry dispatches the updated tracker revision as a durable monotonic mechanic event; re-selecting the already-current combatant is a no-op. The tracker/resource update, active Divine Avatar Form event, Character state write, and Session invalidation share one SQLite transaction, so a mechanic conflict rolls the turn back instead of reporting partial success. Avatar of Mourning counts each accepted entry once, ends on its tenth counted turn, and exposes its pending table resolution before live selected-character projections refresh.
 - Combat row-owned tactical writes use combatant-row revision where relevant.
+- In activated mode, PC snapshot refresh updates verified combatants with row-revision checks even when another PC source is unresolved. The unresolved PC keeps its historical snapshot, one tracker revision records any successful refreshes, and a failed write rolls the transaction back.
 - Source-backed NPC resource counters are combatant-owned durable rows. DM Content statblocks and Systems monsters can seed supported limited-use counters at combatant creation, and current values persist on the combatant without mutating the underlying source entry. Common daily counters retain their existing behavior. A strict terminal `Recharge 6` or `Recharge 2–6` through `Recharge 5–6` suffix in a Markdown ATX ability heading, or the equivalent terminal literal/tag form in a typed Systems ability-name position, seeds a full one-use counter (`current_value = max_value = 1`) with internal `reset_kind = recharge_d6` and a `recharge_threshold` from 2 through 6.
 - Ambiguous, body-only, nonterminal, out-of-range, qualified, conflicting, or otherwise unsupported recharge prose remains a read-only source note, as do at-will and other unmodeled mechanics. A daily/recharge key collision keeps the existing daily counter and the recharge note.
 - Recharge parsing runs while source-backed combatant or preset seeds are materialized, not on live reads. Source identity, preset source-version drift fingerprints, preset apply materialization, and cutover/package export preserve the structured metadata. Public combat counter objects retain their existing keys and display `reset_label`; they do not expose `reset_kind` or `recharge_threshold`, and the accepted live query counts are unchanged.

@@ -1,6 +1,6 @@
 # Live Session
 
-Last updated: 2026-09-28
+Last updated: 2026-10-02
 
 ## Owns
 
@@ -296,6 +296,7 @@ Last updated: 2026-09-28
 - Session article store creation modes are Manual, Upload, and Lookup.
 - Upload mode accepts UTF-8 `.md` or `.markdown` files and can attach separately uploaded referenced images from frontmatter, Markdown images, or Obsidian embeds.
 - Lookup mode lazily searches visible published wiki pages plus accessible Systems entries and stages a revealable snapshot.
+- In activated committed-source mode, pulling a visible published wiki page stages its selected committed body (or summary) and an image only when the exact selected revision has a proved managed image BLOB. A nonmanaged legacy page image is omitted, with a notice on Session DM, DM Content, and JSON API success; its file bytes are not read for the pull. An image-only legacy page is refused before the Session article write, with guidance to convert the page image to managed form or create a manual article with a separate upload. Closed never-activated mode retains its file-backed page-image copy behavior. Managed image proof failures still refuse the pull.
 - Staged articles are hidden from wiki/search until converted or saved through the Player Wiki editor.
 - DMs/admins can update unrevealed staged article title, body, image alt/caption, or replacement image from Session DM or DM Content -> `Staged Articles`. Each edit carries the original article conflict baseline; title, body, image and image metadata commit together. An unchanged save leaves the article unchanged. A stale, revealed, or deleted article refuses the edit. Native and enhanced forms retain entered drafts after refusal, and replacement files must be selected again. When a response leaves the outcome uncertain, refresh the committed article before another edit.
 - Revealed session articles render into the session chat feed and remain visible in stored DM chat logs.

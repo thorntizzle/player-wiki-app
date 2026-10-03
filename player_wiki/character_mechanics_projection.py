@@ -187,6 +187,12 @@ def _normalized_definition_cache_key(
     revision_entry_types: tuple[str, ...],
     context_entry_types: tuple[str, ...] | None = None,
 ) -> tuple[Any, ...] | None:
+    # SourceAuthority includes the current source payloads and verified private
+    # audit witnesses.  Neither is represented by the builder's static revision
+    # key.  A cache hit here could restore numbers from an obsolete witness or
+    # a disabled/replaced source, so activated projections are rebuilt.
+    if activated:
+        return None
     revision_key = _builder_static_revision_key(
         systems_service,
         campaign_slug,

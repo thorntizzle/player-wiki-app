@@ -33,6 +33,7 @@ from .runtime_lease import (
     active_restore_journal_path,
 )
 from .sqlite_safety import snapshot_sqlite_database
+from .snapshot_coherence import SnapshotCoherenceError, inspect_snapshot_coherence
 
 
 JOURNAL_VERSION = 1
@@ -235,8 +236,12 @@ def restore_backup_archive_atomic(
     try:
         archive = _canonical_regular_file(archive_path, require_single_link=True)
         initial_archive = _file_record(archive)
-        with stage_backup_archive(archive, limits=limits):
-            pass
+        with stage_backup_archive(archive, limits=limits) as inspected:
+            if inspected.evidence.format_version != 3:
+                raise RestoreTransactionError(
+                    "Pre-rework archives are inspectable only. Open one in a separate "
+                    "compatible old-app copy, then use reviewed import into the upgraded app."
+                )
     except FileNotFoundError:
         raise FileNotFoundError("Backup archive not found.") from None
     except (BackupArchiveError, RestoreTransactionError):
@@ -276,6 +281,8 @@ def restore_backup_archive_atomic(
             )
 
             with stage_backup_archive(archive, limits=limits) as staged:
+                if staged.evidence.format_version != 3:
+                    raise RestoreTransactionError("Direct restore requires a verified v3 archive.")
                 transaction_id = uuid.uuid4().hex
                 artifact_paths = _restore_artifact_paths(database, campaigns, transaction_id)
                 stage_db = artifact_paths["stage_database"]
@@ -306,11 +313,30 @@ def restore_backup_archive_atomic(
                     stage_campaigns,
                     staged.campaign_files,
                 )
+                _verify_committed_bundle(stage_db, staged.campaign_files)
 
                 target_campaign_files = _scan_regular_tree(campaigns) if campaigns.exists() else ()
                 target_nonempty = database.exists() or bool(target_campaign_files)
                 if not database.exists() and target_campaign_files:
                     raise RestoreTransactionError("The active restore targets are inconsistent.")
+                if database.exists():
+                    from .committed_publication import active, CommittedSourceConflict
+                    try:
+                        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as target_db:
+                            target_version = inspect_migration_ledger(target_db).applied_version
+                            target_active = active(target_db)
+                        if target_version >= 18 and staged.evidence.migration.applied_version < 18:
+                            raise RestoreTransactionError(
+                                "An older archive cannot restore over upgraded authority."
+                            )
+                        if target_active:
+                            with closing(sqlite3.connect(stage_db.as_uri() + "?mode=ro", uri=True)) as staged_db:
+                                if not active(staged_db):
+                                    raise RestoreTransactionError(
+                                        "Restore cannot deactivate committed authority."
+                                    )
+                    except CommittedSourceConflict as exc:
+                        raise RestoreTransactionError("Restore target activation proof is unavailable.") from exc
 
                 prebackup: BackupArchiveEvidence | None = None
                 if target_nonempty:
@@ -344,6 +370,15 @@ def restore_backup_archive_atomic(
                             staged_campaign_files=staged_prebackup.campaign_files,
                             snapshot_path=precheck,
                         )
+                        if (
+                            _database_logical_sha256(staged_prebackup.database_path)
+                            != _database_logical_sha256(stage_db)
+                            or staged_prebackup.campaign_files != staged.campaign_files
+                        ):
+                            raise RestoreTransactionError(
+                                "The target differs from the archive. Resolve later committed "
+                                "edits and file-only drafts through reviewed admission/import."
+                            )
                     _remove_path(precheck)
                     target_campaign_files = (
                         _scan_regular_tree(campaigns) if campaigns.exists() else ()
@@ -663,7 +698,22 @@ def _verify_published(
         Path(_string(targets, "campaigns")),
         campaign_files,
     )
+    _verify_committed_bundle(database_path, campaign_files)
     return database, campaigns
+
+
+def _verify_committed_bundle(
+    database: Path, files: tuple[CampaignFileEvidence, ...],
+) -> None:
+    try:
+        with closing(sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro&immutable=1", uri=True)) as connection:
+            inspect_snapshot_coherence(
+                connection,
+                files=((item.relative_path, item.byte_count, item.sha256) for item in files),
+                require_current=True,
+            )
+    except (sqlite3.Error, SnapshotCoherenceError) as exc:
+        raise RestoreTamperError("The staged or published committed source is incoherent.") from exc
 
 
 def _validate_artifact_evidence(state: dict[str, object]) -> None:

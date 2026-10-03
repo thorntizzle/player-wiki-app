@@ -37,6 +37,7 @@ from player_wiki.restore_transaction import (
     resume_restore,
     rollback_restore,
 )
+from player_wiki.committed_activation import ActivationRefused, ActivationUncertain, activate, inspect_activation
 
 
 DEFAULT_FLY_APP = os.getenv("PLAYER_WIKI_FLY_APP", "campaign-player-wiki-example")
@@ -90,6 +91,15 @@ class _SafeArgumentParser(argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = _SafeArgumentParser(description="Create or restore local Campaign Player Wiki backups.")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    for command in ("committed-activation-inspect", "committed-activation-apply"):
+        activation = subparsers.add_parser(command, help="Inspect or apply private committed-source activation.")
+        activation.add_argument("--db-path", required=True)
+        activation.add_argument("--campaigns-dir", required=True)
+        if command.endswith("apply"):
+            activation.add_argument("--backup-root", required=True)
+            activation.add_argument("--confirm-target", required=True)
+            activation.add_argument("--readiness-sha256", required=True)
 
     for command, help_text in (
         ("artifact-inventory", "Inventory local operational artifacts without writing."),
@@ -267,6 +277,21 @@ def main() -> None:
     args = parser.parse_args()
     project_root = Path(__file__).resolve().parent
 
+    if args.command in ("committed-activation-inspect", "committed-activation-apply"):
+        try:
+            if args.command.endswith("inspect"):
+                result = inspect_activation(db_path=Path(args.db_path), campaigns_dir=Path(args.campaigns_dir))
+            else:
+                result = activate(db_path=Path(args.db_path), campaigns_dir=Path(args.campaigns_dir),
+                                  backup_root=Path(args.backup_root), confirmed_target=args.confirm_target,
+                                  readiness_sha256=args.readiness_sha256)
+        except (ActivationRefused, OSError, ValueError) as exc:
+            print(json.dumps({"outcome":"uncertain" if isinstance(exc,ActivationUncertain) else "refused",
+                              "reason_code":type(exc).__name__},sort_keys=True))
+            raise SystemExit(2) from None
+        print(json.dumps(result,sort_keys=True,separators=(",",":")))
+        return
+
     if args.command == "player-wiki-reconciliation-dry-run":
         report, exit_code = inspect_player_wiki_reconciliation(
             database_path=Path(Config.DB_PATH),
@@ -396,6 +421,10 @@ def main() -> None:
         print(f"Manifest hashes verified: {str(evidence.manifest_hashes_verified).lower()}")
         print(f"Database integrity: {','.join(evidence.database_integrity_check)}")
         print(f"Campaign files: {evidence.campaign_file_count}")
+        if evidence.format_version < 3:
+            print("Direct upgraded restore: unavailable; validate in a separate compatible old-app copy and use reviewed import.")
+        else:
+            print("Direct upgraded restore: eligible for target compatibility and later-edit checks.")
         return
 
     if args.command == "restore":

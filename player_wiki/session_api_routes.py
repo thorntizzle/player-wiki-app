@@ -6,16 +6,21 @@ from typing import Any, Callable
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
+from .auth import campaign_integrity_unavailable_response
 from .campaign_session_service import (
     CampaignSessionValidationError, SessionArticleEditConflictError, validate_session_article_base_token,
 )
+from .committed_publication import CommittedSourceConflict
 from .session_models import (
     SESSION_ARTICLE_SOURCE_KIND_SYSTEMS,
     build_session_article_page_source_ref,
     build_session_article_systems_source_ref,
     parse_session_article_source_ref,
 )
-from .session_source_presenter import get_pullable_session_wiki_article_payload
+from .session_source_presenter import (
+    LEGACY_WIKI_IMAGE_OMISSION_NOTICE,
+    get_pullable_session_wiki_article_payload,
+)
 
 
 @dataclass(frozen=True)
@@ -469,6 +474,7 @@ def register_session_article_authoring_routes(
 
         session_service = dependencies.get_session_service()
         article = None
+        legacy_image_omitted = False
         mode = str(payload.get("mode") or "manual").strip().lower()
         if mode not in {"manual", "upload", "wiki"}:
             return dependencies.json_error(
@@ -512,7 +518,10 @@ def register_session_article_authoring_routes(
                     created_by_user_id=user.id,
                 )
             elif mode == "wiki":
-                campaign = dependencies.get_repository().get_campaign(campaign_slug)
+                try:
+                    campaign = dependencies.get_repository().get_campaign(campaign_slug)
+                except CommittedSourceConflict:
+                    return campaign_integrity_unavailable_response()
                 if campaign is None:
                     abort(404)
 
@@ -569,6 +578,7 @@ def register_session_article_authoring_routes(
                         raise CampaignSessionValidationError(
                             "Choose a visible published wiki page or Systems entry before pulling it into the session store."
                         )
+                    legacy_image_omitted = page_payload.legacy_image_omitted
                     article = session_service.create_article(
                         campaign_slug,
                         title=page_payload.title,
@@ -609,16 +619,16 @@ def register_session_article_authoring_routes(
             return dependencies.json_error(str(exc), 400, code="validation_error")
 
         article_image = session_service.get_article_image(campaign_slug, article.id)
-        return jsonify(
-            {
-                "ok": True,
-                "article": dependencies.serialize_session_article(
-                    campaign_slug,
-                    article,
-                    article_image,
-                ),
-            }
-        )
+        response = {
+            "ok": True,
+            "article": dependencies.serialize_session_article(
+                campaign_slug, article, article_image,
+            ),
+        }
+        if legacy_image_omitted:
+            response["image_omitted"] = True
+            response["notice"] = LEGACY_WIKI_IMAGE_OMISSION_NOTICE
+        return jsonify(response)
 
     def session_article_update(campaign_slug: str, article_id: int):
         if not dependencies.can_manage_session(campaign_slug):

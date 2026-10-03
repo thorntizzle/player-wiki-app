@@ -6,6 +6,15 @@ from typing import Any
 from .repository import normalize_lookup
 
 METRICS = ("spell_attack_bonus", "spell_save_dc")
+MISSING_OVERRIDE_AUTHORITY_KEY = "_effective_missing_override_authority"
+
+
+class _VerifiedMissingOverride:
+    def __deepcopy__(self, memo):
+        return self
+
+
+VERIFIED_MISSING_OVERRIDE = _VerifiedMissingOverride()
 
 
 def _metric_records(payload: dict[str, Any]) -> dict[str, Any]:
@@ -160,6 +169,7 @@ def project_spellcasting_item_effects(
     *, transient_adjustments: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     projected = deepcopy(dict(spellcasting or {}))
+    projected.pop(MISSING_OVERRIDE_AUTHORITY_KEY, None)
     warnings: list[dict[str, str]] = []
     effects: list[dict[str, Any]] = []
     seen_effects: dict[tuple[str, str], dict[str, Any]] = {}
@@ -228,6 +238,7 @@ def project_spellcasting_item_effects(
 
     def project_row(row: dict[str, Any], row_kind: str) -> dict[str, Any]:
         result = dict(row)
+        trusted_missing_overrides = result.pop(MISSING_OVERRIDE_AUTHORITY_KEY, None)
         row_id = str(row.get("class_row_id" if row_kind == "class" else "source_row_id") or "").strip()
         notes: list[str] = []
         for metric in METRICS:
@@ -241,14 +252,22 @@ def project_spellcasting_item_effects(
                 warnings.append({"code": "spell_metric_provenance_unsupported",
                                  "message": f"{row_id or 'Spell row'}: unsupported {metric} adjustment or override."})
             base = _integer(row.get(metric))
+            missing_override_authorized = (
+                isinstance(trusted_missing_overrides, dict)
+                and trusted_missing_overrides.get(metric) is VERIFIED_MISSING_OVERRIDE
+            )
+            if base is None and not (missing_override_authorized and "final_override" in provenance):
+                # Historical overrides and items cannot restore a suppressed
+                # metric. An exact current manager witness can authorize an
+                # override even when the saved base was absent.
+                result[metric] = None
+                notes.append(f"{metric}: unknown; item bonus not automated")
+                continue
             if "final_override" in provenance:
                 transient_key = "attack_bonus" if metric == "spell_attack_bonus" else "save_dc"
                 transient_value = _integer(transient.get(transient_key)) or 0
                 result[metric] = provenance["final_override"] + transient_value
                 notes.append(f"{metric}: sourced final override")
-                continue
-            if base is None:
-                notes.append(f"{metric}: unknown; item bonus not automated")
                 continue
             if provenance["kind"] != "formula":
                 notes.append(f"{metric}: manual total; item bonus not automated")

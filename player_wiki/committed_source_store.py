@@ -11,6 +11,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import Any
 
 import yaml
@@ -46,6 +47,7 @@ class AdmissionResult:
 class _ValidatedConfig:
     system_code: str
     current_session: int
+    character_dir: str
 
 
 def _now() -> str:
@@ -94,6 +96,17 @@ def _legacy_enum_values_valid(connection: sqlite3.Connection) -> bool:
     return True
 
 
+def _validated_character_dir(value: object) -> str | None:
+    """Check the Character mirror's relative root without consulting the filesystem."""
+    if not isinstance(value, str) or not value or "\\" in value or ":" in value or "\x00" in value:
+        return None
+    path = PurePosixPath(value)
+    if (path.is_absolute() or path.as_posix() != value or path.as_posix() == "."
+            or ".." in path.parts):
+        return None
+    return value
+
+
 def _validate_config_payload(
     payload: dict[str, Any] | None, campaign_slug: str,
 ) -> tuple[str | None, _ValidatedConfig | None]:
@@ -125,9 +138,12 @@ def _validate_config_payload(
     for key in ("summary", "source_wiki_root", "systems_library", "player_content_dir", "asset_dir"):
         if key in payload and not isinstance(payload[key], str):
             return "malformed_primary", None
+    character_dir = _validated_character_dir(payload.get("character_dir", "characters"))
+    if character_dir is None or not isinstance(payload.get("character_source_root", ""), str):
+        return "malformed_primary", None
     if "systems_sources" in payload and not isinstance(payload["systems_sources"], list):
         return "malformed_primary", None
-    return None, _ValidatedConfig(system_code, current_session)
+    return None, _ValidatedConfig(system_code, current_session, character_dir)
 
 
 def _current_config(connection: sqlite3.Connection, campaign_slug: str) -> _ValidatedConfig | None:
@@ -314,8 +330,9 @@ def admit_legacy_object(
         marker = connection.execute(
             "SELECT activated, schema_version FROM committed_source_activation WHERE singleton = 1"
         ).fetchone()
-        if marker is None or tuple(marker) != (0, 15):
-            raise ValueError("Committed-source admission requires the closed v15 schema.")
+        from .committed_publication import active
+        if marker is None or tuple(marker) not in ((0, 15), (0, 18)) or active(connection):
+            raise ValueError("Committed-source admission requires trusted closed authority.")
         reason = None
         if not _legacy_enum_values_valid(connection):
             reason = "legacy_enum_invalid"
@@ -411,7 +428,9 @@ def read_current_committed_bytes(
     marker = connection.execute(
         "SELECT activated, schema_version FROM committed_source_activation WHERE singleton = 1"
     ).fetchone()
-    if marker is None or tuple(marker) != (0, 15) or not _legacy_enum_values_valid(connection):
+    from .committed_publication import active
+    if (marker is None or tuple(marker) not in ((0, 15), (0, 18))
+            or active(connection) or not _legacy_enum_values_valid(connection)):
         return None
     if _pending_journal(connection, campaign_slug, object_kind, object_ref):
         return None

@@ -1,6 +1,6 @@
 # Admin, Auth, And Visibility
 
-Last updated: 2026-08-29
+Last updated: 2026-10-02
 
 ## Owns
 
@@ -56,6 +56,7 @@ Last updated: 2026-08-29
 
 - Failed authentication uses constant-cost credential checking and bounded per-client/per-account throttling, including bounded in-memory throttle state.
 - Browser mutations require CSRF validation. Existing JSON API bearer-token behavior and the public route, role, and visibility contracts are unchanged.
+- If trusted committed-source activation proof fails during campaign-scope access or a Wiki-to-Session campaign lookup, browser and JSON API routes return an empty `503` with `Cache-Control: private, no-store` and a short `Retry-After`. This response does not disclose campaign existence or role. The Wiki pull stops before a Session write. Ordinary missing-campaign, sign-in, and permission responses retain their usual behavior.
 - Production startup fails fast when the application secret is missing, weak, or still a known development default.
 - Request and application logging omit query values, redact one-time path credentials, and avoid exception text that could disclose tokens or other credentials.
 - Auth, token-bearing, account, and Admin HTML responses use `no-store`. Shared security and privacy headers apply to browser responses, including nonce-based content security policy and production HSTS where appropriate.

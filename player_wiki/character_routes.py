@@ -203,7 +203,7 @@ def character_roster_view(campaign_slug: str):
             if normalized_query in str(card.get("search_text") or "")
         ]
 
-    return render_template(
+    response = make_response(render_template(
         "character_roster.html",
         campaign=campaign,
         character_cards=character_cards,
@@ -221,7 +221,9 @@ def character_roster_view(campaign_slug: str):
         native_character_create_supported=native_character_create_supported,
         character_create_lane=character_create_lane,
         active_nav="characters",
-    )
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 def register_character_routes(

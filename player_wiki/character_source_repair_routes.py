@@ -9,11 +9,11 @@ import json
 from typing import Any, Mapping
 from uuid import uuid4
 
-from flask import abort, current_app, render_template, request
+from flask import abort, current_app, make_response, render_template, request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.exceptions import HTTPException
 
-from .auth import campaign_scope_access_required, get_effective_campaign_systems_entry_visibility
+from .auth import campaign_scope_access_required, get_effective_campaign_systems_entry_visibility, get_repository
 from .character_models import CharacterDefinition
 from .character_reconciliation import CharacterPublicationConflict, PendingReviewedSourceProof
 from .character_source_repair import (
@@ -364,6 +364,55 @@ def _audit_seen(review_digest: str, campaign_slug: str, character_slug: str) -> 
 
 
 def register_character_source_repair_route(app: Any, *, dependencies: Any) -> None:
+    def blocked_response(campaign: Any, issues: tuple[dict[str, Any], ...]):
+        response = make_response(render_template(
+            "character_source_repair.html", campaign=campaign, character=None,
+            manager_generation={"revision": None, "issues": issues,
+                                "import_choice_required": any(
+                                    issue.get("import_choice_required") for issue in issues)},
+            blocked=True, active_nav="characters",
+        ), 409)
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
+    def manager_issues(campaign_slug: str, character_slug: str) -> tuple[dict[str, Any], ...]:
+        from .committed_character_publication import character_repairs
+
+        try:
+            rows = (issue for issue in character_repairs(campaign_slug)
+                    if issue.get("character_slug") == character_slug)
+            issues = []
+            for issue in rows:
+                reason = str(issue.get("reason") or "")
+                mirror_drift = reason in {
+                    "character_pair_mirror_missing_or_modified",
+                    "character_pair_mirror_conflict",
+                    "character_pair_mirror_unavailable",
+                    "character_mirror_root_unsafe",
+                    "unadmitted_file_only_draft",
+                }
+                issues.append({
+                    "reason": reason,
+                    "journal_kind": str(issue.get("journal_kind") or ""),
+                    "journal_state": str(issue.get("journal_state") or ""),
+                    "definition_mirror": str(issue.get("definition_mirror") or ""),
+                    "import_mirror": str(issue.get("import_mirror") or ""),
+                    "mirror_last_replay_state": str(issue.get("mirror_last_replay_state") or ""),
+                    "affected_action": (
+                        "repair_blocked_operation" if "journal" in reason else
+                        "inspect_last_replay_status" if reason == "character_pair_last_replay_conflict" else
+                        "resolve_mirror_or_import_choice" if mirror_drift else
+                        "repair_committed_proof"
+                    ),
+                    "safe_retry": "inspect_and_refresh_before_retry",
+                    "import_choice_required": mirror_drift,
+                })
+            return tuple(issues)
+        except (CommittedSourceConflict, OSError, TypeError, ValueError):
+            return ({"reason": "mirror_health_unavailable", "affected_action": "repair_committed_proof",
+                     "safe_retry": "inspect_and_refresh_before_retry",
+                     "import_choice_required": False},)
+
     def view(campaign_slug: str, character_slug: str):
         try:
             if not active():
@@ -376,13 +425,35 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
         actor_id = getattr(actor, "id", None)
         if isinstance(actor_id, bool) or not isinstance(actor_id, int) or actor_id < 1:
             abort(403)
-        context = dependencies.load_character_apply_context(campaign_slug, character_slug)
+        blocked = False
+        try:
+            context = dependencies.load_character_apply_context(campaign_slug, character_slug)
+        except (CommittedSourceConflict, OSError, TypeError, ValueError):
+            context = None
+            blocked = True
         if context is None:
-            abort(404)
+            campaign = get_repository().get_campaign(campaign_slug)
+            if campaign is None or not dependencies.is_dnd_5e_system(getattr(campaign, "system", "")):
+                abort(404)
+            issues = manager_issues(campaign_slug, character_slug)
+            if not blocked and not issues:
+                abort(404)
+            return blocked_response(campaign, issues)
         campaign, record = context
         if not (dependencies.is_dnd_5e_system(getattr(campaign, "system", ""))
                 and dependencies.is_dnd_5e_system(record.definition.system)):
             abort(404)
+
+        issues = manager_issues(campaign_slug, character_slug)
+        if any(issue.get("journal_kind") for issue in issues):
+            return blocked_response(campaign, issues)
+        manager_generation = {
+            "revision": record.committed_revision,
+            "issues": issues,
+            "import_choice_required": any(
+                issue.get("import_choice_required") for issue in issues
+            ),
+        }
 
         definition = dict(record.definition.to_dict())
         state = dict(record.state_record.state or {})
@@ -417,14 +488,17 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             raise SourceRepairError("This reviewed action was applied, but the Character changed again. Refresh before another action.")
                         display_choices = tuple({"family": choice["family"], "value": _source_option(choice),
                                                  "label": choice["label"], "identity": choice["value"]} for choice in choices)
-                        return render_template(
+                        response = make_response(render_template(
                             "character_source_repair.html", campaign=campaign,
                             character=record.definition, targets=targets,
+                            manager_generation=manager_generation,
                             manual_targets=manual_targets, numeric_targets=numeric_targets,
                             sources=display_choices, metrics=sorted(MANUAL_METRICS),
                             review=None, outcome="This reviewed manager action was already applied and confirmed.",
                             active_nav="characters",
-                        ), 200
+                        ), 200)
+                        response.headers["Cache-Control"] = "private, no-store"
+                        return response
                     if (claims.get("definition_digest") != canonical_digest(definition)
                             or claims.get("state_revision") != record.state_record.revision
                             or claims.get("state_digest") != canonical_digest(state)
@@ -703,13 +777,16 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
 
         display_choices = tuple({"family": choice["family"], "value": _source_option(choice),
                                  "label": choice["label"], "identity": choice["value"]} for choice in choices)
-        return render_template(
+        response = make_response(render_template(
             "character_source_repair.html", campaign=campaign, character=record.definition,
+            manager_generation=manager_generation,
             targets=targets, manual_targets=manual_targets,
             numeric_targets=numeric_targets, sources=display_choices,
             metrics=sorted(MANUAL_METRICS), review=review,
             outcome=outcome, active_nav="characters",
-        ), status_code
+        ), status_code)
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/source-repair",

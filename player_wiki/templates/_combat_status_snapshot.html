@@ -194,7 +194,7 @@
         {% endif %}
       {% endif %}
 
-      {% if show_status_editing and selected_combatant.can_edit_resources %}
+      {% if show_status_editing and selected_combatant.can_edit_movement %}
         <form
           method="post"
           action="{{ url_for('campaign_combat_update_resources', campaign_slug=campaign.slug, combatant_id=selected_combatant.id) }}"
@@ -248,7 +248,6 @@
         {{ combat_status_return_fields() }}
         <input type="hidden" name="combatant" value="{{ selected_combatant.id }}">
         <input type="hidden" name="expected_combatant_revision" value="{{ selected_combatant.combatant_revision }}">
-        <input type="hidden" name="movement_remaining" value="{{ selected_combatant.movement_remaining or 0 }}">
         <label class="combat-resource-toggle">
           <input type="checkbox" name="has_action" value="1" {% if selected_combatant.has_action %}checked{% endif %}>
           <span class="combat-resource">Action</span>

@@ -22,6 +22,7 @@ from .character_campaign_options import build_campaign_page_character_option
 from .character_models import CharacterDefinition
 from .character_page_companion import is_page_choice_shape
 from .character_profile import profile_class_rows
+from .character_spell_effects import MISSING_OVERRIDE_AUTHORITY_KEY, VERIFIED_MISSING_OVERRIDE
 from .system_policy import is_dnd_5e_system
 
 
@@ -917,6 +918,7 @@ class SourceAuthority:
     ) -> dict[str, Any]:
         """Expose effective spell ownership without mutating historical rows."""
         projected = deepcopy(dict(spellcasting or {}))
+        projected.pop(MISSING_OVERRIDE_AUTHORITY_KEY, None)
         spells: list[dict[str, Any]] = []
         for raw in list(projected.get("spells") or []):
             if not isinstance(raw, dict):
@@ -957,16 +959,28 @@ class SourceAuthority:
             ("source_rows", "source_row_id", self.verified_source_rows),
         ):
             for row in projected.get(key) or []:
-                if _text(row.get(id_key)) in verified:
-                    continue
+                row_id = _text(row.get(id_key))
+                # Always replace any historical marker. Only an independently
+                # verified per-metric manager action can authorize an override
+                # whose saved base is absent.
+                row.pop(MISSING_OVERRIDE_AUTHORITY_KEY, None)
+                witnessed = {}
                 for metric in ("spell_attack_bonus", "spell_save_dc"):
                     authorized = any(self.manual_authorization(
                         record, character_slug=definition.character_slug,
-                        target_kind="source_row", target_id=_text(row.get(id_key)), metric=metric,
+                        target_kind="source_row", target_id=row_id, metric=metric,
                         definition=definition,
                     ) for record in list(dict(definition.spellcasting or {}).get("manual_authorizations") or []))
+                    if authorized:
+                        witnessed[metric] = VERIFIED_MISSING_OVERRIDE
+                    if row_id in verified:
+                        continue
                     if not authorized:
                         row[metric] = None
+                if witnessed:
+                    row[MISSING_OVERRIDE_AUTHORITY_KEY] = witnessed
+                if row_id in verified:
+                    continue
                 row["authority_status"] = MANUAL if self._manual_row_authorized(row, definition) else NEEDS_REPAIR
                 row["spell_metric_notes"] = ["Source needs repair; automatic spell math is unavailable."]
         class_rows = list(projected.get("class_rows") or [])
@@ -1679,7 +1693,8 @@ def with_pending_page_feature_witnesses(
     from .character_source_repair import load_verified_numeric_actions
     trusted = (*load_verified_numeric_actions(definition.campaign_slug,
                                               definition.character_slug), *actions)
-    fields, resources = _numeric_statuses(definition, state, trusted, bases)
+    fields, resources = _numeric_statuses(definition, state, trusted, bases,
+                                          authority.source_snapshot_digest)
     return replace(authority, field_statuses=fields, resource_statuses=resources,
                    verified_numeric_actions=tuple(_canonical(row) for row in trusted))
 
@@ -1688,6 +1703,7 @@ def _numeric_statuses(
     definition: CharacterDefinition, state: dict[str, Any],
     verified_actions: tuple[Any, ...],
     resource_basis_digests: dict[str, str] | None = None,
+    source_snapshot_digest: str = "",
 ) -> tuple[tuple[EffectiveStatus, ...], tuple[EffectiveStatus, ...]]:
     """Classify legacy numeric owners before any normalizer uses saved totals.
 
@@ -1717,8 +1733,14 @@ def _numeric_statuses(
                 witness.get("authorization") for witness in verified_actions
                 if isinstance(witness, dict) and witness.get("source_basis_digest") == basis
                 and basis is not None
+                and _transition_matches(witness, kind, path, metric,
+                                        target_values.get((kind, path, metric)),
+                                        numeric_target_owner_digest(
+                                            definition, state, kind, path, metric),
+                                        source_snapshot_digest)
                 and (matches[0].get("provenance") != "page_feature_update"
-                     or matches[0].get("source_basis_digest") == basis)
+                     or matches[0].get("source_basis_digest") == basis
+                     or witness.get("transition_proof") is not None)
             )
             if matches[0].get("provenance") == "page_feature_update":
                 owners = [row for row in definition.features if isinstance(row, dict)
@@ -1838,6 +1860,24 @@ def _numeric_statuses(
             else "item_charge_identity_conflict",
         ))
     return tuple(fields), tuple(resources)
+
+
+def _transition_matches(witness: dict[str, Any], kind: str, target_id: str,
+                        metric: str, raw_value: Any, owner_digest: str,
+                        source_snapshot_digest: str) -> bool:
+    proof = witness.get("transition_proof")
+    if proof is None:
+        return True
+    if not isinstance(proof, dict):
+        return False
+    return (proof.get("schema_version") == 1
+            and (proof.get("target_kind"), proof.get("target_id"), proof.get("metric"))
+                == (kind, target_id, metric)
+            and proof.get("authorization") == witness.get("authorization")
+            and proof.get("new_basis") == witness.get("source_basis_digest")
+            and proof.get("new_snapshot") == source_snapshot_digest
+            and proof.get("value_digest") == numeric_value_digest(raw_value)
+            and proof.get("owner_digest") == owner_digest)
 
 def build_source_authority(
     *, definition: CharacterDefinition, state: dict[str, Any],
@@ -2048,6 +2088,7 @@ def build_source_authority(
     ))
     field_statuses, resource_statuses = _numeric_statuses(
         definition, state, verified_numeric_actions, resource_bases,
+        source_snapshot_digest,
     )
     class_rows = profile_class_rows(definition.profile)
     class_ids = [_text(row.get("row_id")) for row in class_rows]
@@ -2111,7 +2152,11 @@ def build_source_authority(
             continue
         basis = resource_bases[target_id]
         trusted = tuple(witness.get("authorization") for witness in verified_numeric_actions
-                        if isinstance(witness, dict) and witness.get("source_basis_digest") == basis)
+                        if isinstance(witness, dict) and witness.get("source_basis_digest") == basis
+                        and _transition_matches(witness, kind, target_id, metric,
+                            raw_value, numeric_target_owner_digest(
+                                definition, state, kind, target_id, metric),
+                            source_snapshot_digest))
         if valid_numeric_authorization(
             matches[0], character_slug=definition.character_slug,
             target_kind=kind, target_id=target_id, metric=metric,

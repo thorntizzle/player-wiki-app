@@ -1,13 +1,16 @@
 """Activated config/page authority. Files are recoverable mirrors, never inputs.
 
-There is deliberately no activation entry point here. The permanent closed
-marker remains the default until the separately gated cutover stage.
+The marker is proved against the exact trusted migration schema. The private
+operator transition lives in committed_activation, never in a web route.
 """
 from __future__ import annotations
 
 import hashlib
+import errno
 import json
+import os
 import sqlite3
+import stat
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
@@ -42,13 +45,13 @@ _ACTIVATION_TRIGGER_NAMES = tuple(
 )
 
 
-@lru_cache(maxsize=1)
-def _expected_activation_schema():
-    """Reflect the trusted v15 DDL with the same SQLite engine as the target."""
-    from .migrations import _COMMITTED_SOURCE_SCHEMA_SQL
+@lru_cache(maxsize=2)
+def _expected_activation_schema(version: int):
+    """Reflect the trusted DDL with the same SQLite engine as the target."""
+    from .migrations import SCHEMA_V17_SQL, CURRENT_SCHEMA_SQL
 
     with closing(sqlite3.connect(":memory:")) as reference:
-        reference.executescript(_COMMITTED_SOURCE_SCHEMA_SQL)
+        reference.executescript(CURRENT_SCHEMA_SQL if version >= 18 else SCHEMA_V17_SQL)
         rows = reference.execute(
             "SELECT type, name, tbl_name, sql FROM main.sqlite_schema "
             "WHERE name = ? OR tbl_name = ? ORDER BY type, name",
@@ -64,8 +67,8 @@ def _expected_activation_schema():
     return expected
 
 
-def _activation_schema_matches(connection, *, absent=False):
-    expected = _expected_activation_schema()
+def _activation_schema_matches(connection, *, version=17, absent=False):
+    expected = _expected_activation_schema(version)
     names = tuple(row[1] for row in expected)
     placeholders = ", ".join("?" for _ in names)
     actual = connection.execute(
@@ -129,7 +132,7 @@ def active(connection=None) -> bool:
                 return False
             if table is None:
                 raise CommittedSourceConflict("Committed source activation proof is missing; repair required.")
-            if not _activation_schema_matches(connection):
+            if not _activation_schema_matches(connection, version=ledger.applied_version):
                 raise CommittedSourceConflict("Committed source activation proof is malformed; repair required.")
 
             columns = connection.execute("PRAGMA main.table_info(committed_source_activation)").fetchall()
@@ -151,13 +154,14 @@ def active(connection=None) -> bool:
             singleton, activated, activated_at, coverage, schema = rows[0]
             if (type(singleton) is not int or singleton != 1 or
                     type(activated) is not int or activated not in (0, 1) or
-                    type(coverage) is not int or type(schema) is not int or schema != 15):
+                    type(coverage) is not int or type(schema) is not int or
+                    schema != (18 if ledger.applied_version >= 18 else 15)):
                 raise CommittedSourceConflict("Committed source activation proof is malformed; repair required.")
             if activated == 0:
                 if activated_at is not None or coverage != 0:
                     raise CommittedSourceConflict("Committed source activation proof is inconsistent; repair required.")
                 return False
-            if coverage < 1 or not isinstance(activated_at, str):
+            if ledger.applied_version < 18 or coverage != 1 or not isinstance(activated_at, str):
                 raise CommittedSourceConflict("Committed source activation proof is inconsistent; repair required.")
             try:
                 timestamp = datetime.fromisoformat(activated_at)
@@ -584,7 +588,7 @@ def _attempt_replay(campaigns_dir, *, campaign_slug):
         pass
 
 
-def replay_mirrors(campaigns_dir, *, campaign_slug=None, limit=64):
+def replay_mirrors(campaigns_dir, *, campaign_slug=None, limit=64, retry_conflicts=False):
     """Replay only committed generations. A changed disk file remains a draft.
 
     Serialize replay with publishers through SQLite so an older outbox item
@@ -598,14 +602,20 @@ def replay_mirrors(campaigns_dir, *, campaign_slug=None, limit=64):
         raise CommittedSourceConflict("Committed mirror replay requires activated authority.")
     if connection.in_transaction:
         raise CommittedSourceConflict("Mirror replay needs its own transaction.")
-    rows=connection.execute("SELECT id FROM committed_source_outbox WHERE state IN ('pending','retry') AND (? IS NULL OR campaign_slug=?) ORDER BY id LIMIT ?",
-                            (campaign_slug,campaign_slug,limit)).fetchall()
+    limit=max(1,min(int(limit),64))
+    rows=connection.execute("""SELECT id,state FROM committed_source_outbox
+        WHERE (state IN ('pending','retry') OR (? AND state='conflict' AND object_kind='page'))
+          AND (? IS NULL OR campaign_slug=?)
+        ORDER BY CASE WHEN state='conflict' THEN 1 ELSE 0 END,id LIMIT ?""",
+                            (int(bool(retry_conflicts)),campaign_slug,campaign_slug,limit)).fetchall()
     counts={"recovered":0,"conflict":0,"pending":0,"aborted":0}
+    if retry_conflicts:
+        counts["_conflict_retry_selected"] = sum(item["state"] == "conflict" for item in rows)
     for item in rows:
         connection.execute("BEGIN IMMEDIATE")
         try:
             row=connection.execute("SELECT * FROM committed_source_outbox WHERE id=?",(item[0],)).fetchone()
-            if row["state"] not in {"pending","retry"}:
+            if row["state"] not in {"pending","retry"} and not (retry_conflicts and row["state"] == "conflict" and row["object_kind"] == "page"):
                 connection.rollback(); continue
             slug,kind,ref=row["campaign_slug"],row["object_kind"],row["object_ref"]
             if kind not in {"config","page","character"}:
@@ -668,23 +678,45 @@ def replay_mirrors(campaigns_dir, *, campaign_slug=None, limit=64):
                         state="conflict"
                 if kind == "page" and desired is not None:
                     from .managed_wiki_images import managed_wiki_image_path
+                    image_conflict = False
                     for image in connection.execute("SELECT asset_ref,image_bytes,sha256 FROM committed_page_images WHERE campaign_slug=? AND page_ref=? AND revision=?",
                                                      (slug,ref,row["revision"])).fetchall():
-                        if digest(image["image_bytes"]) != image["sha256"]:
+                        if not _valid_committed_image(image):
                             raise CommittedSourceConflict("Committed image proof failed; manager repair required.")
-                        image_path=managed_wiki_image_path(root/settings.get("asset_dir","assets"), image["asset_ref"])
-                        if not image_path.exists():
-                            image_path.parent.mkdir(parents=True,exist_ok=True)
-                            try: atomic_write_bytes_no_replace(image_path,image["image_bytes"])
-                            except FileExistsError: pass
+                        asset_root=root/settings.get("asset_dir","assets")
+                        reason=_image_mirror_reason(asset_root,image["asset_ref"],image["sha256"])
+                        if reason == "missing":
+                            try:
+                                image_path=managed_wiki_image_path(asset_root,image["asset_ref"])
+                                _safe_mirror_path(image_path,create_parents=True)
+                                managed_wiki_image_path(asset_root,image["asset_ref"])
+                                atomic_write_bytes_no_replace(image_path,image["image_bytes"])
+                            except FileExistsError:
+                                pass  # Compare the competing file below.
+                            except (CampaignContentError, CommittedSourceConflict):
+                                image_conflict = True
+                            except OSError as exc:
+                                try:
+                                    managed_wiki_image_path(asset_root,image["asset_ref"])
+                                except CampaignContentError:
+                                    image_conflict = True
+                                else:
+                                    if exc.errno in {errno.ELOOP, errno.EISDIR, errno.ENOTDIR}:
+                                        image_conflict = True
+                                    else:
+                                        raise
+                            reason=_image_mirror_reason(asset_root,image["asset_ref"],image["sha256"])
+                        image_conflict |= reason is not None
+                    if image_conflict:
+                        state="conflict"
                 connection.execute("""INSERT INTO committed_source_mirrors
                     (campaign_slug,object_kind,object_ref,expected_primary_sha256,mirrored_revision,state,draft_primary_bytes,observed_primary_sha256,updated_at)
                     VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(campaign_slug,object_kind,object_ref) DO UPDATE SET
                     expected_primary_sha256=excluded.expected_primary_sha256,mirrored_revision=excluded.mirrored_revision,state=excluded.state,
                     draft_primary_bytes=excluded.draft_primary_bytes,observed_primary_sha256=excluded.observed_primary_sha256,updated_at=excluded.updated_at""",
                     (slug,kind,ref,digest(desired),row["revision"],"matching" if state=="complete" else "conflict",
-                     actual if state=="conflict" else None,digest(actual),_now()))
-                connection.execute("UPDATE committed_source_outbox SET state=?,attempt_count=attempt_count+1,updated_at=? WHERE id=?",(state,_now(),row["id"]))
+                     actual if state=="conflict" and digest(actual)!=digest(desired) else None,digest(actual),_now()))
+                connection.execute("UPDATE committed_source_outbox SET state=?,attempt_count=attempt_count+1,error_code=NULL,updated_at=? WHERE id=?",(state,_now(),row["id"]))
                 counts["recovered" if state=="complete" else "conflict"]+=1
                 connection.commit()
             except OSError:
@@ -773,11 +805,92 @@ def _image_repair_reason(campaign_slug, page, source):
     return None
 
 
-def inspect_page_mirrors(campaign_slug, content_dir):
+def _valid_committed_image(image):
+    from .input_limits import MAX_INGRESS_FILE_BYTES
+    value = image["image_bytes"]
+    return (isinstance(value, bytes) and 0 < len(value) <= MAX_INGRESS_FILE_BYTES
+            and isinstance(image["sha256"], str) and digest(value) == image["sha256"])
+
+
+def _image_mirror_reason(asset_root, asset_ref, expected_sha256):
+    """Classify one current managed file without returning its path or bytes."""
+    from .input_limits import MAX_INGRESS_FILE_BYTES
+    from .managed_wiki_images import managed_wiki_image_path
+
+    try:
+        path = _safe_mirror_path(managed_wiki_image_path(asset_root, asset_ref))
+    except (CommittedSourceConflict, CampaignContentError, ValueError, RuntimeError):
+        return "unsafe"
+    try:
+        flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) |
+                 getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        try:
+            managed_wiki_image_path(asset_root, asset_ref)
+        except CampaignContentError:
+            return "unsafe"
+        return "missing"
+    except OSError as exc:
+        if exc.errno in {errno.ELOOP, errno.EISDIR, errno.ENOTDIR}:
+            return "unsafe"
+        raise
+    try:
+        stream = os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+    with stream:
+        before = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(before.st_mode) or
+                int(getattr(before, "st_file_attributes", 0)) & 0x400 or
+                before.st_size > MAX_INGRESS_FILE_BYTES):
+            return "unsafe"
+        observed = stream.read(MAX_INGRESS_FILE_BYTES + 1)
+        after = os.fstat(stream.fileno())
+    try:
+        managed_wiki_image_path(asset_root, asset_ref)
+        path = _safe_mirror_path(path)
+        named = path.lstat()
+        managed_wiki_image_path(asset_root, asset_ref)
+    except FileNotFoundError:
+        try:
+            managed_wiki_image_path(asset_root, asset_ref)
+        except CampaignContentError:
+            return "unsafe"
+        return "unsafe"
+    except (CommittedSourceConflict, CampaignContentError):
+        return "unsafe"
+    if (len(observed) > MAX_INGRESS_FILE_BYTES or
+            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) !=
+            (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) or
+            (after.st_dev, after.st_ino) != (named.st_dev, named.st_ino)):
+        return "unsafe"
+    return None if digest(observed) == expected_sha256 else "different"
+
+
+def _current_page_image_mirror_reason(campaign_slug, ref, source, asset_root):
+    if source is None or source["tombstone"]:
+        return None
+    images = get_db().execute(
+        "SELECT asset_ref,image_bytes,sha256 FROM committed_page_images "
+        "WHERE campaign_slug=? AND page_ref=? AND revision=? ORDER BY asset_ref",
+        (campaign_slug, ref, source["revision"]),
+    ).fetchall()
+    for image in images:
+        if not _valid_committed_image(image):
+            return "managed_image_proof_invalid"
+        reason = _image_mirror_reason(asset_root, image["asset_ref"], image["sha256"])
+        if reason is not None:
+            return "managed_image_mirror_" + reason
+    return None
+
+
+def inspect_page_mirrors(campaign_slug, content_dir, asset_root):
     """Return mismatched refs for manager diagnostics without importing drafts."""
     from .campaign_page_refresh import normalize_page_ref
     refs = {row[0] for row in get_db().execute(
-        "SELECT object_ref FROM committed_source_current WHERE campaign_slug=? AND object_kind='page'", (campaign_slug,))}
+        "SELECT object_ref FROM committed_source_current WHERE campaign_slug=? AND object_kind='page'", (campaign_slug,)).fetchall()}
     root = Path(content_dir)
     conflicts = []
     try:
@@ -793,7 +906,9 @@ def inspect_page_mirrors(campaign_slug, content_dir):
             observed = digest(_mirror_bytes(path))
             if expected != observed:
                 conflicts.append(ref)
-        except (OSError, ValueError):
+            elif source is not None and _current_page_image_mirror_reason(campaign_slug, ref, source, asset_root):
+                conflicts.append(ref)
+        except (OSError, ValueError, CommittedSourceConflict):
             conflicts.append(ref)
     return tuple(conflicts)
 
@@ -833,10 +948,10 @@ def _mirror_bytes(path):
 
 
 @read_snapshot
-def page_repairs(campaign_slug):
+def page_repairs(campaign_slug, asset_root):
     """Manager-only non-payload inventory, including unadmitted legacy rows."""
-    refs = {row[0] for row in get_db().execute("SELECT page_ref FROM campaign_pages WHERE campaign_slug=?", (campaign_slug,))}
-    refs.update(row[0] for row in get_db().execute("SELECT object_ref FROM committed_source_admission WHERE campaign_slug=? AND object_kind='page'", (campaign_slug,)))
+    refs = {row[0] for row in get_db().execute("SELECT page_ref FROM campaign_pages WHERE campaign_slug=?", (campaign_slug,)).fetchall()}
+    refs.update(row[0] for row in get_db().execute("SELECT object_ref FROM committed_source_admission WHERE campaign_slug=? AND object_kind='page'", (campaign_slug,)).fetchall())
     result=[]
     for ref in sorted(refs):
         reason = "committed_source_repair_required"
@@ -846,9 +961,21 @@ def page_repairs(campaign_slug):
             if row is not None and source is not None:
                 reason = _image_repair_reason(campaign_slug, row, source)
                 if reason is None:
+                    reason = _current_page_image_mirror_reason(campaign_slug, ref, source, asset_root)
+                if reason is None:
+                    outbox = get_db().execute(
+                        "SELECT state FROM committed_source_outbox WHERE campaign_slug=? "
+                        "AND object_kind='page' AND object_ref=? AND revision=? ORDER BY id DESC LIMIT 1",
+                        (campaign_slug, ref, source["revision"]),
+                    ).fetchone()
+                    if outbox is not None and outbox["state"] in {"conflict", "retry"}:
+                        reason = "mirror_" + outbox["state"]
+                if reason is None:
                     continue
             elif source is not None and source["tombstone"]:
                 continue
+        except OSError:
+            reason = "managed_image_mirror_unavailable"
         except (CommittedSourceConflict, ValueError, TypeError, UnicodeError, yaml.YAMLError, OverflowError, RecursionError):
             pass
         result.append({"page_ref":ref,"reason":reason})

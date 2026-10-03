@@ -236,8 +236,9 @@ class RepositoryStore:
             except ValueError:
                 continue
             from .committed_publication import inspect_page_mirrors, config, digest, _mirror_bytes
-            self.page_store.mirror_conflicts[spec.slug] = inspect_page_mirrors(spec.slug, spec.content_root)
-            source, _ = config(spec.slug)
+            source, settings = config(spec.slug)
+            self.page_store.mirror_conflicts[spec.slug] = inspect_page_mirrors(
+                spec.slug, spec.content_root, spec.config_path.parent / settings.get("asset_dir", "assets"))
             try:
                 observed = _mirror_bytes(spec.config_path)
                 if digest(observed) != source["primary_sha256"]:

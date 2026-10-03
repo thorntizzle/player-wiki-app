@@ -41,6 +41,7 @@ from .campaign_visibility_routes import (
 )
 from .auth import (
     can_access_campaign_scope,
+    campaign_integrity_unavailable_response,
     can_access_own_character,
     can_access_campaign_systems_entry,
     campaign_systems_search_visibilities,
@@ -98,6 +99,7 @@ from .auth_store import (
     isoformat,
 )
 from .campaign_combat_service import CampaignCombatRevisionConflictError, CampaignCombatValidationError
+from .committed_publication import CommittedSourceConflict
 from .campaign_content_service import (
     CampaignContentError,
     delete_campaign_asset_file,
@@ -592,21 +594,25 @@ def register_api(app) -> None:
         def decorator(view):
             @wraps(view)
             def wrapped(*args, **kwargs):
-                campaign_slug = kwargs.get("campaign_slug")
-                if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
-                    access_decision("deny", "missing", scope=scope)
-                    abort(404)
+                try:
+                    campaign_slug = kwargs.get("campaign_slug")
+                    if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
+                        access_decision("deny", "missing", scope=scope)
+                        abort(404)
 
-                character_slug = kwargs.get("character_slug")
-                if can_access_campaign_scope(campaign_slug, scope) or (
-                    own_character
-                    and scope == "characters"
-                    and isinstance(character_slug, str)
-                    and can_access_own_character(campaign_slug, character_slug)
-                ):
+                    character_slug = kwargs.get("character_slug")
+                    allowed = can_access_campaign_scope(campaign_slug, scope) or (
+                        own_character
+                        and scope == "characters"
+                        and isinstance(character_slug, str)
+                        and can_access_own_character(campaign_slug, character_slug)
+                    )
+                except CommittedSourceConflict:
+                    return campaign_integrity_unavailable_response()
+
+                if allowed:
                     access_decision("allow", scope=scope)
                     return view(*args, **kwargs)
-
                 if get_current_user() is None:
                     access_decision("deny", "authentication_required", scope=scope)
                     return json_error("Authentication required.", 401, code="auth_required")
@@ -4725,16 +4731,37 @@ def register_api(app) -> None:
             list_visible_character_page_records(record.definition.campaign_slug, campaign)
             if campaign is not None else []
         )
-        _, source_warnings = suppress_unresolved_linked_sources(
-            record.definition, record.definition.campaign_slug,
-            current_app.extensions["systems_service"],
-            campaign_page_records,
-        )
+        from .committed_publication import active
+        source_authority_identity = ""
+        if active() and campaign is not None and is_dnd_5e_system(record.definition.system):
+            try:
+                projection = build_character_mechanics_projection(
+                    campaign=campaign, definition=record.definition,
+                    state=state,
+                    state_revision=exact_state.revision if exact_state is not None else None,
+                    systems_service=current_app.extensions["systems_service"],
+                    campaign_page_records=campaign_page_records,
+                )
+                source_authority_identity = str(projection.get("source_authority_identity") or "")
+                source_warnings = list(projection.get("projection_warnings") or [])
+            except (RuntimeError, TypeError, ValueError):
+                source_warnings = [{
+                    "code": "source_authority_unavailable",
+                    "message": "Current Character source authority is unavailable; manager repair is required.",
+                }]
+        else:
+            _, source_warnings = suppress_unresolved_linked_sources(
+                record.definition, record.definition.campaign_slug,
+                current_app.extensions["systems_service"],
+                campaign_page_records,
+            )
         return {
             "character_slug": record.character_slug,
             "updated_at": record.updated_at,
             "definition": record.definition.to_dict(),
             "definition_label": "historical_raw",
+            "definition_basis": "committed_generation" if active() else "mirror_file",
+            "source_authority_identity": source_authority_identity,
             "update_safe_definition": update_safe_definition(record.definition),
             "state_revision": exact_state.revision if exact_state is not None else None,
             "effective_equipment_activation": [
@@ -5349,14 +5376,14 @@ def register_api(app) -> None:
             page_records,
         )
         from .committed_publication import active, page_repairs
-        source_repairs = page_repairs(campaign_slug) if active() else []
+        source_repairs = page_repairs(campaign_slug, campaign.assets_dir) if active() else []
         if active():
-            from .committed_character_publication import character_repairs
+            from .db import get_db
             source_repairs.extend(
                 {"object_kind": "character", **repair}
-                for repair in character_repairs(campaign_slug)
+                for repair in manager_character_repairs(campaign_slug, get_db())
             )
-        return jsonify(
+        response = jsonify(
             {
                 "ok": True,
                 **({"source_repairs": source_repairs} if active() else {}),
@@ -5370,6 +5397,8 @@ def register_api(app) -> None:
                 ],
             }
         )
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     @api.get("/campaigns/<campaign_slug>/content/pages/<path:page_ref>")
     @api_campaign_content_management_required
@@ -5566,40 +5595,196 @@ def register_api(app) -> None:
             }
         )
 
+    def describe_character_repair(repair: dict[str, Any]) -> dict[str, Any]:
+        """Manager guidance with no committed or mirror payload bytes."""
+        reason = str(repair.get("reason") or "")
+        mirror_drift = reason in {
+            "unadmitted_file_only_draft",
+            "character_pair_mirror_missing_or_modified",
+            "character_pair_mirror_conflict",
+            "character_pair_mirror_unavailable",
+            "character_mirror_root_unsafe",
+            "character_portrait_mirror_missing_or_modified",
+            "character_portrait_mirror_not_retired",
+        }
+        if reason == "unadmitted_file_only_draft":
+            action = "review_import_choice"
+        elif reason == "character_pair_last_replay_conflict":
+            action = "inspect_last_replay_status"
+        elif mirror_drift:
+            action = "resolve_mirror_or_import_choice"
+        elif "journal" in reason or "blocked" in reason:
+            action = "repair_blocked_operation"
+        else:
+            action = "repair_committed_proof"
+        return {
+            **repair,
+            "affected_action": action,
+            "safe_retry": "inspect_and_refresh_before_retry",
+            "import_choice_required": mirror_drift,
+            "import_choices": (
+                ["retain_committed_generation", "review_mirror_as_explicit_import"]
+                if mirror_drift else []
+            ),
+        }
+
+    def manager_character_repairs(campaign_slug: str, connection) -> list[dict[str, Any]]:
+        from .committed_character_publication import character_repairs
+
+        return [describe_character_repair(row) for row in character_repairs(campaign_slug)]
+
     @api.get("/campaigns/<campaign_slug>/content/characters")
     @api_campaign_content_management_required
     def content_character_list(campaign_slug: str):
+        committed_versions: dict[str, dict[str, Any]] = {}
         try:
-            records = list_campaign_character_files(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
+            from .committed_publication import active
+            if active():
+                # The file inventory is a mirror and can contain unadmitted
+                # drafts or omit a committed generation. Enumerate pointers
+                # first, then let the exact-pair loader validate each member.
+                from .db import get_db
+                from .committed_publication import CommittedSourceConflict
+                from .committed_character_publication import character_mirror_comparison
+                connection = get_db()
+                owned = not connection.in_transaction
+                if owned:
+                    connection.execute("BEGIN")
+                try:
+                    pointers = connection.execute(
+                        "SELECT object_ref,revision FROM committed_source_current WHERE "
+                        "campaign_slug=? AND object_kind='character' ORDER BY object_ref",
+                        (campaign_slug,),
+                    ).fetchall()
+                    if len(pointers) > 1000:
+                        raise ValueError("Committed Character inventory exceeds its bound.")
+                    mirrors = {
+                        row["object_ref"]: row
+                        for row in connection.execute(
+                            "SELECT object_ref,state,mirrored_revision FROM committed_source_mirrors "
+                            "WHERE campaign_slug=? AND object_kind='character'",
+                            (campaign_slug,),
+                        ).fetchall()
+                    }
+                    if len(mirrors) > 1000:
+                        raise ValueError("Committed Character mirror inventory exceeds its bound.")
+                    records = []
+                    for pointer in pointers:
+                        mirror = mirrors.get(pointer["object_ref"])
+                        mirror_health = character_mirror_comparison(
+                            campaign_slug, pointer["object_ref"], connection=connection)
+                        committed_versions[pointer["object_ref"]] = {
+                            "committed_revision": pointer["revision"],
+                            "mirror_last_replay_state": mirror["state"] if mirror is not None else "missing",
+                            "mirrored_revision": mirror["mirrored_revision"] if mirror is not None else None,
+                            "mirror_state": mirror_health["mirror_current_state"],
+                            **mirror_health,
+                        }
+                        try:
+                            record = get_campaign_character_file(
+                                current_app.config["CAMPAIGNS_DIR"], campaign_slug,
+                                pointer["object_ref"],
+                            )
+                        except CommittedSourceConflict:
+                            # The repair inventory below identifies the blocked
+                            # pointer without disclosing its protected payload.
+                            continue
+                        if record is not None:
+                            records.append(record)
+                    source_repairs = manager_character_repairs(campaign_slug, connection)
+                finally:
+                    if owned:
+                        connection.rollback()
+            else:
+                records = list_campaign_character_files(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
         except (CampaignContentError, FileNotFoundError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
 
-        from .committed_publication import active
-        if active():
-            from .committed_character_publication import character_repairs
-            source_repairs = character_repairs(campaign_slug)
-        else:
+        if not active():
             source_repairs = []
 
-        return jsonify(
+        response = jsonify(
             {
                 "ok": True,
                 **({"source_repairs": source_repairs} if active() else {}),
-                "characters": [serialize_character_file_summary(record) for record in records],
+                "characters": [
+                    {**serialize_character_file_summary(record),
+                     **({"basis": "committed_generation",
+                         **committed_versions[record.character_slug]} if active() else {})}
+                    for record in records
+                ],
             }
         )
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     @api.get("/campaigns/<campaign_slug>/content/characters/<character_slug>")
     @api_campaign_content_management_required
     def content_character_detail(campaign_slug: str, character_slug: str):
+        from .committed_publication import CommittedSourceConflict, active
+        activated = active()
+        if activated:
+            from .db import get_db
+            connection = get_db()
+            owned = not connection.in_transaction
+            if owned:
+                connection.execute("BEGIN")
         try:
             record = get_campaign_character_file(current_app.config["CAMPAIGNS_DIR"], campaign_slug, character_slug)
+            if record is None:
+                if activated:
+                    repairs = [row for row in manager_character_repairs(campaign_slug, connection)
+                               if row.get("character_slug") == character_slug]
+                    if repairs:
+                        response = jsonify({"ok": False, "code": "character_repair_required",
+                                            "source_repairs": repairs})
+                        response.status_code = 409
+                        response.headers["Cache-Control"] = "private, no-store"
+                        return response
+                abort(404)
+            payload = serialize_character_file_record(record)
+            if activated:
+                from .committed_character_publication import exact_character, character_mirror_comparison
+                source = exact_character(campaign_slug, character_slug, connection=connection)
+                if source is None:
+                    abort(404)
+                payload["committed_revision"] = source["revision"]
+                mirror = connection.execute(
+                    "SELECT state,mirrored_revision FROM committed_source_mirrors WHERE "
+                    "campaign_slug=? AND object_kind='character' AND object_ref=?",
+                    (campaign_slug, character_slug),
+                ).fetchone()
+                payload["mirror_last_replay_state"] = mirror["state"] if mirror is not None else "missing"
+                payload["mirrored_revision"] = mirror["mirrored_revision"] if mirror is not None else None
+                mirror_health = character_mirror_comparison(
+                    campaign_slug, character_slug, connection=connection)
+                payload["mirror_state"] = mirror_health["mirror_current_state"]
+                payload.update(mirror_health)
+                payload["source_repairs"] = [
+                    row for row in manager_character_repairs(campaign_slug, connection)
+                    if row.get("character_slug") == character_slug
+                ]
+        except CommittedSourceConflict:
+            if not activated:
+                raise
+            repairs = [row for row in manager_character_repairs(campaign_slug, connection)
+                       if row.get("character_slug") == character_slug]
+            response = jsonify({"ok": False, "code": "character_repair_required",
+                                "source_repairs": repairs or [describe_character_repair({
+                                    "character_slug": character_slug,
+                                    "reason": "committed_pair_or_portrait_invalid",
+                                })]})
+            response.status_code = 409
+            response.headers["Cache-Control"] = "private, no-store"
+            return response
         except (CampaignContentError, FileNotFoundError, ValueError) as exc:
             return json_error(str(exc), 400, code="validation_error")
-        if record is None:
-            abort(404)
-
-        return jsonify({"ok": True, "character_file": serialize_character_file_record(record)})
+        finally:
+            if activated and owned:
+                connection.rollback()
+        response = jsonify({"ok": True, "character_file": payload})
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     @api.put("/campaigns/<campaign_slug>/content/characters/<character_slug>")
     @api_campaign_content_management_required
@@ -6342,9 +6527,22 @@ def register_api(app) -> None:
         try:
             payload = load_json_object()
             require_supported_combat_campaign(campaign_slug)
+            movement_changed = False
+            if "movement_remaining" in payload:
+                raw_movement = payload["movement_remaining"]
+                normalized_movement = "" if raw_movement is None else str(raw_movement).strip()
+                if normalized_movement:
+                    try:
+                        parsed_movement = int(normalized_movement)
+                    except ValueError:
+                        pass  # Let update_resources report the invalid value.
+                    else:
+                        movement_changed = (
+                            parsed_movement >= 0
+                            and parsed_movement != combatant.movement_remaining
+                        )
             if (combatant.is_player_character and combatant.character_slug
-                    and "movement_remaining" in payload
-                    and str(payload["movement_remaining"]).strip() != str(combatant.movement_remaining)):
+                    and movement_changed):
                 character_record = get_character_repository().get_visible_character(
                     campaign_slug, combatant.character_slug
                 )

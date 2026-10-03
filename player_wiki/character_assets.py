@@ -52,10 +52,29 @@ def resolve_character_portrait_asset_path(
 ) -> tuple[Path, Path]:
     """Resolve the exact portrait asset location without following unsafe paths."""
 
+    parts = validate_character_portrait_asset_ref(character_slug, asset_ref)
+
+    assets_root = (Path(campaign_dir) / "assets").resolve()
+    candidate = assets_root.joinpath(*parts)
+    resolved = candidate.resolve()
+    if assets_root not in resolved.parents or resolved != candidate:
+        raise ValueError("Character portrait asset references are invalid.")
+    return assets_root, candidate
+
+
+def validate_character_portrait_asset_ref(
+    character_slug: str, asset_ref: str,
+) -> tuple[str, str, str]:
+    """Validate the stored portrait reference without consulting the filesystem."""
+
     clean_ref = str(asset_ref or "").strip()
+    try:
+        byte_count = len(clean_ref.encode("utf-8"))
+    except UnicodeError as exc:
+        raise ValueError("Character portrait asset references are invalid.") from exc
     if (
         not clean_ref
-        or len(clean_ref.encode("utf-8")) > CHARACTER_PORTRAIT_ASSET_REF_MAX_BYTES
+        or byte_count > CHARACTER_PORTRAIT_ASSET_REF_MAX_BYTES
         or "\\" in clean_ref
     ):
         raise ValueError("Character portrait asset references are invalid.")
@@ -72,12 +91,7 @@ def resolve_character_portrait_asset_path(
     ):
         raise ValueError("Character portrait asset references are invalid.")
 
-    assets_root = (Path(campaign_dir) / "assets").resolve()
-    candidate = assets_root.joinpath(*parts)
-    resolved = candidate.resolve()
-    if assets_root not in resolved.parents or resolved != candidate:
-        raise ValueError("Character portrait asset references are invalid.")
-    return assets_root, candidate
+    return parts
 
 
 def prepare_character_portrait_file(filename: str, data_blob: bytes) -> tuple[str, bytes]:

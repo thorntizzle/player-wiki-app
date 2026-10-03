@@ -17,6 +17,9 @@
           {% for character in session_dm_passive_scores %}
             <article class="session-passive-score-card">
               <h3 class="session-passive-score-card__name">{{ character.name }}</h3>
+              {% for warning in character.projection_warnings or [] %}
+                <p class="meta">{{ warning.message }}</p>
+              {% endfor %}
               <div class="session-passive-score-grid">
                 <p>
                   <span class="session-passive-score-label">Passive Perception</span>

@@ -530,7 +530,7 @@ class CharacterRepository:
                     "ORDER BY object_ref, operation_id, state",
                 ),
             ):
-                for slug, operation_id, state in connection.execute(query, (campaign_slug,)):
+                for slug, operation_id, state in connection.execute(query, (campaign_slug,)).fetchall():
                     validate_character_slug(slug)
                     if (len(slug.encode("utf-8")) > 255
                             or not isinstance(operation_id, str)

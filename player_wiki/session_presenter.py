@@ -226,6 +226,17 @@ def present_session_dm_passive_score_rows(
                 campaign_page_records=campaign_page_records,
             )
         except (CharacterBuildError, TypeError, ValueError):
+            rows.append({
+                "name": record.definition.name,
+                "passive_perception": "NEEDS REPAIR",
+                "passive_insight": "NEEDS REPAIR",
+                "passive_investigation": "NEEDS REPAIR",
+                "source_authority_identity": "",
+                "projection_warnings": [{
+                    "code": "source_authority_unavailable",
+                    "message": "Current Character source authority is unavailable.",
+                }],
+            })
             continue
 
         projected_definition = projection.get("definition")
@@ -247,6 +258,9 @@ def present_session_dm_passive_score_rows(
                 "passive_perception": passive_label("passive_perception"),
                 "passive_insight": passive_label("passive_insight"),
                 "passive_investigation": passive_label("passive_investigation"),
+                "source_authority_identity": authority.identity if authority is not None else "",
+                "projection_warnings": [dict(warning) for warning in projection.get("projection_warnings") or []
+                                        if isinstance(warning, dict)],
             }
         )
     return rows

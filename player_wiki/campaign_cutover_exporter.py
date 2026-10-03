@@ -25,15 +25,17 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
-from .migrations import CURRENT_SCHEMA_SQL
+from .migrations import (CURRENT_SCHEMA_SQL, SCHEMA_V15_SQL, SCHEMA_V16_SQL, SCHEMA_V17_SQL,
+                         MIGRATIONS, MigrationContext, MigrationHooks, _apply_payload)
 from .sqlite_safety import SQLiteSnapshotError, snapshot_sqlite_database
+from .snapshot_coherence import SnapshotCoherenceError, inspect_snapshot_coherence
 
 
 FORMAT_IDENTITY = "campaign-player-wiki-cutover-package"
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 SCHEMA_VERSION = 1
-DERIVATION_VERSION = 1
-VERIFICATION_LEVEL = "verified_v2"
+DERIVATION_VERSION = 2
+VERIFICATION_LEVEL = "verified_v3"
 
 FAMILY_NAMES = (
     "accounts",
@@ -58,7 +60,7 @@ DISPOSITIONS = (
 )
 
 EXTERNAL_MACHINE_PATH_SENTINEL = (
-    "[cpw-cutover-v2:quarantined-external-machine-path]"
+    "[cpw-cutover-v3:quarantined-external-machine-path]"
 )
 
 _HEX40 = re.compile(r"[0-9a-f]{40}")
@@ -160,7 +162,21 @@ _PATH_FIELD_NAMES = frozenset(
 _PACKAGE_FILE_BINDING_KEYS = frozenset(
     {"binding", "campaign_slug", "logical_path", "object_path", "sha256"}
 )
-_BLOB_COLUMNS = {"campaign_session_article_images": frozenset({"data_blob"})}
+_BLOB_COLUMNS = {
+    "campaign_session_article_images": frozenset({"data_blob"}),
+    "committed_source_generations": frozenset({"primary_bytes", "secondary_bytes"}),
+    "committed_source_publications": frozenset({"desired_primary_bytes", "desired_secondary_bytes"}),
+    "committed_source_mirrors": frozenset({"draft_primary_bytes", "draft_secondary_bytes"}),
+    "committed_page_images": frozenset({"image_bytes"}),
+    "committed_character_portraits": frozenset({"image_bytes"}),
+}
+_COMMITTED_SEALED_TABLES = frozenset({
+    "committed_source_generations", "committed_source_current",
+    "committed_source_admission", "committed_source_admission_receipts",
+    "committed_source_publications", "committed_source_mirrors",
+    "committed_source_outbox", "committed_source_activation",
+    "committed_page_images", "committed_character_portraits",
+})
 _OPERATIONAL_TABLES = frozenset(
     {
         "player_wiki_reconciliation_operations",
@@ -311,12 +327,32 @@ _TABLE_RULES: dict[str, _TableRule] = {
     "player_wiki_deletion_operations": _TableRule(None, "journal"),
     "character_reconciliation_operations": _TableRule(None, "journal"),
     "character_deletion_operations": _TableRule(None, "journal"),
+    "committed_source_generations": _TableRule(None, "sealed"),
+    "committed_source_current": _TableRule(None, "sealed"),
+    "committed_source_admission": _TableRule(None, "sealed"),
+    "committed_source_admission_receipts": _TableRule(None, "sealed"),
+    "committed_source_publications": _TableRule(None, "sealed"),
+    "committed_source_mirrors": _TableRule(None, "sealed"),
+    "committed_source_outbox": _TableRule(None, "sealed"),
+    "committed_source_activation": _TableRule(None, "sealed"),
+    "committed_page_images": _TableRule(None, "sealed"),
+    "committed_character_portraits": _TableRule(None, "sealed"),
 }
 
 
 # This is a versioned contract, not a runtime reflection shortcut.  The exporter
 # refuses a changed table or column set before it reads authorization rows.
 _EXPECTED_COLUMNS: dict[str, tuple[str, ...]] = {
+    "committed_source_generations": ("campaign_slug", "object_kind", "object_ref", "revision", "system_code", "primary_bytes", "secondary_bytes", "primary_sha256", "secondary_sha256", "tombstone", "actor_user_id", "reason", "committed_at"),
+    "committed_source_current": ("campaign_slug", "object_kind", "object_ref", "revision"),
+    "committed_source_admission": ("campaign_slug", "object_kind", "object_ref", "status", "reason_code", "revision", "updated_at"),
+    "committed_source_admission_receipts": ("campaign_slug", "object_kind", "object_ref", "receipt_sha256", "revision", "admitted_at"),
+    "committed_source_publications": ("operation_id", "campaign_slug", "object_kind", "object_ref", "state", "expected_revision", "expected_primary_sha256", "expected_secondary_sha256", "desired_primary_bytes", "desired_secondary_bytes", "desired_primary_sha256", "desired_secondary_sha256", "committed_revision", "actor_user_id", "error_code", "created_at", "updated_at"),
+    "committed_source_mirrors": ("campaign_slug", "object_kind", "object_ref", "expected_primary_sha256", "expected_secondary_sha256", "mirrored_revision", "state", "draft_primary_bytes", "draft_secondary_bytes", "observed_primary_sha256", "observed_secondary_sha256", "updated_at"),
+    "committed_source_outbox": ("id", "campaign_slug", "object_kind", "object_ref", "revision", "expected_primary_sha256", "expected_secondary_sha256", "state", "attempt_count", "error_code", "created_at", "updated_at"),
+    "committed_source_activation": ("singleton", "activated", "activated_at", "coverage_version", "schema_version"),
+    "committed_page_images": ("campaign_slug", "object_kind", "page_ref", "revision", "asset_ref", "sha256", "image_bytes"),
+    "committed_character_portraits": ("campaign_slug", "object_kind", "character_slug", "revision", "asset_ref", "sha256", "image_bytes"),
     "api_tokens": ("id", "user_id", "label", "token_hash", "created_at", "last_used_at", "expires_at", "revoked_at", "created_by_user_id"),
     "auth_audit_log": ("id", "actor_user_id", "target_user_id", "campaign_slug", "character_slug", "event_type", "metadata_json", "created_at"),
     "campaign_combat_conditions": ("id", "combatant_id", "name", "duration_text", "created_at", "created_by_user_id"),
@@ -477,6 +513,7 @@ def export_campaign_cutover_package(
         _write_canonical_json(stage / "inventory" / "tables.json", projected["tables"])
         _write_canonical_json(stage / "inventory" / "files.json", public_files)
         _write_canonical_json(stage / "inventory" / "blobs.json", projected["blobs"])
+        _write_canonical_json(stage / "inventory" / "coherence.json", projected["coherence"])
         _write_canonical_json(
             stage / "inventory" / "dispositions.json", projected["dispositions"]
         )
@@ -536,6 +573,7 @@ def export_campaign_cutover_package(
                 "verification_level": VERIFICATION_LEVEL,
             },
             "content_root_digest": content_root,
+            "coherence_digest": _artifact_hash(artifacts, "inventory/coherence.json"),
             "derivation_version": DERIVATION_VERSION,
             "disposition_totals": projected["dispositions"]["totals"],
             "exporter": {"commit": exporter_commit, "tree": exporter_tree},
@@ -1515,7 +1553,20 @@ def _project_snapshot(
                 )
             schema = _inspect_schema(connection)
             dependencies = _collect_scope_dependencies(connection, campaign_slugs)
-            return _build_projections(
+            try:
+                coherence = inspect_snapshot_coherence(
+                    connection,
+                    files=((f"{item['campaign_slug']}/{item['logical_path']}",
+                            int(item["byte_count"]), str(item["sha256"]))
+                           for item in file_bindings),
+                    require_current=True,
+                    visible_campaigns=campaign_slugs,
+                )
+            except SnapshotCoherenceError as exc:
+                raise CampaignCutoverExportError(
+                    "canonical_incoherent", "The cutover snapshot is semantically incoherent."
+                ) from exc
+            result = _build_projections(
                 connection=connection,
                 schema=schema,
                 campaign_slugs=campaign_slugs,
@@ -1524,12 +1575,32 @@ def _project_snapshot(
                 host_path_bindings=host_path_bindings,
                 approved_campaign_root_keys=approved_campaign_root_keys,
             )
+            result["coherence"] = _public_coherence_summary(coherence)
+            return result
     except CampaignCutoverExportError:
         raise
     except sqlite3.Error as exc:
         raise CampaignCutoverExportError(
             "snapshot_query_refused", "The staged SQLite snapshot could not be queried safely."
         ) from exc
+
+
+def _public_coherence_summary(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    states: dict[str, int] = {}
+    for item in evidence["file_dispositions"]:
+        state = str(item["state"])
+        states[state] = states.get(state, 0) + 1
+    return {
+        "version": evidence["version"],
+        "schema_version": evidence["schema_version"],
+        "mode": evidence["mode"],
+        "canonical_sha256": evidence["canonical_sha256"],
+        "generation_count": evidence["generation_count"],
+        "generations_sha256": evidence["generations_sha256"],
+        "object_count": len(evidence["objects"]),
+        "blob_count": len(evidence["blob_bindings"]),
+        "mirror_states": states,
+    }
 
 
 def _inspect_schema(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -1544,7 +1615,9 @@ def _inspect_schema(connection: sqlite3.Connection) -> dict[str, Any]:
     ).fetchall()
     tables_seen: set[str] = set()
     triggers_seen: set[str] = set()
+    indexes_seen: dict[str, dict[str, str]] = {}
     expected_triggers = _expected_revision_triggers()
+    expected_indexes = _expected_nonunique_indexes(18)
     for row in rows:
         object_type = str(row["type"])
         name = str(row["name"])
@@ -1572,6 +1645,15 @@ def _inspect_schema(connection: sqlite3.Connection) -> dict[str, Any]:
                     "The SQLite schema contains an unsupported trigger definition.",
                 )
             triggers_seen.add(name)
+        if object_type == "index" and name in expected_indexes:
+            expected_index = expected_indexes[name]
+            if (schema_object["table"] != expected_index["table"] or
+                    _normalize_sql_fragment(schema_object["sql"]) !=
+                    _normalize_sql_fragment(expected_index["sql"])):
+                raise CampaignCutoverExportError(
+                    "schema_index_mismatch", "The SQLite schema contains an incompatible index."
+                )
+            indexes_seen[name] = schema_object
         objects.append(schema_object)
     if tables_seen != set(_EXPECTED_COLUMNS):
         raise CampaignCutoverExportError(
@@ -1581,6 +1663,16 @@ def _inspect_schema(connection: sqlite3.Connection) -> dict[str, Any]:
     if triggers_seen != set(expected_triggers):
         raise CampaignCutoverExportError(
             "schema_trigger_mismatch", "The SQLite schema is missing a required trigger."
+        )
+    explicit_indexes = {
+        str(index["name"])
+        for table in tables_seen
+        for index in connection.execute(f"PRAGMA index_list({_quote_identifier(table)})")
+        if not index["unique"]
+    }
+    if explicit_indexes != set(expected_indexes) or set(indexes_seen) != set(expected_indexes):
+        raise CampaignCutoverExportError(
+            "schema_index_mismatch", "The SQLite schema has missing or extra indexes."
         )
 
     tables = []
@@ -1639,6 +1731,185 @@ def _canonical_schema_columns(
         )
     columns_by_name = {str(column["name"]): column for column in columns}
     return [columns_by_name[name] for name in expected_names]
+
+
+def _trusted_schema_sql(version: int) -> str:
+    try:
+        return {15: SCHEMA_V15_SQL, 16: SCHEMA_V16_SQL,
+                17: SCHEMA_V17_SQL, 18: CURRENT_SCHEMA_SQL}[version]
+    except KeyError as exc:
+        raise CampaignCutoverExportError(
+            "schema_version_mismatch", "The committed-source schema version is unsupported."
+        ) from exc
+
+
+def _trusted_schema_connection(version: int) -> sqlite3.Connection:
+    # The frozen transforms create two historical indexes absent from the
+    # consolidated CREATE SQL. Replay them only in a disposable memory DB.
+    schema_sql = _trusted_schema_sql(version)
+    if MIGRATIONS[version - 1].payload.schema_sql != schema_sql:
+        raise CampaignCutoverExportError(
+            "schema_version_mismatch", "The trusted migration inputs are inconsistent."
+        )
+    trusted = sqlite3.connect(":memory:")
+    try:
+        trusted.row_factory = sqlite3.Row
+        trusted.execute(_SCHEMA_MIGRATIONS_SQL)
+        context = MigrationContext(trusted, hooks=MigrationHooks())
+        for migration in MIGRATIONS[:version]:
+            _apply_payload(context, migration.payload)
+        return trusted
+    except Exception:
+        trusted.close()
+        raise
+
+
+@lru_cache(maxsize=3)
+def _trusted_schema_objects(version: int) -> dict[tuple[str, str], dict[str, str]]:
+    with closing(_trusted_schema_connection(version)) as trusted:
+        return {
+            (row["type"], row["name"]): {
+                "name": row["name"], "table": row["tbl_name"],
+                "type": row["type"], "sql": " ".join((row["sql"] or "").split()),
+            }
+            for row in trusted.execute(
+                "SELECT type,name,tbl_name,sql FROM sqlite_schema "
+                "WHERE name NOT GLOB 'sqlite_*' AND sql IS NOT NULL"
+            )
+        }
+
+
+@lru_cache(maxsize=3)
+def _expected_nonunique_indexes(version: int) -> dict[str, dict[str, str]]:
+    # Every named nonunique index is sourced from the trusted migration SQL.
+    with closing(_trusted_schema_connection(version)) as trusted:
+        result = {}
+        for row in trusted.execute(
+            "SELECT name,tbl_name,sql FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL"
+        ):
+            index = next(item for item in trusted.execute(
+                f"PRAGMA index_list({_quote_identifier(row['tbl_name'])})"
+            ) if item["name"] == row["name"])
+            if not index["unique"]:
+                result[row["name"]] = {
+                    "name": row["name"], "table": row["tbl_name"],
+                    "type": "index", "sql": " ".join(row["sql"].split()),
+                }
+        return result
+
+
+@lru_cache(maxsize=3)
+def _trusted_schema_contracts(version: int) -> dict[str, dict[str, Any]]:
+    # The consolidated SQL includes CHECKs omitted by historical ALTER TABLE
+    # paths; compare those predicates and validate every affected legacy row.
+    with closing(sqlite3.connect(":memory:")) as trusted:
+        trusted.row_factory = sqlite3.Row
+        trusted.executescript(_trusted_schema_sql(version))
+        trusted.execute(_SCHEMA_MIGRATIONS_SQL)
+        return {
+            name: _table_schema_contract(trusted, name)
+            for kind, name in _trusted_schema_objects(version)
+            if kind == "table"
+        }
+
+
+def _inspect_supported_schema(connection: sqlite3.Connection, version: int) -> None:
+    """Prove a v15-v18 live schema against its exact trusted migration DDL."""
+    expected = _trusted_schema_objects(version)
+    actual = {
+        (row["type"], row["name"]): {
+            "name": row["name"], "table": row["tbl_name"],
+            "type": row["type"], "sql": " ".join((row["sql"] or "").split()),
+        }
+        for row in connection.execute(
+            "SELECT type,name,tbl_name,sql FROM sqlite_schema "
+            "WHERE name NOT GLOB 'sqlite_*' AND sql IS NOT NULL"
+        )
+    }
+    if set(actual) != set(expected):
+        raise CampaignCutoverExportError(
+            "schema_object_mismatch", "The SQLite schema has missing or extra objects."
+        )
+    expected_contracts = _trusted_schema_contracts(version)
+    for key, trusted_object in expected.items():
+        observed = actual[key]
+        if observed["table"] != trusted_object["table"]:
+            raise CampaignCutoverExportError(
+                "schema_object_mismatch", "The SQLite schema has a retargeted object."
+            )
+        if key[0] != "table":
+            if _normalize_sql_fragment(observed["sql"]) != _normalize_sql_fragment(trusted_object["sql"]):
+                raise CampaignCutoverExportError(
+                    "schema_object_mismatch", "The SQLite schema has altered index or trigger DDL."
+                )
+            continue
+        table = key[1]
+        observed_columns = connection.execute(
+            f"PRAGMA table_xinfo({_quote_identifier(table)})"
+        ).fetchall()
+        expected_contract = expected_contracts[table]
+        observed_contract = _table_schema_contract(connection, table,
+            columns=_canonical_schema_columns(observed_columns,
+                tuple(column["name"] for column in expected_contract["columns"])))
+        actual_checks = set(observed_contract["constraints"].pop("checks"))
+        expected_checks = set(expected_contract["constraints"]["checks"])
+        expected_contract = {**expected_contract, "constraints": {
+            key: value for key, value in expected_contract["constraints"].items()
+            if key != "checks"
+        }}
+        if (observed_contract != expected_contract or
+                not actual_checks.issubset(expected_checks)):
+            raise CampaignCutoverExportError(
+                "schema_constraint_mismatch", "The SQLite table DDL is incompatible."
+            )
+        for predicate in expected_checks - actual_checks:
+            if predicate not in _APPROVED_LEGACY_MISSING_CHECKS.get(table, frozenset()):
+                raise CampaignCutoverExportError(
+                    "schema_constraint_mismatch", "The SQLite table is missing a required CHECK."
+                )
+            _validate_missing_check_predicate(connection=connection,
+                                              table_name=table, predicate=predicate)
+        if table != "schema_migrations" and _normalize_sql_fragment(
+            _without_check_clauses(observed["sql"])
+        ) != _normalize_sql_fragment(_without_check_clauses(trusted_object["sql"])):
+            raise CampaignCutoverExportError(
+                "schema_table_mismatch", "The SQLite table DDL differs from the trusted version."
+            )
+
+
+def _without_check_clauses(sql: str) -> str:
+    """Remove only balanced CHECK clauses; their predicates are proved above."""
+    result = []
+    cursor = 0
+    for match in re.finditer(r"\bcheck\s*\(", sql, flags=re.IGNORECASE):
+        if match.start() < cursor:
+            continue
+        result.append(sql[cursor:match.start()])
+        depth = 1
+        quote = None
+        index = match.end()
+        while index < len(sql) and depth:
+            char = sql[index]
+            if quote:
+                if char == quote:
+                    if index + 1 < len(sql) and sql[index + 1] == quote:
+                        index += 1
+                    else:
+                        quote = None
+            elif char in {"'", '"', "`"}:
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            index += 1
+        if depth:
+            raise CampaignCutoverExportError(
+                "schema_constraint_mismatch", "The SQLite schema has an invalid CHECK clause."
+            )
+        cursor = index
+    result.append(sql[cursor:])
+    return "".join(result)
 
 
 def _validate_schema_contract(
@@ -1751,6 +2022,18 @@ def _expected_revision_triggers() -> dict[str, dict[str, str]]:
             "campaign_enabled_sources", "campaign_entry_overrides",
         )
         for operation in ("insert", "update", "delete")
+    } | {
+        "committed_source_current_monotonic",
+        "committed_source_current_no_delete",
+        "committed_source_generations_no_update",
+        "committed_source_generations_no_delete",
+        "committed_source_activation_no_insert_active",
+        "committed_source_activation_no_update_active",
+        "committed_source_activation_no_delete",
+        "committed_page_images_no_update",
+        "committed_page_images_no_delete",
+        "committed_character_portraits_no_update",
+        "committed_character_portraits_no_delete",
     }
     with closing(sqlite3.connect(":memory:")) as connection:
         connection.executescript(CURRENT_SCHEMA_SQL)
@@ -2130,6 +2413,8 @@ def _build_projections(
         row_digests: list[dict[str, Any]] = []
         for row in rows:
             locator = {column: _scalar_for_locator(row[column]) for column in primary_key}
+            if table_name in _COMMITTED_SEALED_TABLES:
+                locator = {"sealed_locator_sha256": _digest_json(locator)}
             safe_row_evidence: dict[str, Any] = {
                 "disposition": None,
                 "locator": locator,
@@ -2528,9 +2813,14 @@ def _row_blob_bindings(
         binding = {
                 "column": column,
                 "custody": "source/database.sqlite3",
-                "primary_key": {
-                    key: _scalar_for_locator(row[key]) for key in primary_key
-                },
+                "primary_key": (
+                    {"sealed_locator_sha256": _digest_json({
+                        key: _scalar_for_locator(row[key]) for key in primary_key
+                    })}
+                    if table_name in _COMMITTED_SEALED_TABLES else {
+                        key: _scalar_for_locator(row[key]) for key in primary_key
+                    }
+                ),
                 "table": table_name,
             }
         if expose_content_digest:
@@ -3642,6 +3932,7 @@ def _self_verify_package(
         "campaigns",
         "certification",
         "content_root_digest",
+        "coherence_digest",
         "derivation_version",
         "disposition_totals",
         "exporter",
@@ -3817,6 +4108,30 @@ def _self_verify_package(
         raise CampaignCutoverExportError(
             "self_verification_failed", "The package snapshot identity is invalid."
         )
+    coherence = json_payloads.get("inventory/coherence.json")
+    if manifest.get("coherence_digest") != _artifact_hash(actual_artifacts, "inventory/coherence.json"):
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package coherence digest is invalid."
+        )
+    try:
+        file_evidence = json_payloads["inventory/files.json"]
+        with closing(sqlite3.connect(
+            f"{(stage / 'source' / 'database.sqlite3').resolve().as_uri()}?mode=ro&immutable=1",
+            uri=True,
+        )) as connection:
+            recomputed = inspect_snapshot_coherence(
+                connection,
+                files=((f"{item['campaign_slug']}/{item['logical_path']}",
+                        item["byte_count"], item["sha256"]) for item in file_evidence),
+                require_current=True,
+                visible_campaigns=campaign_slugs,
+            )
+        if coherence != _public_coherence_summary(recomputed):
+            raise ValueError("coherence mismatch")
+    except (sqlite3.Error, SnapshotCoherenceError, KeyError, TypeError, ValueError) as exc:
+        raise CampaignCutoverExportError(
+            "self_verification_failed", "The package canonical evidence is invalid."
+        ) from exc
 
     dispositions = json_payloads.get("inventory/dispositions.json")
     disposition_keys = {

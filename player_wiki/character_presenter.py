@@ -510,6 +510,7 @@ def present_character_roster(
         vitals = dict(state.get("vitals") or {})
         hit_dice = hit_dice_summary_from_state(definition, state)
         authority = None
+        source_warnings: list[dict[str, str]] = []
         projected_definition = definition
         projected_state = state
         needs_authority = activated and is_dnd_5e_system(definition.system)
@@ -532,9 +533,18 @@ def present_character_roster(
                         authority = candidate
                         projected_definition = projection["definition"]
                         projected_state = projection["state"]
+                        source_warnings = [
+                            dict(row) for row in projection.get("projection_warnings") or []
+                            if isinstance(row, dict)
+                        ]
             except (RuntimeError, TypeError, ValueError):
                 # An incomplete read context cannot authenticate historical numbers.
                 pass
+        if needs_authority and authority is None:
+            source_warnings = [{
+                "code": "source_authority_unavailable",
+                "message": "Current Character source authority is unavailable; shown numbers are historical table values.",
+            }]
 
         def status_label(status: Any) -> str:
             return "NEEDS ATTENTION" if status is not None and status.status == "CONFLICT" else "NEEDS REPAIR"
@@ -629,6 +639,12 @@ def present_character_roster(
                 "temp_hp": int(vitals.get("temp_hp") or 0),
                 "hit_dice": hit_dice,
                 "resource_preview": resource_preview,
+                "source_authority_identity": authority.identity if authority is not None else "",
+                "projection_warnings": source_warnings,
+                "numeric_owner": (
+                    "current_source_authority" if authority is not None
+                    else "historical_table" if needs_authority else "saved_character"
+                ),
                 "search_text": " ".join(part for part in search_parts if part).lower(),
             }
         )
@@ -743,6 +759,7 @@ def present_dnd_character_section_counts(
             campaign,
             definition,
             systems_service=systems_service,
+            source_authority_active=mechanics_projection.get("source_authority") is not None,
         ),
         "resources": len(list(state.get("resources") or [])),
         "features": _count_presented_dnd_features(
@@ -869,6 +886,7 @@ def _count_presented_dnd_spells(
     definition: Any,
     *,
     systems_service: Any | None,
+    source_authority_active: bool = False,
 ) -> int:
     spellcasting = dict(definition.spellcasting or {})
     class_rows = [
@@ -941,7 +959,9 @@ def _count_presented_dnd_spells(
             or spell.get("spell_source_row_id")
             or fallback_row_id
         ).strip()
-        authority_status = str(spell.get("authority_status") or "NEEDS REPAIR").strip().upper()
+        authority_status = str(
+            spell.get("authority_status") or ("NEEDS REPAIR" if source_authority_active else "VERIFIED")
+        ).strip().upper()
         action_state = project_spell_action_state(
             spell=spell,
             row_payload=dict(rows_by_id.get(target_row_id) or {}),
@@ -1714,7 +1734,9 @@ def _present_character_detail(
                 linked_systems_entry=linked_systems_entry,
                 linked_systems_metadata=linked_systems_metadata,
             )
-            authority_status = str(spell.get("authority_status") or "NEEDS REPAIR").strip().upper()
+            authority_status = str(
+                spell.get("authority_status") or ("NEEDS REPAIR" if source_authority is not None else "VERIFIED")
+            ).strip().upper()
             player_status = "NEEDS REPAIR" if authority_status == "NEEDS ATTENTION" else authority_status
             authority_note = (
                 "Source needs repair; use this spell with your GM. Automatic benefits are unavailable."
@@ -3064,7 +3086,7 @@ def _present_xianxia_linked_records(
         ).strip()
         href = build_character_entry_href(
             campaign_slug,
-            systems_ref=systems_ref,
+            systems_ref=systems_ref if entry is not None else None,
             page_ref=payload.get("page_ref"),
         )
         record = {
@@ -3172,7 +3194,7 @@ def _present_xianxia_generic_technique_records(
                 or "Generic Technique",
                 "href": build_character_entry_href(
                     campaign_slug,
-                    systems_ref=systems_ref,
+                    systems_ref=systems_ref if entry is not None else None,
                     page_ref=payload.get("page_ref"),
                 ),
                 "systems_ref": systems_ref,
@@ -3798,14 +3820,28 @@ def _xianxia_entry_for_linked_record(
     if systems_service is None:
         return None
     entry_key = str(systems_ref.get("entry_key") or "").strip()
-    if entry_key:
-        entry = systems_service.get_entry_for_campaign(campaign_slug, entry_key)
-        if entry is not None:
-            return entry
     slug = str(systems_ref.get("slug") or "").strip()
-    if slug:
-        return systems_service.get_entry_by_slug_for_campaign(campaign_slug, slug)
-    return None
+    if not entry_key and not slug:
+        return None
+    entry = (
+        systems_service.get_entry_for_character_read(campaign_slug, entry_key)
+        if entry_key else
+        systems_service.get_entry_by_slug_for_character_read(campaign_slug, slug)
+    )
+    if entry is None or not systems_service.is_entry_enabled_for_character_read(campaign_slug, entry):
+        return None
+    for claimed, actual in (
+        ("entry_key", "entry_key"), ("slug", "slug"),
+        ("library_slug", "library_slug"), ("source_id", "source_id"),
+        ("entry_type", "entry_type"), ("title", "title"),
+    ):
+        value = str(systems_ref.get(claimed) or "").strip()
+        if value and value != str(getattr(entry, actual, "") or "").strip():
+            return None
+    if not has_request_context():
+        return None
+    from .auth import can_access_campaign_systems_entry
+    return entry if can_access_campaign_systems_entry(campaign_slug, entry.slug) else None
 
 
 def _xianxia_rank_records_by_ref(entry: Any | None) -> dict[str, dict[str, Any]]:

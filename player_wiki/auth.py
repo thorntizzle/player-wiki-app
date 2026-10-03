@@ -5,7 +5,7 @@ from datetime import timedelta
 from functools import wraps
 from urllib.parse import urljoin, urlsplit
 
-from flask import Flask, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, current_app, flash, g, jsonify, make_response, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 from .incident_diagnostics import access_decision
 
@@ -63,6 +63,7 @@ from .models import Campaign
 from .login_throttle import LoginThrottle, account_digest, canonical_client_key
 from .repository import Repository
 from .repository_store import RepositoryStore
+from .committed_publication import CommittedSourceConflict
 from .themes import ThemePreset, get_theme_preset, is_valid_theme_key, list_theme_presets, normalize_theme_key
 
 AUTH_SESSION_KEY = "auth_session_token"
@@ -432,6 +433,14 @@ def get_repository_store() -> RepositoryStore:
 
 def get_repository() -> Repository:
     return get_repository_store().get()
+
+
+def campaign_integrity_unavailable_response():
+    """A campaign-independent response when trusted activation proof fails."""
+    response = make_response("", 503)
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Retry-After"] = "5"
+    return response
 
 
 def get_systems_service():
@@ -899,25 +908,28 @@ def campaign_scope_access_required(scope: str, *, own_character: bool = False):
     def decorator(view):
         @wraps(view)
         def wrapped(*args, **kwargs):
-            campaign_slug = kwargs.get("campaign_slug")
-            if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
-                access_decision("deny", "missing", scope=normalized_scope)
-                abort(404)
+            try:
+                campaign_slug = kwargs.get("campaign_slug")
+                if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
+                    access_decision("deny", "missing", scope=normalized_scope)
+                    abort(404)
 
-            character_slug = kwargs.get("character_slug")
-            if can_access_campaign_scope(campaign_slug, normalized_scope) or (
-                own_character
-                and normalized_scope == "characters"
-                and isinstance(character_slug, str)
-                and can_access_own_character(campaign_slug, character_slug)
-            ):
+                character_slug = kwargs.get("character_slug")
+                allowed = can_access_campaign_scope(campaign_slug, normalized_scope) or (
+                    own_character
+                    and normalized_scope == "characters"
+                    and isinstance(character_slug, str)
+                    and can_access_own_character(campaign_slug, character_slug)
+                )
+                if not allowed and get_current_user() is None and get_effective_campaign_visibility(campaign_slug, normalized_scope) != VISIBILITY_PUBLIC:
+                    access_decision("redirect", "authentication_required", scope=normalized_scope)
+                    return redirect(url_for("sign_in", next=request.full_path if request.query_string else request.path))
+            except CommittedSourceConflict:
+                return campaign_integrity_unavailable_response()
+
+            if allowed:
                 access_decision("allow", scope=normalized_scope)
                 return view(*args, **kwargs)
-
-            if get_current_user() is None and get_effective_campaign_visibility(campaign_slug, normalized_scope) != VISIBILITY_PUBLIC:
-                access_decision("redirect", "authentication_required", scope=normalized_scope)
-                return redirect(url_for("sign_in", next=request.full_path if request.query_string else request.path))
-
             access_decision("deny", "hidden", scope=normalized_scope)
             abort(404)
 

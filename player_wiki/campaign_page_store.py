@@ -868,9 +868,12 @@ class CampaignPageStore:
             raise CampaignRefreshTransactionError("Campaign refresh requires a connection without an active transaction.")
 
     def _ensure_campaign_pages_current(self, campaign_slug: str, content_dir: Path) -> None:
-        from .committed_publication import active, inspect_page_mirrors
+        from .committed_publication import active, inspect_page_mirrors, config
         if active():
-            self.mirror_conflicts[campaign_slug] = inspect_page_mirrors(campaign_slug, content_dir)
+            from flask import current_app
+            _, settings = config(campaign_slug)
+            asset_root = Path(current_app.config["CAMPAIGNS_DIR"]) / campaign_slug / settings.get("asset_dir", "assets")
+            self.mirror_conflicts[campaign_slug] = inspect_page_mirrors(campaign_slug, content_dir, asset_root)
             return
         with self._lock:
             if not self._has_sync_state(campaign_slug):
@@ -933,9 +936,12 @@ class CampaignPageStore:
         return replace(plan, sync_identity=sync_identity)
 
     def _sync_campaign_pages_locked(self, campaign_slug: str, content_dir: Path) -> None:
-        from .committed_publication import active, inspect_page_mirrors
+        from .committed_publication import active, inspect_page_mirrors, config
         if active():
-            self.mirror_conflicts[campaign_slug] = inspect_page_mirrors(campaign_slug, content_dir)
+            from flask import current_app
+            _, settings = config(campaign_slug)
+            asset_root = Path(current_app.config["CAMPAIGNS_DIR"]) / campaign_slug / settings.get("asset_dir", "assets")
+            self.mirror_conflicts[campaign_slug] = inspect_page_mirrors(campaign_slug, content_dir, asset_root)
             self._content_fingerprints[campaign_slug] = ((), ())
             return
         plan = self._prepare_campaign_refresh_locked(campaign_slug, content_dir)

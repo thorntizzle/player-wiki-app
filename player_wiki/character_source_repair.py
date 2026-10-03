@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import hashlib
 import json
+import sqlite3
 from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
 
@@ -317,11 +319,15 @@ def _valid_numeric_witness_marker(marker: Any, character_slug: str, provenance: 
                                      or _sha256_hex(marker.get("owner_digest"))))
 
 
-def load_verified_numeric_actions(campaign_slug: str, character_slug: str) -> tuple[dict[str, Any], ...]:
+def load_verified_numeric_actions(campaign_slug: str, character_slug: str, *,
+                                  connection: sqlite3.Connection | None = None,
+                                  strict: bool = False,
+                                  include_origin: bool = False) -> tuple[dict[str, Any], ...]:
     """Load only actor-bound manager/native audit records, never copied YAML labels."""
     try:
-        rows = get_db().execute(
-            """SELECT actor_user_id, event_type, metadata_json FROM auth_audit_log
+        db = connection if connection is not None else get_db()
+        rows = db.execute(
+            """SELECT id,actor_user_id, event_type, metadata_json FROM auth_audit_log
                WHERE campaign_slug = ? AND character_slug = ?
                  AND event_type IN ('character_update_applied', 'character_page_feature_grant_confirmed',
                                     'character_native_created', 'character_native_leveled', 'character_native_spell_selected')
@@ -329,8 +335,11 @@ def load_verified_numeric_actions(campaign_slug: str, character_slug: str) -> tu
             (campaign_slug, character_slug),
         ).fetchall()
     except Exception:
+        if strict:
+            raise SourceRepairError("Numeric audit proof is unavailable.")
         return ()
     witnesses: list[dict[str, Any]] = []
+    origins: list[dict[str, Any]] = []
     confirmed_updates: set[tuple[int, str, str]] = set()
     for row in rows:
         if row["event_type"] != "character_update_applied":
@@ -346,6 +355,7 @@ def load_verified_numeric_actions(campaign_slug: str, character_slug: str) -> tu
         except (TypeError, ValueError):
             continue
     for row in rows:
+        start = len(witnesses)
         try:
             actor_id = row["actor_user_id"]
             if type(actor_id) is not int or actor_id < 1:
@@ -439,7 +449,144 @@ def load_verified_numeric_actions(campaign_slug: str, character_slug: str) -> tu
                                          for marker in batch)
         except (KeyError, TypeError, ValueError):
             continue
-    return tuple(witnesses)
+        finally:
+            if include_origin:
+                origins.extend({"witness": witness, "audit_id": row["id"],
+                                "actor_user_id": row["actor_user_id"],
+                                "event_type": row["event_type"],
+                                "source_snapshot_digest": json.loads(
+                                    row["metadata_json"]).get("source_snapshot_digest"),
+                                "metadata_sha256": hashlib.sha256(
+                                    row["metadata_json"].encode("utf-8")).hexdigest()}
+                               for witness in witnesses[start:])
+    if include_origin:
+        return tuple(origins)
+    return (*witnesses, *_load_transition_actions(db, campaign_slug, character_slug,
+                                                   strict=strict))
+
+
+def _load_transition_actions(connection: sqlite3.Connection, campaign_slug: str,
+                             character_slug: str, *, strict: bool = False) -> tuple[dict[str, Any], ...]:
+    """Accept only activation-transaction proofs linked to one original audit row."""
+    try:
+        from .committed_publication import active
+        if not active(connection):
+            return ()
+        marker = connection.execute("SELECT activated_at FROM committed_source_activation WHERE singleton=1").fetchone()
+        rows = connection.execute(
+            """SELECT actor_user_id,metadata_json FROM auth_audit_log
+               WHERE campaign_slug=? AND character_slug=?
+                 AND event_type='character_source_transition_confirmed' ORDER BY id""",
+            (campaign_slug, character_slug),
+        ).fetchall()
+        if not rows:
+            return ()
+        originals = load_verified_numeric_actions(campaign_slug, character_slug,
+                    connection=connection, strict=True, include_origin=True)
+        current_identity = _current_transition_identity(connection, campaign_slug,
+                                                        character_slug)
+        candidates: list[dict[str, Any]] = []
+        counts: dict[tuple[str, str, str, str], int] = {}
+        proof_fields = {"schema_version", "campaign_slug", "character_slug",
+            "target_kind", "target_id", "metric", "authorization",
+            "origin_audit_id", "origin_actor_user_id", "origin_event_type",
+            "origin_metadata_sha256", "old_basis", "new_basis",
+            "old_snapshot", "new_snapshot", "value_digest", "owner_digest",
+            "identity", "activated_at"}
+        for row in rows:
+            try:
+                proof = json.loads(row["metadata_json"])
+                if not isinstance(proof, dict):
+                    continue
+                key = (str(proof.get("target_kind")), str(proof.get("target_id")),
+                       str(proof.get("metric")), str(proof.get("new_basis")))
+                counts[key] = counts.get(key, 0) + 1
+                if (row["actor_user_id"] is not None or set(proof) != proof_fields
+                        or proof.get("schema_version") != 1
+                        or proof.get("campaign_slug") != campaign_slug
+                        or proof.get("character_slug") != character_slug
+                        or marker is None or proof.get("activated_at") != marker[0]
+                        or proof.get("target_kind") not in {"resource", "spell_metric", "spell_choice"}
+                        or not all(_sha256_hex(proof.get(name)) for name in (
+                            "old_basis", "new_basis", "old_snapshot", "new_snapshot",
+                            "value_digest", "owner_digest", "origin_metadata_sha256"))
+                        or type(proof.get("origin_audit_id")) is not int
+                        or type(proof.get("origin_actor_user_id")) is not int
+                        or not isinstance(proof.get("authorization"), dict)
+                        or not isinstance(proof.get("identity"), dict)
+                        or not current_identity
+                        or set(proof["identity"]) != {
+                            "generation", "state", "config", "systems", "pages",
+                            "page_current", "audit"}
+                        or not _sha256_hex(proof["identity"].get("audit"))
+                        or any(proof["identity"].get(name) != value for name, value
+                               in current_identity.items() if name != "state")):
+                    continue
+                authorization = proof["authorization"]
+                if ((authorization.get("target_kind"), authorization.get("target_id"),
+                     authorization.get("metric")) != key[:3]
+                        or authorization.get("value_digest") != proof["value_digest"]
+                        or (authorization.get("owner_digest") is not None
+                            and authorization["owner_digest"] != proof["owner_digest"])):
+                    continue
+                matching = [original for original in originals
+                    if original["audit_id"] == proof["origin_audit_id"]
+                    and original["actor_user_id"] == proof["origin_actor_user_id"]
+                    and original["event_type"] == proof.get("origin_event_type")
+                    and original["metadata_sha256"] == proof["origin_metadata_sha256"]
+                    and (original["source_snapshot_digest"] == proof["old_snapshot"]
+                         if authorization.get("provenance") != "page_feature_update"
+                         else authorization.get("source_snapshot_digest") == proof["old_snapshot"])
+                    and isinstance(original["witness"], dict)
+                    and original["witness"].get("authorization") == authorization
+                    and original["witness"].get("source_basis_digest") == proof["old_basis"]]
+                if len(matching) != 1:
+                    continue
+                candidates.append({"authorization": authorization,
+                    "source_basis_digest": proof["new_basis"], "transition_proof": proof})
+            except (TypeError, ValueError, KeyError):
+                continue
+        return tuple(candidate for candidate in candidates
+                     if counts[(candidate["authorization"]["target_kind"],
+                                candidate["authorization"]["target_id"],
+                                candidate["authorization"]["metric"],
+                                candidate["source_basis_digest"])] == 1)
+    except Exception:
+        if strict:
+            raise SourceRepairError("Transition audit proof is unavailable.") from None
+        return ()
+
+
+def _current_transition_identity(connection: sqlite3.Connection, campaign_slug: str,
+                                 character_slug: str) -> dict[str, object]:
+    def digest(rows: object) -> str:
+        return hashlib.sha256(json.dumps([tuple(row) for row in rows],sort_keys=True,
+            default=str,separators=(",", ":")).encode()).hexdigest()
+    character = connection.execute("""SELECT revision,primary_sha256 FROM
+        committed_source_current JOIN committed_source_generations
+        USING(campaign_slug,object_kind,object_ref,revision)
+        WHERE campaign_slug=? AND object_kind='character' AND object_ref=?""",
+        (campaign_slug, character_slug)).fetchone()
+    config = connection.execute("""SELECT revision,primary_sha256 FROM
+        committed_source_current JOIN committed_source_generations
+        USING(campaign_slug,object_kind,object_ref,revision)
+        WHERE campaign_slug=? AND object_kind='config' AND object_ref=''""",
+        (campaign_slug,)).fetchone()
+    state = connection.execute("""SELECT revision,state_json FROM character_state
+        WHERE campaign_slug=? AND character_slug=?""",
+        (campaign_slug, character_slug)).fetchone()
+    systems = connection.execute("SELECT token FROM systems_revision WHERE singleton=1").fetchone()
+    if any(row is None for row in (character,config,state,systems)):
+        return {}
+    return {"generation": [character[0],character[1]],
+            "state": [state[0],hashlib.sha256(state[1].encode()).hexdigest()],
+            "config": [config[0],config[1]], "systems": str(systems[0]),
+            "pages": digest(connection.execute(
+                "SELECT * FROM campaign_pages WHERE campaign_slug=? ORDER BY page_ref",
+                (campaign_slug,)).fetchall()),
+            "page_current": digest(connection.execute(
+                """SELECT * FROM committed_source_current WHERE campaign_slug=?
+                   AND object_kind='page' ORDER BY object_ref""",(campaign_slug,)).fetchall())}
 
 
 def _sha256_hex(value: Any) -> bool:
@@ -739,10 +886,12 @@ def record_confirmed_native_creation_witness(
         return False
 
 
-def load_verified_manual_actions(campaign_slug: str, character_slug: str) -> tuple[dict[str, Any], ...]:
+def load_verified_manual_actions(campaign_slug: str, character_slug: str, *,
+                                 connection: sqlite3.Connection | None = None,
+                                 strict: bool = False) -> tuple[dict[str, Any], ...]:
     """Read only journal-produced, actor-bound audit witnesses for this Character."""
     try:
-        rows = get_db().execute(
+        rows = (connection if connection is not None else get_db()).execute(
             """SELECT actor_user_id, metadata_json FROM auth_audit_log
                WHERE event_type = 'character_update_applied'
                  AND campaign_slug = ? AND character_slug = ?
@@ -750,6 +899,8 @@ def load_verified_manual_actions(campaign_slug: str, character_slug: str) -> tup
             (campaign_slug, character_slug),
         ).fetchall()
     except Exception:
+        if strict:
+            raise SourceRepairError("Manual audit proof is unavailable.")
         return ()  # Projection fails closed outside an available DB context.
     witnesses: list[dict[str, Any]] = []
     for row in rows:

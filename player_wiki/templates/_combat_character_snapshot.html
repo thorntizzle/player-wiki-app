@@ -22,6 +22,9 @@
         {% if selected_combatant.snapshot_note %}
           <p class="meta">{{ selected_combatant.snapshot_note }}</p>
         {% endif %}
+        {% for warning in selected_combatant.source_warnings or [] %}
+          <p class="meta">{{ warning.message }}</p>
+        {% endfor %}
       </div>
       <div class="combatant-badges">
         <span class="combat-badge">Round {{ combat_tracker.round_number }}</span>
@@ -182,7 +185,6 @@
       >
         {{ csrf_input() }}
         {{ combat_workspace_fields(selected_combatant_id, expected_combatant_revision=selected_combatant.combatant_revision) }}
-        <input type="hidden" name="movement_remaining" value="{{ selected_combatant.movement_remaining or 0 }}">
         <label class="combat-resource-toggle">
           <input type="checkbox" name="has_action" value="1" {% if selected_combatant.has_action %}checked{% endif %}>
           <span class="combat-resource">Action</span>

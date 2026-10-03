@@ -42,6 +42,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from .admin import register_admin
 from .incident_diagnostics import emit_incident
 from .api import register_api
+from .committed_publication import CommittedSourceConflict
 from .campaign_visibility_routes import (
     CampaignVisibilityBrowserDependencies,
     register_campaign_visibility_browser_routes,
@@ -61,6 +62,7 @@ from .auth import (
     can_manage_campaign_session,
     can_post_campaign_session_messages,
     campaign_scope_access_required,
+    campaign_integrity_unavailable_response,
     clear_campaign_visibility_cache,
     get_accessible_campaign_entries,
     get_auth_store,
@@ -521,6 +523,7 @@ from .session_presenter import (
     present_session_record,
 )
 from .session_source_presenter import (
+    LEGACY_WIKI_IMAGE_OMISSION_NOTICE,
     get_pullable_session_wiki_article_payload,
     get_pullable_session_systems_entry as get_shared_pullable_session_systems_entry,
     get_pullable_session_wiki_page_record as get_shared_pullable_session_wiki_page_record,
@@ -1470,6 +1473,10 @@ def create_app() -> Flask:
             raise ValueError(
                 "The selected Character does not carry this exact Systems item ref."
             )
+        visible_page_records = list_visible_character_page_records_for_store(
+            campaign_page_store, campaign_slug, campaign,
+            include_body=True, excluded_sections={"Sessions"},
+        )
 
         def projection_digest(entry) -> str:
             projection = build_character_mechanics_projection(
@@ -1480,8 +1487,20 @@ def create_app() -> Flask:
                 systems_service=MechanicsImpactOverlaySystemsService(
                     systems_service, entry
                 ),
-                campaign_page_records=None,
+                campaign_page_records=visible_page_records,
             )
+            from .committed_publication import active
+            if active() and is_dnd_5e_system(record.definition.system) and (
+                not projection.get("source_authority_identity")
+                or any(
+                    warning.get("code") in {
+                        "read_time_projection_failed", "transient_mechanics_projection_failed"
+                    }
+                    for warning in projection.get("projection_warnings") or []
+                    if isinstance(warning, dict)
+                )
+            ):
+                raise ValueError("Current Character source authority is unavailable for impact preview.")
             projected_definition = projection.get("definition")
             definition_payload = (
                 projected_definition.to_dict()
@@ -1495,6 +1514,8 @@ def create_app() -> Flask:
                 "attack_reminders": projection.get("attack_reminders") or [],
                 "defensive_rules": projection.get("defensive_rules") or [],
                 "item_use_actions": projection.get("item_use_actions") or [],
+                "source_authority_identity": projection.get("source_authority_identity") or "",
+                "projection_warnings": projection.get("projection_warnings") or [],
             }
             return hashlib.sha256(
                 json.dumps(
@@ -6305,6 +6326,7 @@ def create_app() -> Flask:
         image_file = request.files.get("image_file")
         referenced_image_file = request.files.get("referenced_image_file")
         source_kind = ""
+        legacy_image_omitted = False
 
         try:
             if article_mode == "upload":
@@ -6349,7 +6371,10 @@ def create_app() -> Flask:
                     created_by_user_id=created_by_user_id,
                 )
             elif article_mode == "wiki":
-                campaign = load_campaign_context(campaign_slug)
+                try:
+                    campaign = load_campaign_context(campaign_slug)
+                except CommittedSourceConflict:
+                    abort(campaign_integrity_unavailable_response())
                 source_kind, source_ref = parse_session_article_source_ref(
                     request.form.get("source_ref", "") or request.form.get("wiki_page_ref", "")
                 )
@@ -6397,6 +6422,7 @@ def create_app() -> Flask:
                         raise CampaignSessionValidationError(
                             "Choose a visible published wiki page or Systems entry before pulling it into the session store."
                         )
+                    legacy_image_omitted = page_payload.legacy_image_omitted
                     article = session_service.create_article(
                         campaign_slug,
                         title=page_payload.title,
@@ -6435,7 +6461,7 @@ def create_app() -> Flask:
                     pass
             raise
 
-        return article, article_mode, source_kind
+        return article, article_mode, source_kind, legacy_image_omitted
 
     def update_session_article_from_request(
         campaign_slug: str,
@@ -10408,9 +10434,11 @@ def create_app() -> Flask:
         article_mode = normalize_session_article_form_mode(request.form.get("article_mode", "manual"))
         source_kind = ""
         try:
-            _, article_mode, source_kind = create_session_article_from_request(
-                campaign_slug,
-                created_by_user_id=user.id,
+            _, article_mode, source_kind, legacy_image_omitted = (
+                create_session_article_from_request(
+                    campaign_slug,
+                    created_by_user_id=user.id,
+                )
             )
         except CampaignSessionValidationError as exc:
             flash(str(exc), "error")
@@ -10419,7 +10447,10 @@ def create_app() -> Flask:
                 if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
                     flash("Systems entry added to staged articles.", "success")
                 else:
-                    flash("Published wiki page added to staged articles.", "success")
+                    message = "Published wiki page added to staged articles."
+                    if legacy_image_omitted:
+                        message += f" {LEGACY_WIKI_IMAGE_OMISSION_NOTICE}"
+                    flash(message, "success")
             else:
                 flash("Staged article added to the session reveal queue.", "success")
 

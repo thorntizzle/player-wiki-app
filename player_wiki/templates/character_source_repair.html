@@ -1,16 +1,28 @@
 {% extends "base.html" %}
 
-{% block title %}Repair Character source | {{ character.name }}{% endblock %}
+{% block title %}Repair Character source{% if not blocked %} | {{ character.name }}{% endif %}{% endblock %}
 
 {% block content %}
   <div class="character-update-preview page-stack">
     <header class="card">
       <p class="eyebrow">DND-5E Character manager</p>
-      <h1>Repair source for {{ character.name }}</h1>
+      <h1>{% if blocked %}Character source needs manager repair{% else %}Repair source for {{ character.name }}{% endif %}</h1>
+      {% if blocked %}
+      <p>The committed Character is blocked. Inspect the operation and refresh after repair. Source review and apply are unavailable.</p>
+      {% else %}
       <p>Select one exact Character instance and one current source. The preview shows effective grants gained and lost before applying.</p>
-      <a class="ghost-button" href="{{ url_for('character_update_preview_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Back to Character Update</a>
+      <p class="meta">Committed Character generation {{ manager_generation.revision }} is the current source. Mirror files are draft copies.</p>
+      {% endif %}
+      {% for issue in manager_generation.issues %}
+        <p class="meta">Repair: {{ issue.reason | replace('_', ' ') }}{% if issue.journal_kind %}; {{ issue.journal_kind }} journal {{ issue.journal_state }}{% endif %}. Affected action: {{ issue.affected_action | replace('_', ' ') }}. Retry: {{ issue.safe_retry | replace('_', ' ') }}.{% if issue.definition_mirror %} Current definition mirror: {{ issue.definition_mirror }}; import mirror: {{ issue.import_mirror }}.{% endif %}{% if issue.mirror_last_replay_state %} Last replay state: {{ issue.mirror_last_replay_state }}.{% endif %}</p>
+      {% endfor %}
+      {% if manager_generation.import_choice_required %}
+        <p class="meta">Choose explicitly whether to retain the committed generation or review the mirror draft for import. This source repair does not import mirror files.</p>
+      {% endif %}
+      {% if not blocked %}<a class="ghost-button" href="{{ url_for('character_update_preview_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Back to Character Update</a>{% endif %}
     </header>
 
+    {% if not blocked %}
     {% if outcome %}
       <section class="callout" role="status"><p>{{ outcome }}</p></section>
     {% endif %}
@@ -101,6 +113,7 @@
           <button type="submit" name="intent" value="review">Preview stat or resource attestation</button>
         </form>
       </section>
+    {% endif %}
     {% endif %}
   </div>
 {% endblock %}

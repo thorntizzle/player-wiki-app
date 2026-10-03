@@ -403,6 +403,11 @@ def _create_source_links(definition: CharacterDefinition, initial_state: dict):
             if _claim(value.get("systems_ref")) and _claim(value.get("page_ref")):
                 raise CommittedSourceConflict(f"Character source row at {_link_owner(path)} has conflicting links.")
             for field, child in value.items():
+                if path == ("definition", "source") and field == "source_authorizations":
+                    # Private numeric markers carry page_ref as evidence, not as
+                    # a Character source claim. Their audit and basis are checked
+                    # separately; retained feature/page links remain below.
+                    continue
                 child_path = (*path, field)
                 child_owner = _link_owner(child_path)
                 if field in _EXACT_LINK_FIELDS and _claim(child):
@@ -621,6 +626,29 @@ def _create_source_proof(campaign_slug, pages, entries, *, connection):
             raise CommittedSourceConflict("Character primary class row and alias disagree.")
     return CreateSourceProof(int(settings_source["revision"]), session, token_row["token"],
                              library_slug, tuple(page_proofs), tuple(entry_proofs))
+
+
+def _update_source_claims(prior_record, definition, prepared_state):
+    """Reprove changed exact claims, including a moved list owner."""
+    prior_pages, prior_entries = _create_source_links(
+        prior_record.definition, prior_record.state_record.state,
+    )
+    pages, entries = _create_source_links(definition, prepared_state)
+    prior = set((*prior_pages, *prior_entries))
+    changed = {link for link in (*pages, *entries) if link not in prior}
+    # The primary class alias and its row must still resolve to one entry if
+    # either claim changes. A disabled retained companion cannot certify a
+    # newly retargeted alias through the retained-link exception.
+    coupled = (
+        ("definition.profile.class_ref", "definition.profile.classes[0].systems_ref"),
+        ("definition.profile.subclass_ref", "definition.profile.classes[0].subclass_ref"),
+    )
+    for owners in coupled:
+        if any(link.owner in owners for link in changed):
+            changed.update(link for link in entries if link.owner in owners)
+    return (pages, entries,
+            tuple(link for link in pages if link in changed),
+            tuple(link for link in entries if link in changed))
 
 
 def _sha(data: bytes | None) -> str | None:
@@ -941,6 +969,20 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
     if (reviewed_source_proof is not None and reviewed_source_proof.page_feature_markers
             and prepared.validated_state != desired_state):
         raise CharacterStateConflictError("Page feature state changed during validation.")
+    pages, entries, new_pages, new_entries = _update_source_claims(
+        prior_record, definition, prepared.validated_state,
+    )
+    connection = get_db()
+    owned_snapshot = not connection.in_transaction
+    if owned_snapshot:
+        connection.execute("BEGIN")
+    try:
+        expected_source = _create_source_proof(
+            definition.campaign_slug, new_pages, new_entries, connection=connection,
+        )
+    finally:
+        if owned_snapshot:
+            connection.rollback()
     clean_audit = coordinator._prepare_update_audit(
         operation_kind=operation_kind, audit_event_type=audit_event_type,
         audit_actor_user_id=audit_actor_user_id, audit_target_user_id=audit_target_user_id,
@@ -958,7 +1000,6 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         filename = Path(desired_asset_ref).name
         if validated_campaign_asset_media_type(Path(filename), data_blob=bytes(desired_asset_bytes)) is None:
             raise CommittedSourceConflict("Portrait bytes failed image validation.")
-    connection = get_db()
     _reserve(connection)
     try:
         slug = definition.character_slug
@@ -1040,6 +1081,18 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
                     "Character source or state changed before reimport; inspect the Character and retry."
                 )
             prepared = reserved_prepared
+        locked_pages, locked_entries, locked_new_pages, locked_new_entries = _update_source_claims(
+            prior_record, definition, prepared.validated_state,
+        )
+        if ((locked_pages, locked_entries, locked_new_pages, locked_new_entries)
+                != (pages, entries, new_pages, new_entries)):
+            raise CommittedSourceConflict("Character source claims changed before publication.")
+        locked_source = _create_source_proof(
+            campaign, locked_new_pages, locked_new_entries, connection=connection,
+        )
+        if (locked_source != expected_source
+                or locked_source.config_revision != locked_config["revision"]):
+            raise CommittedSourceConflict("Character source changed before publication.")
         prior_portrait = portrait_bytes(campaign, slug, connection=connection)
         ref = str((definition.profile or {}).get("portrait_asset_ref") or "").strip()
         if operation_kind == "portrait_upsert":
@@ -1358,6 +1411,80 @@ def replay_character_mirror(connection, campaigns_dir, row, source, settings):
     return state
 
 
+def character_journal_repairs(campaign_slug: str, *, connection=None):
+    """Bounded manager-only journal identities, without operation payloads."""
+    connection = connection or get_db()
+    queries = (
+        ("reconciliation", "SELECT character_slug,state FROM character_reconciliation_operations "
+         "WHERE campaign_slug=? AND state IN ('prepared','repository_pending','conflict')"),
+        ("deletion", "SELECT character_slug,state FROM character_deletion_operations "
+         "WHERE campaign_slug=? AND state IN ('prepared','repository_pending','conflict')"),
+        ("publication", "SELECT object_ref AS character_slug,state FROM committed_source_publications "
+         "WHERE campaign_slug=? AND object_kind='character' AND state IN ('prepared','conflict')"),
+    )
+    result = []
+    for kind, sql in queries:
+        rows = connection.execute(sql + " LIMIT 1001", (campaign_slug,)).fetchall()
+        if len(rows) > 1000:
+            raise CommittedSourceConflict("Character journal inventory exceeds its bound.")
+        result.extend({"character_slug": row["character_slug"],
+                       "reason": "character_journal_requires_manager_repair",
+                       "journal_kind": kind, "journal_state": row["state"]}
+                      for row in rows)
+    return result
+
+
+def character_mirror_comparison(campaign_slug: str, character_slug: str, *,
+                                connection=None, config_record=None):
+    """Compare current mirror bytes with the committed pair, even with a journal."""
+    connection = connection or get_db()
+    from flask import current_app
+    from .committed_publication import _mirror_bytes
+    from .character_path_safety import resolve_character_definition_import_paths
+    from .character_repository import load_campaign_character_config
+
+    result = {"mirror_current_state": "proof_unavailable",
+              "definition_mirror": "unavailable", "import_mirror": "unavailable"}
+    try:
+        source = current(campaign_slug, "character", character_slug,
+                         connection=connection, allow_tombstone=True)
+        if source is None or source["tombstone"]:
+            result["mirror_current_state"] = "not_applicable"
+            return result
+        secondary = source["secondary_bytes"]
+        if (not isinstance(secondary, bytes) or not secondary or len(secondary) > MAX_PAIR_BYTES
+                or _sha(secondary) != source["secondary_sha256"]):
+            return result
+        result["mirror_current_state"] = "unavailable"
+        config_record = config_record or load_campaign_character_config(
+            current_app.config["CAMPAIGNS_DIR"], campaign_slug)
+        if not config_record.characters_dir.resolve().is_relative_to(config_record.campaign_dir.resolve()):
+            return result
+        paths = resolve_character_definition_import_paths(config_record.characters_dir, character_slug)
+        for label, path, expected in zip(
+            ("definition", "import"), paths,
+            (source["primary_sha256"], source["secondary_sha256"]),
+        ):
+            try:
+                observed = _mirror_bytes(path)
+            except (CommittedSourceConflict, OSError, ValueError, RuntimeError):
+                result[label + "_mirror"] = "unavailable"
+            else:
+                result[label + "_mirror"] = (
+                    "matching" if _sha(observed) == expected else
+                    "missing" if observed is None else "modified"
+                )
+    except (CommittedSourceConflict, OSError, ValueError, TypeError, RuntimeError):
+        return result
+    states = {result["definition_mirror"], result["import_mirror"]}
+    result["mirror_current_state"] = (
+        "matching" if states == {"matching"} else
+        "unavailable" if "unavailable" in states else
+        "missing" if "missing" in states else "modified"
+    )
+    return result
+
+
 @read_snapshot
 def character_repairs(campaign_slug: str):
     """Manager-only actionable non-payload inventory for committed Characters."""
@@ -1365,17 +1492,15 @@ def character_repairs(campaign_slug: str):
     refs = {row[0] for row in connection.execute(
         "SELECT object_ref FROM committed_source_current WHERE campaign_slug=? AND object_kind='character'",
         (campaign_slug,),
-    )}
+    ).fetchall()}
     refs.update(row[0] for row in connection.execute(
         "SELECT object_ref FROM committed_source_admission WHERE campaign_slug=? AND object_kind='character'",
         (campaign_slug,),
-    ))
-    refs.update(row[0] for row in connection.execute(
-        "SELECT character_slug FROM character_deletion_operations WHERE campaign_slug=? "
-        "AND state IN ('prepared','repository_pending','conflict')",
-        (campaign_slug,),
-    ))
-    repairs = []
+    ).fetchall())
+    journal_repairs = character_journal_repairs(campaign_slug, connection=connection)
+    refs.update(row["character_slug"] for row in journal_repairs)
+    journal_refs = {row["character_slug"] for row in journal_repairs}
+    repairs = list(journal_repairs)
     from flask import current_app
     from .committed_publication import _mirror_bytes, _safe_mirror_path
     from .character_assets import resolve_character_portrait_asset_path
@@ -1383,10 +1508,12 @@ def character_repairs(campaign_slug: str):
     from .character_path_safety import resolve_character_definition_import_paths
     from .character_repository import load_campaign_character_config
     config_record = load_campaign_character_config(current_app.config["CAMPAIGNS_DIR"], campaign_slug)
-    if not config_record.characters_dir.resolve().is_relative_to(config_record.campaign_dir.resolve()):
-        return [{"character_slug": ref, "reason": "character_mirror_root_unsafe"}
-                for ref in sorted(refs)]
-    if config_record.characters_dir.is_dir():
+    try:
+        safe_root = config_record.characters_dir.resolve().is_relative_to(
+            config_record.campaign_dir.resolve())
+    except (OSError, RuntimeError, ValueError):
+        safe_root = False
+    if safe_root and config_record.characters_dir.is_dir():
         drafts = list(config_record.characters_dir.glob("*/definition.yaml"))
         drafts.extend(config_record.characters_dir.glob("*/import.yaml"))
         if len(drafts) > 1000:
@@ -1398,8 +1525,29 @@ def character_repairs(campaign_slug: str):
                 continue
             refs.add(draft.parent.name)
     for ref in sorted(refs):
+        if ref in journal_refs:
+            # A journal blocks exact_character. Report each journal first and
+            # compare mirror bytes separately; never call the pair failure generic.
+            if not safe_root:
+                repairs.append({"character_slug": ref, "reason": "character_mirror_root_unsafe",
+                                "mirror_current_state": "unavailable",
+                                "definition_mirror": "unavailable", "import_mirror": "unavailable"})
+                continue
+            mirror_health = character_mirror_comparison(
+                campaign_slug, ref, connection=connection, config_record=config_record)
+            if mirror_health["mirror_current_state"] == "proof_unavailable":
+                repairs.append({"character_slug": ref,
+                                "reason": "committed_pair_or_portrait_invalid"})
+            elif mirror_health["mirror_current_state"] in {"missing", "modified", "unavailable"}:
+                repairs.append({"character_slug": ref,
+                                "reason": "character_pair_mirror_missing_or_modified"
+                                if mirror_health["mirror_current_state"] != "unavailable"
+                                else "character_pair_mirror_unavailable",
+                                **mirror_health})
+            continue
         reason = None
         comparison = {}
+        committed_proof_valid = False
         deletion_journal = connection.execute(
             "SELECT state FROM character_deletion_operations WHERE campaign_slug=? "
             "AND character_slug=? AND state IN ('prepared','repository_pending','conflict') "
@@ -1424,6 +1572,9 @@ def character_repairs(campaign_slug: str):
             else:
                 comparison["committed_revision"] = source["revision"]
                 portrait = portrait_bytes(campaign_slug, ref, connection=connection) if not source["tombstone"] else None
+                committed_proof_valid = True
+                if not safe_root:
+                    raise CommittedSourceConflict("Character mirror root is unsafe.")
                 paths = resolve_character_definition_import_paths(config_record.characters_dir, ref)
                 expected = (source["primary_sha256"], source["secondary_sha256"])
                 observed = tuple(_mirror_bytes(path) for path in paths)
@@ -1463,14 +1614,23 @@ def character_repairs(campaign_slug: str):
                         if asset_path.exists():
                             reason = "character_portrait_mirror_not_retired"
         except (CommittedSourceConflict, OSError, ValueError, TypeError, UnicodeError, yaml.YAMLError):
-            reason = ("legacy_deletion_journal_requires_manager_repair"
-                      if deletion_journal is not None else "committed_pair_or_portrait_invalid")
+            mirror_health = character_mirror_comparison(
+                campaign_slug, ref, connection=connection, config_record=config_record)
+            comparison.update(mirror_health)
+            if deletion_journal is not None:
+                reason = "legacy_deletion_journal_requires_manager_repair"
+            elif committed_proof_valid:
+                reason = ("character_mirror_root_unsafe" if not safe_root
+                          else "character_pair_mirror_unavailable")
+            else:
+                reason = "committed_pair_or_portrait_invalid"
         mirror = connection.execute(
             "SELECT state FROM committed_source_mirrors WHERE campaign_slug=? "
             "AND object_kind='character' AND object_ref=?", (campaign_slug, ref),
         ).fetchone()
         if reason is None and mirror is not None and mirror["state"] in {"conflict", "missing", "unknown"}:
-            reason = "character_pair_mirror_conflict"
+            reason = "character_pair_last_replay_conflict"
+            comparison["mirror_last_replay_state"] = mirror["state"]
         if reason is not None:
             repairs.append({"character_slug": ref, "reason": reason, **comparison})
     return repairs

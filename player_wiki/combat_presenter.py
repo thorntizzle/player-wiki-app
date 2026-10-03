@@ -5,6 +5,7 @@ from flask import current_app, has_app_context
 from .character_hit_dice import hit_dice_summary_from_state
 from .character_models import CharacterRecord
 from .character_profile import profile_class_level_text
+from .campaign_combat_service import MOVEMENT_VALUE_PATTERN, parse_combat_movement_total
 from .db import get_db
 from .system_policy import is_dnd_5e_system
 from .combat_models import (
@@ -109,6 +110,33 @@ def present_combat_tracker(
                                 "stats.max_hp", "stats.speed",
                             )
                         )
+                        if authority is not None and not historical_snapshot:
+                            # A combatant is a saved combat snapshot. A new
+                            # committed Character/source generation can make
+                            # its formerly valid numeric seed historical.
+                            current_numbers = (
+                                ("stats.max_hp", combatant.max_hp),
+                                ("stats.initiative_bonus", combatant.initiative_bonus),
+                                ("stats.ability_scores.dex.modifier", combatant.dexterity_modifier),
+                            )
+                            speed = authority.field_status("stats.speed").effective
+                            movement_total = (
+                                parse_combat_movement_total(speed)
+                                if MOVEMENT_VALUE_PATTERN.search(str(speed if speed is not None else "")) is not None
+                                else None
+                            )
+                            historical_snapshot = (
+                                movement_total is None
+                                or movement_total != combatant.movement_total
+                                or any(
+                                    type(authority.field_status(path).effective) is not int
+                                    or authority.field_status(path).effective != saved
+                                    for path, saved in current_numbers
+                                )
+                            )
+                            if historical_snapshot:
+                                movement_safe = False
+                                hp_safe = False
                 except (KeyError, RuntimeError, TypeError, ValueError):
                     historical_snapshot = True
                     movement_safe = False
@@ -165,6 +193,13 @@ def present_combat_tracker(
                 "turn_value": combatant.turn_value,
                 "initiative_bonus_label": format_signed(combatant.initiative_bonus) if show_detail else "",
                 "historical_snapshot": historical_snapshot,
+                "source_authority_identity": (
+                    authority.identity if authority is not None and show_detail else ""
+                ),
+                "source_warnings": (
+                    [{"code": code, "message": message} for code, message in authority.warnings]
+                    if authority is not None and show_detail else []
+                ),
                 "snapshot_note": (
                     "Historical table-managed Combat snapshot; Character numeric owners need repair before automatic refresh."
                     if historical_snapshot and show_detail else ""

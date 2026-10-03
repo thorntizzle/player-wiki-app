@@ -4516,10 +4516,17 @@ class SystemsService:
         campaign_slug: str,
         entry: SystemsEntryRecord,
     ) -> bool:
+        library = self.get_campaign_library_for_character_read(campaign_slug)
+        if (library is None or library.status != "active"
+                or entry.library_slug != library.library_slug):
+            return False
         source_state = self._campaign_source_state_map_for_character_read(
             campaign_slug
         ).get(str(entry.source_id or "").strip())
-        if source_state is None or not source_state.is_enabled:
+        if (source_state is None or not source_state.is_enabled
+                or source_state.source.status != "active"
+                or source_state.source.library_slug != library.library_slug
+                or source_state.source.source_id != entry.source_id):
             return False
         override = self._campaign_entry_override_map(
             campaign_slug,

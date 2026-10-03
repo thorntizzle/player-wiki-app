@@ -417,6 +417,41 @@ acceptance statements below describe completed releases, not current commands.
 
 ## Data And Volume Boundaries
 
+### Committed-source activation candidate (local, unintegrated)
+
+The Stage 7 candidate adds private `ops.py committed-activation-inspect` and
+`ops.py committed-activation-apply`. Both require explicit `--db-path` and
+`--campaigns-dir`; apply also requires `--backup-root`, `--confirm-target`
+equal to the resolved database path, and the fresh `--readiness-sha256` from
+inspect. Inspect reports bounded object identities and reason codes, without
+source payloads. Apply creates and verifies a private v3 backup, then takes one
+SQLite writer reservation and recomputes global readiness before the trusted
+v18 marker changes from closed to active. Activation is one-way. The default
+after migration remains closed, and any blocked or missing configured object
+prevents activation. Apply requires the app to be stopped and holds the
+exclusive runtime lease through backup and commit. External campaign-file
+writers must also be quiesced; SQLite cannot make a filesystem scan atomic
+with its commit. The candidate is unintegrated and grants no live or
+protected-data authority; use on a real target needs a separate operator gate.
+
+For source-bound native spell formula/choice and page tracker values, inspect
+proves both closed and projected active bases from one SQLite snapshot. Apply
+stores a private, versioned transition audit in the same transaction as the
+marker. A missing, copied, duplicate, stale, or mismatched original witness
+blocks readiness with a bounded reason; a failed append rolls back the marker.
+Postcommit readback checks both marker and transition records, and uncertainty
+requires inspection before any further action.
+
+For activated page-image mirror conflicts in this local candidate, inspect the
+manager-only content page list for the affected page and repair reason. Preserve
+the differing file while investigating it; compare or restore the canonical
+managed file against the verified committed image through an authorized
+operator procedure. Restart the app after correction so startup recovery retries
+the current conflict entry without replacing a competing file. A missing file
+can be recreated from the committed BLOB by replay. A current mismatch remains
+visible to manager diagnostics even if an older outbox entry was complete.
+
+
 - On Fly, app code is baked into the image.
 - SQLite and campaign content live on the mounted `/data` volume.
 - Numbered schema migrations come online through startup `manage.py init-db` against the mounted DB before Gunicorn starts.

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from io import BytesIO
+import os
 from pathlib import Path
+import stat
 from typing import Any, Callable
 
-from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, send_from_directory, url_for
+from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, send_file, send_from_directory, url_for
 
 from .auth import (
     can_access_campaign_scope,
@@ -254,9 +257,7 @@ def campaign_asset(campaign_slug: str, asset_path: str):
                     draft = managed_wiki_image_path(campaign.assets_dir, asset_path)
                 except CampaignContentError:
                     abort(404)
-                if not draft.is_file():
-                    abort(404)
-                return _send_campaign_asset(draft)
+                return _send_managed_campaign_asset(campaign, asset_path, draft)
             media = validated_campaign_asset_media_type(Path(asset_path), data_blob=data)
             if media is None:
                 abort(404)
@@ -267,12 +268,11 @@ def campaign_asset(campaign_slug: str, asset_path: str):
             asset_file = managed_wiki_image_path(campaign.assets_dir, asset_path)
         except CampaignContentError:
             abort(404)
-        if not asset_file.is_file() or (
-            not is_content_manager
+        if (not is_content_manager
             and not is_visible_managed_wiki_image(campaign_slug, campaign.current_session, asset_path)
         ):
             abort(404)
-        return _send_campaign_asset(asset_file)
+        return _send_managed_campaign_asset(campaign, asset_path, asset_file)
 
     return _legacy_campaign_asset(campaign_slug=campaign_slug, asset_path=asset_path)
 
@@ -301,6 +301,52 @@ def _send_campaign_asset(asset_file: Path):
         as_attachment=media_type is None,
         download_name=asset_file.name,
     )
+
+
+def _send_managed_campaign_asset(campaign: Any, asset_ref: str, selected_path: Path):
+    """Read the selected original path with a final ancestry and inode check."""
+    try:
+        path = managed_wiki_image_path(campaign.assets_dir, asset_ref)
+        if path != selected_path:
+            abort(404)
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        try:
+            with os.fdopen(descriptor, "rb") as stream:
+                before = os.fstat(stream.fileno())
+                if (not stat.S_ISREG(before.st_mode)
+                        or int(getattr(before, "st_file_attributes", 0)) & 0x400
+                        or before.st_size > MAX_INGRESS_FILE_BYTES):
+                    abort(404)
+                data = stream.read(MAX_INGRESS_FILE_BYTES + 1)
+                after = os.fstat(stream.fileno())
+        except BaseException:
+            # fdopen owns the descriptor after it succeeds.
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            raise
+        managed_wiki_image_path(campaign.assets_dir, asset_ref)
+        named = path.lstat()
+        managed_wiki_image_path(campaign.assets_dir, asset_ref)
+        if (len(data) > MAX_INGRESS_FILE_BYTES
+                or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                or (after.st_dev, after.st_ino) != (named.st_dev, named.st_ino)):
+            abort(404)
+    except (CampaignContentError, OSError):
+        abort(404)
+    media_type = validated_campaign_asset_media_type(path, data_blob=data)
+    if media_type is None:
+        g.restrict_campaign_asset_csp = True
+    response = send_file(
+        BytesIO(data), mimetype=media_type or "application/octet-stream",
+        as_attachment=media_type is None, download_name=path.name, conditional=False,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @campaign_scope_access_required("wiki")

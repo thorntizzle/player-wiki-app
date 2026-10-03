@@ -37,7 +37,10 @@ from .live_presenter import (
 from .campaign_session_service import CampaignSessionValidationError, SessionArticleEditConflictError
 from .session_article_publisher import SessionArticlePublishError
 from .session_models import SESSION_ARTICLE_SOURCE_KIND_SYSTEMS
-from .session_source_presenter import build_session_article_source_search_results
+from .session_source_presenter import (
+    LEGACY_WIKI_IMAGE_OMISSION_NOTICE,
+    build_session_article_source_search_results,
+)
 from .session_closeout_presenter import present_session_log_closeout_action
 from .session_presenter import present_session_messages, present_session_record, retain_session_article_draft
 
@@ -620,9 +623,11 @@ def campaign_session_create_article(campaign_slug: str):
     source_kind = ""
     mutation_succeeded = False
     try:
-        _, article_mode, source_kind = dependencies.create_session_article_from_request(
-            campaign_slug,
-            created_by_user_id=user.id,
+        _, article_mode, source_kind, legacy_image_omitted = (
+            dependencies.create_session_article_from_request(
+                campaign_slug,
+                created_by_user_id=user.id,
+            )
         )
     except CampaignSessionValidationError as exc:
         flash(str(exc), "error")
@@ -631,7 +636,10 @@ def campaign_session_create_article(campaign_slug: str):
             if source_kind == SESSION_ARTICLE_SOURCE_KIND_SYSTEMS:
                 flash("Systems entry pulled into the session store.", "success")
             else:
-                flash("Published wiki page pulled into the session store.", "success")
+                message = "Published wiki page pulled into the session store."
+                if legacy_image_omitted:
+                    message += f" {LEGACY_WIKI_IMAGE_OMISSION_NOTICE}"
+                flash(message, "success")
         else:
             flash("Session article saved to the session store.", "success")
         mutation_succeeded = True

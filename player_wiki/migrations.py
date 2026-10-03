@@ -1982,7 +1982,23 @@ CREATE TRIGGER IF NOT EXISTS committed_character_portraits_no_delete
 BEFORE DELETE ON committed_character_portraits
 BEGIN SELECT RAISE(ABORT, 'committed portrait bytes are immutable'); END;
 """
-CURRENT_SCHEMA_SQL = SCHEMA_V16_SQL + "\n" + _COMMITTED_CHARACTER_PORTRAIT_SCHEMA_SQL
+SCHEMA_V17_SQL = SCHEMA_V16_SQL + "\n" + _COMMITTED_CHARACTER_PORTRAIT_SCHEMA_SQL
+_COMMITTED_ACTIVATION_V18_SQL = """
+DROP TRIGGER IF EXISTS committed_source_activation_no_update_active;
+UPDATE committed_source_activation SET schema_version = 18
+WHERE singleton = 1 AND activated = 0 AND schema_version = 15;
+CREATE TRIGGER committed_source_activation_no_update_active
+BEFORE UPDATE ON committed_source_activation
+WHEN NOT (
+    OLD.singleton = 1 AND NEW.singleton = 1
+    AND OLD.activated = 0 AND NEW.activated = 1
+    AND OLD.activated_at IS NULL AND NEW.activated_at IS NOT NULL
+    AND OLD.coverage_version = 0 AND NEW.coverage_version = 1
+    AND OLD.schema_version = 18 AND NEW.schema_version = 18
+)
+BEGIN SELECT RAISE(ABORT, 'committed source activation is one-way'); END;
+"""
+CURRENT_SCHEMA_SQL = SCHEMA_V17_SQL + "\n" + _COMMITTED_ACTIVATION_V18_SQL
 
 
 class MigrationError(RuntimeError):
@@ -2625,8 +2641,10 @@ _COMMITTED_SOURCE_CHECKSUM = "20a56573f27b5256121dbd11cc343fc496502cfdc218cfea60
 
 _COMMITTED_IMAGE_PAYLOAD = MigrationPayload(schema_sql=SCHEMA_V16_SQL, transforms=())
 _COMMITTED_IMAGE_CHECKSUM = "f99b3e993e8fc2193dee4a1d1625a197db3a36d945eeff26a26ff19a74cc7b3d"
-_COMMITTED_CHARACTER_PORTRAIT_PAYLOAD = MigrationPayload(schema_sql=CURRENT_SCHEMA_SQL, transforms=())
+_COMMITTED_CHARACTER_PORTRAIT_PAYLOAD = MigrationPayload(schema_sql=SCHEMA_V17_SQL, transforms=())
 _COMMITTED_CHARACTER_PORTRAIT_CHECKSUM = "4dd3eb97b6a7ad6b1d3d63519f9d81271c1714f534cf8e7343ddf31c042278d1"
+_COMMITTED_ACTIVATION_V18_PAYLOAD = MigrationPayload(schema_sql=CURRENT_SCHEMA_SQL, transforms=())
+_COMMITTED_ACTIVATION_V18_CHECKSUM = "65136e8ea080a3e9a12604fc9e6b7d43457f1cc54afa3b0550e3ca18fb423a35"
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, _BASELINE_NAME, _BASELINE_CHECKSUM, _BASELINE_PAYLOAD),
@@ -2707,6 +2725,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(16, "0016_committed_page_images", _COMMITTED_IMAGE_CHECKSUM, _COMMITTED_IMAGE_PAYLOAD),
     Migration(17, "0017_committed_character_portraits", _COMMITTED_CHARACTER_PORTRAIT_CHECKSUM,
               _COMMITTED_CHARACTER_PORTRAIT_PAYLOAD),
+    Migration(18, "0018_committed_source_activation", _COMMITTED_ACTIVATION_V18_CHECKSUM,
+              _COMMITTED_ACTIVATION_V18_PAYLOAD),
 )
 
 

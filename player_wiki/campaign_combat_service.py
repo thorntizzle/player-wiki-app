@@ -198,7 +198,7 @@ def build_character_combat_snapshot(record: object, *, source_authority: Any | N
         if not status.is_effective:
             raise CampaignCombatValidationError("Character numeric values need manager repair before Combat automation.")
         if label == "movement_total":
-            if MOVEMENT_VALUE_PATTERN.search(str(status.effective or "")) is None:
+            if MOVEMENT_VALUE_PATTERN.search(str(status.effective if status.effective is not None else "")) is None:
                 raise CampaignCombatValidationError("Movement speed needs manager repair before Combat automation.")
             values[label] = parse_combat_movement_total(status.effective)
         else:
@@ -928,8 +928,7 @@ class CampaignCombatService:
         movement_authority_identity = None
         legacy_movement_limit = not activated
         if (combatant.is_player_character and combatant.character_slug
-                and (movement_remaining is not None if activated else
-                     normalized_movement_remaining != combatant.movement_remaining)):
+                and normalized_movement_remaining != combatant.movement_remaining):
             character_record = (self._load_current_player_character(
                 campaign_slug, combatant.character_slug,
             ) if activated else self.character_repository.get_combat_seed_character(
@@ -951,11 +950,12 @@ class CampaignCombatService:
             if activated and not is_xianxia_system(character_record.definition.system):
                 if movement_authority is None:
                     raise CampaignCombatValidationError("Movement speed needs manager repair before it can change.")
+                speed_status = movement_authority.field_status("stats.speed")
                 movement_total_for_write = parse_combat_movement_total(
-                    movement_authority.field_status("stats.speed").effective,
+                    speed_status.effective,
                 )
                 if MOVEMENT_VALUE_PATTERN.search(
-                    str(movement_authority.field_status("stats.speed").effective or "")
+                    str(speed_status.effective if speed_status.effective is not None else "")
                 ) is None:
                     raise CampaignCombatValidationError("Movement speed needs manager repair before it can change.")
                 if normalized_movement_remaining > movement_total_for_write:
@@ -988,7 +988,9 @@ class CampaignCombatService:
                                       else has_bonus_action),
                     has_reaction=combatant.has_reaction if has_reaction is None else has_reaction,
                     movement_total=movement_total_for_write,
-                    movement_remaining=normalized_movement_remaining,
+                    movement_remaining=(normalized_movement_remaining
+                                        if normalized_movement_remaining != combatant.movement_remaining
+                                        else None),
                     expected_revision=expected_revision,
                     updated_by_user_id=updated_by_user_id,
                     commit=False,
@@ -1544,29 +1546,28 @@ class CampaignCombatService:
                     ):
                         continue
                     pending.append((combatant, record, snapshot, remaining))
-                if not deferred:
-                    for combatant, record, snapshot, remaining in pending:
-                        self.store.update_combatant(
-                            campaign_slug, combatant.id,
-                            display_name=record.definition.name,
-                            initiative_bonus=snapshot["initiative_bonus"],
-                            dexterity_modifier=snapshot["dexterity_modifier"],
-                            current_hp=snapshot["current_hp"], max_hp=snapshot["max_hp"],
-                            temp_hp=snapshot["temp_hp"],
-                            movement_total=snapshot["movement_total"],
-                            movement_remaining=remaining,
-                            expected_revision=combatant.revision, commit=False,
-                        )
-                        changed = True
-                    if changed:
-                        self.store.bump_tracker_revision(campaign_slug, commit=False)
+                for combatant, record, snapshot, remaining in pending:
+                    self.store.update_combatant(
+                        campaign_slug, combatant.id,
+                        display_name=record.definition.name,
+                        initiative_bonus=snapshot["initiative_bonus"],
+                        dexterity_modifier=snapshot["dexterity_modifier"],
+                        current_hp=snapshot["current_hp"], max_hp=snapshot["max_hp"],
+                        temp_hp=snapshot["temp_hp"],
+                        movement_total=snapshot["movement_total"],
+                        movement_remaining=remaining,
+                        expected_revision=combatant.revision, commit=False,
+                    )
+                    changed = True
+                if changed:
+                    self.store.bump_tracker_revision(campaign_slug, commit=False)
             metrics.sync_changed = changed
             metrics.sync_ran = True
             metrics.status = SNAPSHOT_SYNC_STATUS_DEFERRED if deferred else SNAPSHOT_SYNC_STATUS_SYNCED
             self._player_snapshot_sync_completed_at[campaign_slug] = time.monotonic()
             self._player_snapshot_sync_source_tokens.pop(campaign_slug, None)
             return metrics
-        except CharacterStateConflictError:
+        except (CharacterStateConflictError, CampaignCombatRevisionConflictError):
             metrics.status = SNAPSHOT_SYNC_STATUS_DEFERRED
             return metrics
         finally:
@@ -1867,7 +1868,9 @@ class CampaignCombatService:
             if not is_xianxia_system(record.definition.system):
                 status = authority.field_status("stats.speed") if authority is not None else None
                 if (status is None or not status.is_effective
-                        or MOVEMENT_VALUE_PATTERN.search(str(status.effective or "")) is None):
+                        or MOVEMENT_VALUE_PATTERN.search(
+                            str(status.effective if status.effective is not None else "")
+                        ) is None):
                     raise CampaignCombatValidationError(
                         "Movement speed needs manager repair before automatic turn refill."
                     )

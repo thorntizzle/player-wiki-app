@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
+import errno
 import re
 import secrets
 import stat
@@ -37,14 +38,25 @@ def is_managed_wiki_asset_target(assets_dir: str | Path, asset_ref: str) -> bool
         return True
 
 
-def _is_link_or_reparse(path: Path) -> bool:
-    try:
-        details = path.lstat()
-    except FileNotFoundError:
-        return False
-    except OSError as exc:
-        raise CampaignContentError("Managed wiki image path is unsafe.") from exc
-    return stat.S_ISLNK(details.st_mode) or bool(int(getattr(details, "st_file_attributes", 0)) & 0x400)
+def _checked_lexical_path(path: Path) -> Path:
+    """Keep the original path while checking every existing ancestor."""
+
+    path = path.absolute()
+    for component in (*reversed(path.parents), path):
+        try:
+            details = component.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            if exc.errno in {errno.EACCES, errno.EPERM, errno.ELOOP, errno.ENOTDIR, errno.EISDIR}:
+                raise CampaignContentError("Managed wiki image path is unsafe.") from exc
+            raise
+        if (stat.S_ISLNK(details.st_mode)
+                or int(getattr(details, "st_file_attributes", 0)) & 0x400
+                or (not stat.S_ISREG(details.st_mode) if component == path
+                    else not stat.S_ISDIR(details.st_mode))):
+            raise CampaignContentError("Managed wiki image path is unsafe.")
+    return path
 
 
 def managed_wiki_image_path(
@@ -52,30 +64,36 @@ def managed_wiki_image_path(
     asset_ref: str,
     *,
     require_absent: bool = False,
+    create_parents: bool = False,
 ) -> Path:
     """Require the exact reserved path, without symlink or reparse aliases."""
 
     if not is_canonical_managed_wiki_image_ref(asset_ref):
         raise CampaignContentError("Managed wiki image reference is invalid.")
-    supplied_root = Path(assets_dir)
-    if _is_link_or_reparse(supplied_root):
+    if ".." in Path(assets_dir).parts:
         raise CampaignContentError("Managed wiki image root is unsafe.")
-    try:
-        root = supplied_root.resolve()
-    except (OSError, RuntimeError) as exc:
-        raise CampaignContentError("Managed wiki image root is unsafe.") from exc
-    path = root.joinpath(*PurePosixPath(asset_ref).parts)
-    for component in (root, root / MANAGED_WIKI_IMAGE_ROOT, root / MANAGED_WIKI_IMAGE_ROOT / "v1", path):
-        if _is_link_or_reparse(component):
-            raise CampaignContentError("Managed wiki image path is unsafe.")
-    try:
-        resolved = path.resolve()
-    except (OSError, RuntimeError) as exc:
-        raise CampaignContentError("Managed wiki image path is unsafe.") from exc
-    if resolved != path:
-        raise CampaignContentError("Managed wiki image path is unsafe.")
-    if require_absent and path.exists():
-        raise CampaignContentError("Managed wiki image destination is already in use.")
+    path = _checked_lexical_path(
+        Path(assets_dir).joinpath(*PurePosixPath(asset_ref).parts)
+    )
+    if create_parents:
+        for parent in reversed(path.parents):
+            try:
+                parent.lstat()
+            except FileNotFoundError:
+                try:
+                    parent.mkdir()
+                except FileExistsError:
+                    pass
+            _checked_lexical_path(path)
+        _checked_lexical_path(path)
+    if require_absent:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise CampaignContentError("Managed wiki image destination is already in use.")
+        _checked_lexical_path(path)
     return path
 
 

@@ -57,6 +57,7 @@ def render_dnd_character_markdown(
             ("Status", definition.status),
             ("State revision", character.get("state_revision")),
             ("Source authority snapshot", character.get("source_authority_identity")),
+            ("Definition basis", "Historical raw committed generation" if record.committed_revision is not None else "Historical raw mirror definition"),
             ("Equipment activation", "Effective SQLite inventory state; definition YAML is historical"),
         ],
     )

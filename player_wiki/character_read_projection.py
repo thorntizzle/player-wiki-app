@@ -176,6 +176,21 @@ def build_character_read_projection_cache_key(
     campaign_current_session: int,
     effective_visibility: Any,
 ) -> tuple[Any, ...] | None:
+    from .committed_publication import active
+    from .system_policy import is_dnd_5e_system
+
+    # Read-shell and header projections depend on source liveness and private
+    # audit witnesses in addition to the saved definition/state revisions.
+    # Rebuild activated DND projections until those inputs have a shared,
+    # transaction-bound cache version. Closed and Xianxia caches keep their
+    # existing behavior.
+    try:
+        activated = active()
+    except RuntimeError:
+        # An offline projection has no committed read snapshot to version.
+        return None
+    if activated and is_dnd_5e_system(getattr(getattr(record, "definition", None), "system", "")):
+        return None
     systems_revision = _builder_static_revision_key(
         systems_service,
         campaign_slug,

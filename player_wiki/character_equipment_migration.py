@@ -198,10 +198,10 @@ def migrate_controlled_copy(campaigns_dir: Path, database_path: Path, *, apply: 
         ledger = inspect_migration_ledger(connection)
         if not ledger.is_current:
             raise ValueError("Database schema migration ledger is not current.")
-        if apply and connection.execute(
-            "SELECT activated FROM committed_source_activation WHERE singleton=1"
-        ).fetchone()[0] == 1:
-            raise ValueError("Activated Character state requires committed definition authority.")
+        if apply:
+            from .committed_publication import active
+            if active(connection):
+                raise ValueError("Activated Character state requires committed definition authority.")
         rows = connection.execute(
             "SELECT campaign_slug, character_slug, revision, state_json FROM character_state "
             "ORDER BY campaign_slug, character_slug"
