@@ -1922,12 +1922,113 @@ def _inspect_supported_schema(connection: sqlite3.Connection, version: int) -> N
                 )
             _validate_missing_check_predicate(connection=connection,
                                               table_name=table, predicate=predicate)
-        if table != "schema_migrations" and _normalize_sql_fragment(
-            _without_check_clauses(observed["sql"])
-        ) != _normalize_sql_fragment(_without_check_clauses(trusted_object["sql"])):
-            raise CampaignCutoverExportError(
-                "schema_table_mismatch", "The SQLite table DDL differs from the trusted version."
-            )
+        if table != "schema_migrations":
+            observed_sql = _without_check_clauses(observed["sql"])
+            trusted_sql = _without_check_clauses(trusted_object["sql"])
+            if (_normalize_sql_fragment(observed_sql) != _normalize_sql_fragment(trusted_sql)
+                    and not (table in _ORDER_VARIANT_TABLES and
+                             _column_order_equivalent_table_sql(observed_sql, trusted_sql))):
+                raise CampaignCutoverExportError(
+                    "schema_table_mismatch", "The SQLite table DDL differs from the trusted version."
+                )
+
+
+_ORDER_VARIANT_TABLES = frozenset({
+    "campaign_combat_trackers",
+    "campaign_combatants",
+    "campaign_dm_statblocks",
+    "campaign_session_articles",
+    "campaign_session_messages",
+    "campaign_system_policies",
+    "user_preferences",
+})
+
+
+def _column_order_equivalent_table_sql(observed_sql: str, trusted_sql: str) -> bool:
+    """Accept only a permutation of intact column clauses in approved tables."""
+    observed = _split_create_table_sql(observed_sql)
+    trusted = _split_create_table_sql(trusted_sql)
+    if observed is None or trusted is None:
+        return False
+    observed_header, observed_clauses, observed_suffix = observed
+    trusted_header, trusted_clauses, trusted_suffix = trusted
+    if (_normalize_sql_fragment(observed_header) != _normalize_sql_fragment(trusted_header)
+            or _normalize_sql_fragment(observed_suffix) != _normalize_sql_fragment(trusted_suffix)):
+        return False
+
+    def partition(clauses: tuple[str, ...]) -> tuple[dict[str, str], tuple[str, ...]] | None:
+        columns: dict[str, str] = {}
+        constraints: list[str] = []
+        for clause in clauses:
+            match = re.match(r"([a-z_][a-z_0-9]*)(?=\s|$)", clause, re.IGNORECASE)
+            if match is None:
+                return None
+            name = match.group(1).casefold()
+            if name in {"constraint", "primary", "unique", "check", "foreign"}:
+                constraints.append(_normalize_sql_fragment(clause))
+            else:
+                if name in columns:
+                    return None
+                columns[name] = _normalize_sql_fragment(clause)
+        return columns, tuple(constraints)
+
+    observed_parts = partition(observed_clauses)
+    trusted_parts = partition(trusted_clauses)
+    return (observed_parts is not None and trusted_parts is not None
+            and observed_parts == trusted_parts)
+
+
+def _split_create_table_sql(sql: str) -> tuple[str, tuple[str, ...], str] | None:
+    """Split the outer table body on commas outside quotes and nested parentheses."""
+    if re.match(r"\s*create\s+table\s+", sql, re.IGNORECASE) is None:
+        return None
+    opening: int | None = None
+    start = 0
+    depth = 0
+    quote: str | None = None
+    clauses: list[str] = []
+    index = 0
+    while index < len(sql):
+        char = sql[index]
+        if quote is not None:
+            if char == quote:
+                if index + 1 < len(sql) and sql[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if char in {"'", '"', "`"}:
+            quote = char
+            index += 1
+            continue
+        if char == "[":
+            quote = "]"
+            index += 1
+            continue
+        if char == "(":
+            if opening is None:
+                opening = index
+                start = index + 1
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                return None
+            if depth == 0:
+                clause = sql[start:index].strip()
+                if clause:
+                    clauses.append(clause)
+                if not clauses:
+                    return None
+                return sql[:opening], tuple(clauses), sql[index + 1:]
+        elif char == "," and depth == 1:
+            clause = sql[start:index].strip()
+            if clause:
+                clauses.append(clause)
+            start = index + 1
+        index += 1
+    return None
 
 
 def _without_check_clauses(sql: str) -> str:
