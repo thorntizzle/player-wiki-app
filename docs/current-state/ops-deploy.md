@@ -1,6 +1,6 @@
 # Ops And Fly Deployment
 
-Last updated: 2026-09-28
+Last updated: 2026-10-05
 
 ## Owns
 
@@ -417,9 +417,9 @@ acceptance statements below describe completed releases, not current commands.
 
 ## Data And Volume Boundaries
 
-### Committed-source activation candidate (local, unintegrated)
+### Committed-source activation (integrated, separately gated)
 
-The Stage 7 candidate adds private `ops.py committed-activation-inspect` and
+The integrated Stage 7 source provides private `ops.py committed-activation-inspect` and
 `ops.py committed-activation-apply`. Both require explicit `--db-path` and
 `--campaigns-dir`; apply also requires `--backup-root`, `--confirm-target`
 equal to the resolved database path, and the fresh `--readiness-sha256` from
@@ -431,7 +431,7 @@ after migration remains closed, and any blocked or missing configured object
 prevents activation. Apply requires the app to be stopped and holds the
 exclusive runtime lease through backup and commit. External campaign-file
 writers must also be quiesced; SQLite cannot make a filesystem scan atomic
-with its commit. The candidate is unintegrated and grants no live or
+with its commit. Integration into local `main` grants no deployment, live, or
 protected-data authority; use on a real target needs a separate operator gate.
 
 For source-bound native spell formula/choice and page tracker values, inspect
@@ -442,7 +442,7 @@ blocks readiness with a bounded reason; a failed append rolls back the marker.
 Postcommit readback checks both marker and transition records, and uncertainty
 requires inspection before any further action.
 
-For activated page-image mirror conflicts in this local candidate, inspect the
+For activated page-image mirror conflicts, inspect the
 manager-only content page list for the affected page and repair reason. Preserve
 the differing file while investigating it; compare or restore the canonical
 managed file against the verified committed image through an authorized
