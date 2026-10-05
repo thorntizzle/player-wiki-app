@@ -78,6 +78,34 @@ def _claim(value):
     return not (isinstance(value, str) and not value.strip())
 
 
+def _inert_item_context_metadata(metadata: dict) -> bool:
+    """A paired Items page describes the item; it cannot supply mechanics."""
+    from math import isfinite
+    from .campaign_item_mechanics import CAMPAIGN_ITEM_METADATA_KEYS
+
+    if not isinstance(metadata, dict) or "character_option" in metadata:
+        return False
+    item_fields = {field.casefold() for field in CAMPAIGN_ITEM_METADATA_KEYS} - {"type"}
+    for key, value in metadata.items():
+        if not isinstance(key, str):
+            return False
+        lowered = key.casefold()
+        if lowered == "type":
+            if key != "type" or not isinstance(value, str) or not value.strip():
+                return False
+        elif isinstance(value, (dict, list)):
+            # Structured metadata could carry a nested mechanics model.
+            return False
+        elif isinstance(value, float) and not isfinite(value):
+            return False
+        elif (lowered in item_fields or lowered.startswith("campaign_item_mechanics")
+              or lowered.startswith("item_") or "mechanic" in lowered
+              or "review" in lowered or "model" in lowered):
+            if _claim(value):
+                return False
+    return True
+
+
 def _link_kind(path: tuple[str | int, ...], field: str, system: str):
     """Give an explicit link the mechanics kind of its owning retained row."""
     if len(path) < 2:
@@ -89,6 +117,9 @@ def _link_kind(path: tuple[str | int, ...], field: str, system: str):
         if len(path) == 4 and path[2] == "classes" and isinstance(path[3], int):
             return "subclass" if field == "subclass_ref" else "class" if field == "systems_ref" else None
         return None
+    if (len(path) == 4 and path[:3] == ("definition", "spellcasting", "class_rows")
+            and isinstance(path[3], int) and field == "class_ref"):
+        return "class"
     if field in {"class_ref", "subclass_ref", "species_ref", "background_ref",
                  "species_page_ref", "background_page_ref"}:
         return None
@@ -400,7 +431,13 @@ def _create_source_links(definition: CharacterDefinition, initial_state: dict):
         if visited > 10000 or depth > 24:
             raise CommittedSourceConflict("Character source links exceed their preparation bound.")
         if isinstance(value, dict):
-            if _claim(value.get("systems_ref")) and _claim(value.get("page_ref")):
+            dual_item = (
+                normalize_system_code(definition.system) == "DND-5E"
+                and len(path) == 3 and path[:2] == ("definition", "equipment_catalog")
+                and isinstance(path[2], int)
+                and _claim(value.get("systems_ref")) and _claim(value.get("page_ref"))
+            )
+            if _claim(value.get("systems_ref")) and _claim(value.get("page_ref")) and not dual_item:
                 raise CommittedSourceConflict(f"Character source row at {_link_owner(path)} has conflicting links.")
             for field, child in value.items():
                 if path == ("definition", "source") and field == "source_authorizations":
@@ -419,7 +456,8 @@ def _create_source_links(definition: CharacterDefinition, initial_state: dict):
                     if kind is None:
                         raise CommittedSourceConflict(f"Character source link at {child_owner} has no owning kind.")
                     if field.endswith("page_ref"):
-                        links.add(_exact_page_link(child, child_owner, kind))
+                        links.add(_exact_page_link(child, child_owner,
+                                                   "item_context" if dual_item else kind))
                     else:
                         links.add(_exact_systems_link(child, child_owner, kind))
                 elif isinstance(child, (dict, list)):
@@ -482,8 +520,16 @@ def _create_source_proof(campaign_slug, pages, entries, *, connection):
     library_slug = default_systems_library_slug(settings.get("systems_library") or settings["system"])
     page_proofs = []
     page_records = {}
+    entry_owners = {link.owner for link in entries if link.field_kind == "item"}
+    context_entry_owners = {
+        link.owner.removesuffix(".page_ref") + ".systems_ref"
+        for link in pages if link.field_kind == "item_context"
+    }
     for link in pages:
         ref = link.identity
+        if link.field_kind == "item_context" and (
+                link.owner.removesuffix(".page_ref") + ".systems_ref" not in entry_owners):
+            raise CommittedSourceConflict("Character item context has no paired Systems mechanics source.")
         if ref not in page_records:
             source = current(campaign_slug, "page", ref, connection=connection)
             row = page_row(campaign_slug, ref, connection=connection) if source is not None else None
@@ -497,7 +543,7 @@ def _create_source_proof(campaign_slug, pages, entries, *, connection):
             raise CommittedSourceConflict("Character page source is unavailable or hidden.")
         required_section = {
             "species": {"Mechanics"}, "background": {"Mechanics"},
-            "feature": {"Mechanics"}, "item": {"Items"},
+            "feature": {"Mechanics"}, "item": {"Items"}, "item_context": {"Items"},
             "spell": {"Mechanics", "Spells"},
             "xianxia_equipment": {"Items"},
         }.get(link.field_kind, set())
@@ -509,6 +555,8 @@ def _create_source_proof(campaign_slug, pages, entries, *, connection):
             raise CommittedSourceConflict("Character page mechanics are malformed.") from exc
         if not isinstance(metadata, dict):
             raise CommittedSourceConflict("Character page mechanics are malformed.")
+        if link.field_kind == "item_context" and not _inert_item_context_metadata(metadata):
+            raise CommittedSourceConflict(f"Character item context at {link.owner} claims mechanics.")
         if link.field_kind in {"species", "background", "feature"}:
             raw_option = metadata.get("character_option")
             option = (
@@ -572,12 +620,13 @@ def _create_source_proof(campaign_slug, pages, entries, *, connection):
             if link.expected_library and link.expected_library != library_slug:
                 raise CommittedSourceConflict(f"Character Systems library at {link.owner} changed.")
             column = "entry_key" if link.source_kind == "systems_key" else "slug"
-            entry = connection.execute(
+            matches = connection.execute(
                 f"SELECT entry_key,slug,source_id,entry_type,title,metadata_json FROM systems_entries "
                 f"WHERE library_slug=? AND {column}=?", (library_slug, link.identity),
-            ).fetchone()
-            if entry is None:
-                raise CommittedSourceConflict("Character Systems entry is missing.")
+            ).fetchall()
+            if len(matches) != 1:
+                raise CommittedSourceConflict("Character Systems entry is missing or ambiguous.")
+            entry = matches[0]
             if link.expected_slug and entry["slug"] != link.expected_slug:
                 raise CommittedSourceConflict("Character Systems link identity changed.")
             if (entry["entry_type"] not in link.allowed_types or
@@ -593,6 +642,11 @@ def _create_source_proof(campaign_slug, pages, entries, *, connection):
                     is_campaign_item_mechanics_metadata(metadata) and
                     not campaign_item_mechanics_is_approved(metadata)):
                 raise CommittedSourceConflict("Character Systems mechanics need review.")
+            if link.owner in context_entry_owners and (
+                    link.field_kind != "item" or
+                    not is_campaign_item_mechanics_metadata(metadata) or
+                    not campaign_item_mechanics_is_approved(metadata)):
+                raise CommittedSourceConflict("Character item context needs approved Systems mechanics.")
             source = connection.execute(
                 "SELECT status FROM systems_sources WHERE library_slug=? AND source_id=?",
                 (library_slug, entry["source_id"]),
@@ -646,6 +700,16 @@ def _update_source_claims(prior_record, definition, prepared_state):
     for owners in coupled:
         if any(link.owner in owners for link in changed):
             changed.update(link for link in entries if link.owner in owners)
+    for link in pages:
+        if link.field_kind != "item_context":
+            continue
+        paired_owner = link.owner.removesuffix(".page_ref") + ".systems_ref"
+        pair = [entry for entry in entries if entry.owner == paired_owner]
+        if len(pair) != 1:
+            raise CommittedSourceConflict("Character item context has no unique Systems mechanics source.")
+        # A retained context link is still a current claim on every update.
+        # Reprove both owners together so a page or Systems change fails closed.
+        changed.update((link, pair[0]))
     return (pages, entries,
             tuple(link for link in pages if link in changed),
             tuple(link for link in entries if link in changed))
@@ -921,16 +985,749 @@ def publish_create(coordinator, definition, import_metadata, initial_state, *,
     return result
 
 
+def _prepare_transition_renewals(prior_record, definition, state, authority,
+                                 prior_authority, connection, *, withheld_resource_ids=()):
+    """Prove each surviving activation chain against the proposed exact owner."""
+    from .character_equipment_activation import effective_definition
+    from .character_source_authority import (
+        numeric_target_owner_digest, numeric_target_values, numeric_value_digest,
+        valid_numeric_authorization,
+    )
+    from .character_source_repair import _current_transition_proof_rows
+
+    campaign, slug = definition.campaign_slug, definition.character_slug
+    prior = _current_transition_proof_rows(connection, campaign, slug)
+    if not prior:
+        return ()
+    if authority is None or prior_authority is None:
+        raise CharacterStateConflictError("Character transition source authority is unavailable.")
+    reconciled, _ = effective_definition(definition, state)
+    values = numeric_target_values(reconciled, state)
+    markers = list(dict(reconciled.source or {}).get("source_authorizations") or [])
+    withheld = {("resource", f"resource:{resource_id}", "owner_reset")
+                for resource_id in withheld_resource_ids}
+    if withheld and (set(dict(reconciled.source or {}).get(
+            "item_transition_withheld_resources") or []) != set(withheld_resource_ids)):
+        raise CharacterStateConflictError("Withheld resource identity changed.")
+    prior_effective, _ = effective_definition(
+        prior_record.definition, prior_record.state_record.state,
+    )
+    prior_values = numeric_target_values(prior_effective, prior_record.state_record.state)
+    prior_markers = list(dict(prior_effective.source or {}).get("source_authorizations") or [])
+    prepared = []
+    seen = set()
+    for row in prior:
+        proof = row["proof"]
+        key = (proof["target_kind"], proof["target_id"], proof["metric"])
+        if (proof["new_basis"] != prior_authority.numeric_basis_digest(key[1])
+                or proof["new_snapshot"] != prior_authority.source_snapshot_digest):
+            if key in withheld:
+                raise CharacterStateConflictError("Withheld resource proof is stale.")
+            continue
+        if key in seen:
+            raise CharacterStateConflictError("Character transition target is ambiguous.")
+        seen.add(key)
+        if key in withheld:
+            old_matching = [marker for marker in prior_markers if isinstance(marker, dict)
+                            and (marker.get("target_kind"), marker.get("target_id"),
+                                 marker.get("metric")) == key]
+            current_matching = [marker for marker in markers if isinstance(marker, dict)
+                                and (marker.get("target_kind"), marker.get("target_id"),
+                                     marker.get("metric")) == key]
+            resource_id = key[1].removeprefix("resource:")
+            templates = [template for template in definition.resource_templates
+                         if isinstance(template, dict) and template.get("id") == resource_id]
+            state_rows = [resource for resource in state.get("resources") or []
+                          if isinstance(resource, dict) and resource.get("id") == resource_id]
+            if (len(old_matching) != 1 or old_matching[0] != proof["authorization"]
+                    or len(current_matching) != 1 or current_matching[0] != old_matching[0]
+                    or key not in prior_values
+                    or numeric_target_owner_digest(prior_effective,
+                        prior_record.state_record.state, *key) != proof["owner_digest"]
+                    or numeric_value_digest(prior_values[key]) != proof["value_digest"]
+                    or len(templates) != 1 or len(state_rows) != 1
+                    or any(templates[0].get(field) is not None
+                           for field in ("max", "initial_current"))
+                    or any(state_rows[0].get(field) is not None
+                           for field in ("max", "current"))
+                    or str(templates[0].get("authority_status") or "").casefold()
+                       != "needs repair"
+                    or str(state_rows[0].get("authority_status") or "").casefold()
+                       != "needs repair"):
+                raise CharacterStateConflictError("Withheld resource proof needs manager repair.")
+            continue
+        matching = [marker for marker in markers if isinstance(marker, dict)
+                    and (marker.get("target_kind"), marker.get("target_id"),
+                         marker.get("metric")) == key]
+        if not matching and key not in values:
+            # An explicitly removed target needs no new claim.
+            continue
+        if len(matching) != 1 or matching[0] != proof["authorization"] or key not in values:
+            raise CharacterStateConflictError("Character transition owner needs manager repair.")
+        owner = numeric_target_owner_digest(reconciled, state, *key)
+        value = numeric_value_digest(values[key])
+        basis = authority.numeric_basis_digest(key[1])
+        snapshot = authority.source_snapshot_digest
+        if (owner != proof["owner_digest"] or value != proof["value_digest"]
+                or not basis or not snapshot
+                or not valid_numeric_authorization(
+                    matching[0], character_slug=slug, target_kind=key[0],
+                    target_id=key[1], metric=key[2], raw_value=values[key],
+                    owner_digest=owner, verified_actions=(matching[0],))):
+            raise CharacterStateConflictError("Character transition source or owner changed.")
+        prepared.append({
+            **{name: proof[name] for name in (
+                "campaign_slug", "character_slug", "target_kind", "target_id", "metric",
+                "authorization", "origin_audit_id", "origin_actor_user_id",
+                "origin_event_type", "origin_metadata_sha256", "value_digest",
+                "owner_digest", "activated_at")},
+            "schema_version": 2,
+            "old_basis": proof["new_basis"], "new_basis": basis,
+            "old_snapshot": proof["new_snapshot"], "new_snapshot": snapshot,
+            "prior_generation": proof["identity"]["generation"],
+            "prior_transition_audit_id": row["audit_id"],
+            "prior_transition_metadata_sha256": row["metadata_sha256"],
+        })
+    return tuple(prepared)
+
+
+def _append_transition_renewals(connection, campaign, slug, renewals):
+    if not renewals:
+        return
+    from .character_source_repair import (_current_transition_identity,
+                                          _current_transition_proof_rows)
+
+    identity = _current_transition_identity(connection, campaign, slug)
+    if not identity:
+        raise CharacterStateConflictError("Character transition identity is unavailable.")
+    expected = []
+    audit_rows = connection.execute(
+        """SELECT id,actor_user_id,event_type,metadata_json FROM auth_audit_log
+           WHERE campaign_slug=? AND character_slug=? ORDER BY id""",
+        (campaign, slug),
+    ).fetchall()
+    audit_digest = hashlib.sha256(b"[")
+    for index, row in enumerate(audit_rows):
+        if index:
+            audit_digest.update(b",")
+        audit_digest.update(json.dumps(tuple(row), sort_keys=True, default=str,
+                                       separators=(",", ":")).encode())
+    audit_count = len(audit_rows)
+    for renewal in renewals:
+        closed_digest = audit_digest.copy()
+        closed_digest.update(b"]")
+        proof = {**renewal, "identity": {**identity, "audit": closed_digest.hexdigest()}}
+        metadata = json.dumps(proof, sort_keys=True, separators=(",", ":"),
+                              ensure_ascii=False)
+        cursor = connection.execute(
+            """INSERT INTO auth_audit_log
+               (actor_user_id,target_user_id,campaign_slug,character_slug,
+                event_type,metadata_json,created_at)
+               VALUES (NULL,NULL,?,?,'character_source_transition_confirmed',?,?)""",
+            (campaign, slug, metadata, _now()),
+        )
+        expected.append(cursor.lastrowid)
+        if audit_count:
+            audit_digest.update(b",")
+        audit_digest.update(json.dumps((cursor.lastrowid, None,
+            "character_source_transition_confirmed", metadata), sort_keys=True,
+            default=str, separators=(",", ":")).encode())
+        audit_count += 1
+    loaded = _current_transition_proof_rows(connection, campaign, slug)
+    if not all(sum(row["audit_id"] == audit_id for row in loaded) == 1
+               for audit_id in expected):
+        raise CharacterStateConflictError("Character transition readback failed.")
+
+
+def _reject_retired_item_spell_rows(prior_definition, definition):
+    """Raw removal or relink cannot carry the old item's spell claims."""
+    from .system_policy import is_dnd_5e_system
+    if not is_dnd_5e_system(definition.system):
+        return
+    previous = {str(item.get("id") or "").strip(): item
+                for item in prior_definition.equipment_catalog if isinstance(item, dict)}
+    current = {str(item.get("id") or "").strip(): item
+               for item in definition.equipment_catalog if isinstance(item, dict)}
+    relinked = {item_id for item_id, old in previous.items()
+                if item_id and (item_id not in current
+                or old.get("systems_ref") != current[item_id].get("systems_ref"))}
+    if not relinked:
+        return
+    old_spells = list(dict(prior_definition.spellcasting or {}).get("spells") or [])
+    old_source_ids = {
+        str(spell.get("spell_source_row_id") or "").strip()
+        for spell in old_spells if isinstance(spell, dict)
+        and isinstance(spell.get("item_owner_ids"), list)
+        and relinked.intersection(spell["item_owner_ids"])
+        and str(spell.get("spell_source_row_id") or "").strip()
+    }
+    retired_spell_ids = {
+        str(spell.get("id") or "").strip()
+        for spell in old_spells if isinstance(spell, dict)
+        and isinstance(spell.get("item_owner_ids"), list)
+        and relinked.intersection(spell["item_owner_ids"])
+        and str(spell.get("id") or "").strip()
+    }
+    from flask import current_app
+    from .character_source_authority import _current_payload, _source_identity
+    from .item_spell_support import parse_item_spell_support
+    retired_source_ids = set()
+    systems_service = current_app.extensions.get("systems_service")
+    for item_id in relinked:
+        item = previous[item_id]
+        source_kind, source_key = _source_identity(item)
+        if not source_kind.startswith("systems") or not source_key or systems_service is None:
+            continue
+        metadata, reason = _current_payload(
+            campaign_slug=prior_definition.campaign_slug, kind="item",
+            source_kind=source_kind, source_key=source_key,
+            systems_service=systems_service, pages={},
+            expected_slug=str(dict(item.get("systems_ref") or {}).get("slug") or ""),
+            expected_ref=dict(item.get("systems_ref") or {}),
+        )
+        if reason or metadata is None:
+            continue
+        parsed = parse_item_spell_support(metadata.get("spell_support"))
+        retired_source_ids.update(row.source_row_id for row in parsed.records
+                                  if row.source_row_id)
+        retired_source_ids.update(source_id for _, source_id, _, _ in
+                                  parsed.source_declarations if source_id)
+    legacy_spell_ids = {
+        str(spell.get("id") or "").strip()
+        for spell in old_spells if isinstance(spell, dict)
+        and (spell.get("spell_grant_origin") == "item_effect"
+             or spell.get("spell_source_row_kind") == "item")
+        and not spell.get("item_owner_ids")
+        and str(spell.get("spell_source_row_id") or "").strip() in retired_source_ids
+        and str(spell.get("id") or "").strip()
+    }
+    old_source_ids.update(
+        str(spell.get("spell_source_row_id") or "").strip()
+        for spell in old_spells if isinstance(spell, dict)
+        and str(spell.get("id") or "").strip() in legacy_spell_ids
+        and str(spell.get("spell_source_row_id") or "").strip()
+    )
+    if not old_source_ids and len(previous) == len(relinked):
+        old_source_ids.update(
+            str(row.get("source_row_id") or "").strip()
+            for row in list(dict(prior_definition.spellcasting or {}).get("source_rows") or [])
+            if isinstance(row, dict) and row.get("source_row_kind") == "item"
+            and str(row.get("source_row_id") or "").strip()
+        )
+    candidate = dict(definition.spellcasting or {})
+    old_refs = {json.dumps(previous[item_id]["systems_ref"], sort_keys=True)
+                for item_id in relinked if previous[item_id].get("systems_ref")}
+    surviving_old_owners = {
+        item_id for item_id, item in current.items() if item_id not in relinked
+        and item_id in previous and item.get("systems_ref") == previous[item_id].get("systems_ref")
+        and json.dumps(item.get("systems_ref"), sort_keys=True) in old_refs
+    }
+    surviving_sources = set()
+    for spell in list(candidate.get("spells") or []):
+        if not isinstance(spell, dict):
+            continue
+        source_id = str(spell.get("spell_source_row_id") or "").strip()
+        item_spell = (spell.get("spell_grant_origin") == "item_effect"
+                      or spell.get("spell_source_row_kind") == "item")
+        owners = spell.get("item_owner_ids")
+        spell_id = str(spell.get("id") or "").strip()
+        if spell_id in legacy_spell_ids or (spell_id in retired_spell_ids
+                                            and source_id not in old_source_ids):
+            raise CharacterStateConflictError("Retired item spell identity needs manager repair before relink.")
+        if source_id not in old_source_ids:
+            continue
+        if not item_spell:
+            raise CharacterStateConflictError("Retired item spell source is ambiguous.")
+        if isinstance(owners, list) and relinked.intersection(owners):
+            raise CharacterStateConflictError("Retired item spell ownership needs manager repair.")
+        if item_spell and (not isinstance(owners, list) or not owners
+                           or any(owner not in surviving_old_owners for owner in owners)):
+            raise CharacterStateConflictError("Item spell ownership needs manager repair before relink.")
+        if item_spell and source_id and source_id in old_source_ids:
+            surviving_sources.add(source_id)
+    for row in list(candidate.get("source_rows") or []):
+        if not isinstance(row, dict):
+            continue
+        source_id = str(row.get("source_row_id") or "").strip()
+        if (row.get("source_row_kind") == "item" and source_id
+                and source_id in old_source_ids and source_id not in surviving_sources):
+            raise CharacterStateConflictError("Retired item spell source needs manager repair.")
+
+
+def _exact_item_transition_baseline(prior_definition, definition,
+                                    prior_authority, candidate_authority):
+    """Bind retired physical owners and their exact approved source bytes.
+
+    Aggregate values are handled separately. Their saved totals are never an
+    input to this source proof or an inverse of a retired item effect.
+    """
+    from flask import current_app
+    from .character_source_authority import VERIFIED, _current_payload, _source_identity
+    from .item_spell_support import parse_item_spell_support
+    from .system_policy import is_dnd_5e_system
+
+    if not is_dnd_5e_system(definition.system):
+        return ((), (), (), ())
+    old_items = [item for item in prior_definition.equipment_catalog
+                 if isinstance(item, dict) and not item.get("is_currency_only")]
+    new_items = [item for item in definition.equipment_catalog
+                 if isinstance(item, dict) and not item.get("is_currency_only")]
+    old_ids = [str(item.get("id") or "").strip() for item in old_items]
+    new_ids = [str(item.get("id") or "").strip() for item in new_items]
+    if (not all(old_ids + new_ids) or len(old_ids) != len(set(old_ids))
+            or len(new_ids) != len(set(new_ids))):
+        raise CharacterStateConflictError("Item identity needs manager repair before publication.")
+    new_by_id = dict(zip(new_ids, new_items))
+    retired = [(item_id, item) for item_id, item in zip(old_ids, old_items)
+               if item_id not in new_by_id
+               or item.get("systems_ref") != new_by_id[item_id].get("systems_ref")]
+    if not retired:
+        return ((), (), (), ())
+    systems_service = current_app.extensions.get("systems_service")
+    if systems_service is None or prior_authority is None or candidate_authority is None:
+        raise CharacterStateConflictError("Item source needs manager repair before publication.")
+    from .campaign_item_mechanics import (
+        CAMPAIGN_ITEM_METADATA_KEYS, campaign_item_character_metadata,
+        campaign_item_mechanics_is_approved, is_campaign_item_mechanics_metadata,
+    )
+    safe_metadata = set(CAMPAIGN_ITEM_METADATA_KEYS) | {"campaign_item_mechanics_review_status", "rarity",
+                     "spell_support", "attunement", "requires_attunement",
+                     "weight", "value", "source", "source_id", "description",
+                     "body_format", "body_markdown", "campaign_item",
+                     "campaign_item_mechanics", "campaign_item_mechanics_field_provenance",
+                     "campaign_item_mechanics_flags", "campaign_item_mechanics_support_state",
+                     "campaign_item_mechanics_version", "custom_campaign_slug",
+                     "provenance", "search_metadata", "updated_by_user_id"}
+    structured_metadata = {"spell_support", "spellcasting_modifiers",
+                           "ability_score_minimums", "resource_template_bonuses",
+                           "defensive_rules", "attack_reminder_rules", "item_use_actions",
+                           "item_uses", "armor_profile", "weapon_profile", "charges",
+                           "properties", "campaign_item_mechanics",
+                           "campaign_item_mechanics_field_provenance",
+                           "campaign_item_mechanics_flags", "search_metadata"}
+    safe_item = {"id", "name", "default_quantity", "weight", "notes",
+                 "source_kind", "systems_ref", "page_ref", "campaign_option",
+                 "is_equipped", "is_attuned", "weapon_wield_mode",
+                 "currency", "is_currency_only", "equipped_state_explicit",
+                 "charges_current", "charges_max", "tags"}
+    identities = []
+    affected_ac = set()
+    affected_abilities = set()
+    affected_resources = set()
+
+    def note_effects(item_id, metadata, authority):
+        if item_id not in authority.active_item_ids:
+            return
+        if any(metadata.get(key) not in (None, "", 0, False, [], {}) for key in
+               ("bonus_ac", "ac", "armor_profile", "defensive_rules")):
+            affected_ac.add("stats.armor_class")
+        minimums = metadata.get("ability_score_minimums") or {}
+        if not isinstance(minimums, dict):
+            raise CharacterStateConflictError("Item ability minimum needs manager repair.")
+        for key in minimums:
+            if key not in {"str", "dex", "con", "int", "wis", "cha"}:
+                raise CharacterStateConflictError("Item ability minimum needs manager repair.")
+            affected_abilities.add(key)
+        bonuses = metadata.get("resource_template_bonuses") or []
+        if not isinstance(bonuses, list):
+            raise CharacterStateConflictError("Item resource bonus needs manager repair.")
+        for bonus in bonuses:
+            if not isinstance(bonus, dict) or not str(bonus.get("id") or "").strip():
+                raise CharacterStateConflictError("Item resource bonus needs manager repair.")
+            affected_resources.add(str(bonus["id"]).strip())
+    for item_id, item in retired:
+        source_kind, source_key = _source_identity(item)
+        if (not source_kind.startswith("systems") or not source_key
+                or prior_authority.status_for("item", item_id) != VERIFIED
+                or set(item) - safe_item
+                or item.get("campaign_option") not in (None, {}, [])):
+            raise CharacterStateConflictError(
+                "Item owner or aggregate baseline needs manager repair before publication."
+            )
+        metadata, reason = _current_payload(
+            campaign_slug=definition.campaign_slug, kind="item",
+            source_kind=source_kind, source_key=source_key,
+            systems_service=systems_service, pages={},
+            expected_slug=str(dict(item.get("systems_ref") or {}).get("slug") or ""),
+            expected_ref=dict(item.get("systems_ref") or {}),
+        )
+        if reason or metadata is None or set(metadata) - safe_metadata:
+            raise CharacterStateConflictError(
+                "Item aggregate effects or exact source need manager repair before publication."
+            )
+        for field in safe_metadata - structured_metadata - {"campaign_item_mechanics_review_status"}:
+            if field in metadata and not isinstance(metadata[field], (str, int, float, bool, type(None))):
+                raise CharacterStateConflictError("Item source metadata needs manager repair.")
+        if (is_campaign_item_mechanics_metadata(metadata)
+                and not campaign_item_mechanics_is_approved(metadata)):
+            raise CharacterStateConflictError("Item aggregate effects need approved source review.")
+        effects = (campaign_item_character_metadata(metadata)
+                   if is_campaign_item_mechanics_metadata(metadata) else metadata)
+        parsed = parse_item_spell_support(effects.get("spell_support"))
+        if parsed.diagnostics or any(record.invalid for record in parsed.records):
+            raise CharacterStateConflictError("Item spell source needs manager repair before publication.")
+        ability_keys = {record.source_ability_key for record in parsed.records
+                        if record.source_ability_key}
+        if ability_keys and (not prior_authority.field_status("stats.proficiency_bonus").is_effective
+                             or not candidate_authority.field_status("stats.proficiency_bonus").is_effective
+                             or any(not prior_authority.field_status(
+                                 f"stats.ability_scores.{key}.score").is_effective
+                                 or not candidate_authority.field_status(
+                                     f"stats.ability_scores.{key}.score").is_effective
+                                 for key in ability_keys)):
+            raise CharacterStateConflictError(
+                "Independent spell formula inputs need manager repair before item transition."
+            )
+        identities.append((item_id, source_kind, source_key,
+                           hashlib.sha256(json.dumps(metadata, sort_keys=True,
+                               separators=(",", ":"), default=str).encode()).hexdigest()))
+        note_effects(item_id, effects, prior_authority)
+        replacement = new_by_id.get(item_id)
+        if replacement is not None:
+            new_kind, new_key = _source_identity(replacement)
+            if (not new_kind.startswith("systems") or not new_key
+                    or candidate_authority.status_for("item", item_id) != VERIFIED
+                    or set(replacement) - safe_item
+                    or replacement.get("campaign_option") not in (None, {}, [])):
+                raise CharacterStateConflictError(
+                    "Replacement item owner or aggregate baseline needs manager repair."
+                )
+            new_metadata, reason = _current_payload(
+                campaign_slug=definition.campaign_slug, kind="item",
+                source_kind=new_kind, source_key=new_key,
+                systems_service=systems_service, pages={},
+                expected_slug=str(dict(replacement.get("systems_ref") or {}).get("slug") or ""),
+                expected_ref=dict(replacement.get("systems_ref") or {}),
+            )
+            if reason or new_metadata is None or set(new_metadata) - safe_metadata:
+                raise CharacterStateConflictError(
+                    "Replacement aggregate effects or exact source need manager repair."
+                )
+            for field in safe_metadata - structured_metadata - {"campaign_item_mechanics_review_status"}:
+                if field in new_metadata and not isinstance(new_metadata[field],
+                                                            (str, int, float, bool, type(None))):
+                    raise CharacterStateConflictError("Replacement source metadata needs manager repair.")
+            if (is_campaign_item_mechanics_metadata(new_metadata)
+                    and not campaign_item_mechanics_is_approved(new_metadata)):
+                raise CharacterStateConflictError("Replacement aggregate effects need approved source review.")
+            new_effects = (campaign_item_character_metadata(new_metadata)
+                           if is_campaign_item_mechanics_metadata(new_metadata)
+                           else new_metadata)
+            new_parsed = parse_item_spell_support(new_effects.get("spell_support"))
+            if new_parsed.diagnostics or any(record.invalid for record in new_parsed.records):
+                raise CharacterStateConflictError("Replacement spell source needs manager repair.")
+            new_abilities = {record.source_ability_key for record in new_parsed.records
+                             if record.source_ability_key}
+            if new_abilities and (not candidate_authority.field_status(
+                    "stats.proficiency_bonus").is_effective
+                    or any(not candidate_authority.field_status(
+                        f"stats.ability_scores.{key}.score").is_effective
+                        for key in new_abilities)):
+                raise CharacterStateConflictError(
+                    "Replacement spell formula inputs need manager repair."
+                )
+            identities.append((item_id, new_kind, new_key,
+                               hashlib.sha256(json.dumps(new_metadata, sort_keys=True,
+                                   separators=(",", ":"), default=str).encode()).hexdigest()))
+            note_effects(item_id, new_effects, candidate_authority)
+    return (tuple(identities), tuple(sorted(affected_ac)),
+            tuple(sorted(affected_abilities)), tuple(sorted(affected_resources)))
+
+
+def _withhold_item_transition_aggregates(prior_definition, definition, state,
+                                         prior_authority, candidate_authority,
+                                         item_baseline):
+    """Replace only affected current metrics with a proved value or null.
+
+    The prior aggregate is never used to calculate a new number. This runs
+    before serialization and source-authority renewal, so raw API and package
+    bytes have the same withheld values as the projected sheet.
+    """
+    from copy import deepcopy
+    from flask import current_app
+    from .character_ability_inputs import input_records
+    from .character_builder import (
+        _effective_item_catalog_for_definition, normalize_definition_to_native_model,
+    )
+    from .character_builder_derivation import (
+        _character_profile_class_names, _character_profile_subclass_names,
+        _derive_armor_class_from_character_inputs,
+    )
+    from .character_source_authority import NEEDS_REPAIR, VERIFIED
+
+    identities, ac_paths, ability_keys, resource_ids = item_baseline
+    payload = deepcopy(definition.to_dict())
+    next_state = deepcopy(state)
+    source = dict(payload.get("source") or {})
+    source.pop("item_transition_withheld_resources", None)
+    source.pop("item_transition_cleared_charges", None)
+    from collections import Counter
+    relinked_ids = {item_id for item_id, count in
+                    Counter(identity[0] for identity in identities).items() if count == 2}
+    for item_id in relinked_ids:
+        prior_rows = [row for row in prior_definition.equipment_catalog
+                      if isinstance(row, dict) and row.get("id") == item_id]
+        current_rows = [row for row in payload.get("equipment_catalog") or []
+                        if isinstance(row, dict) and row.get("id") == item_id]
+        state_rows = [row for row in next_state.get("inventory") or []
+                      if isinstance(row, dict)
+                      and str(row.get("catalog_ref") or row.get("id") or "").strip() == item_id]
+        if len(prior_rows) != 1 or len(current_rows) != 1 or len(state_rows) != 1:
+            raise CharacterStateConflictError("Relinked item identity needs manager repair.")
+        current_rows[0].update(is_attuned=False, charges_current=None, charges_max=None)
+        state_rows[0].update(is_attuned=False, charges_current=None, charges_max=None)
+    if relinked_ids:
+        from .character_service import _normalize_attunement_state
+        next_state["attunement"] = _normalize_attunement_state(
+            next_state.get("attunement"), next_state.get("inventory") or [],
+        )
+        source["item_transition_cleared_charges"] = sorted(relinked_ids)
+    if not (ac_paths or ability_keys or resource_ids):
+        payload["source"] = source
+        return type(definition).from_dict(payload), next_state
+
+    stats = dict(payload.get("stats") or {})
+    abilities = dict(stats.get("ability_scores") or {})
+    inputs = input_records(dict(prior_definition.stats or {}))
+    provable_abilities = {
+        key for key in ability_keys
+        if inputs.get(key, {}).get("stage") == "base"
+        and prior_authority.field_status(
+            f"stats.ability_scores.{key}.score"
+        ).reason == "baseline_authorized"
+        and prior_authority.field_status(
+            f"stats.ability_scores.{key}.score"
+        ).is_effective
+    }
+    # The native formula pass consumes the separately witnessed base input.
+    # It is never allowed to recover a base from the saved final score.
+    projected = None
+    if provable_abilities or ac_paths:
+        try:
+            projected = normalize_definition_to_native_model(
+                definition, mode="authoring", source_authority=candidate_authority,
+                systems_service=current_app.extensions.get("systems_service"),
+            )
+        except (ValueError, TypeError, KeyError):
+            projected = None
+    projected_stats = dict(projected.stats or {}) if projected is not None else {}
+    projected_abilities = dict(projected_stats.get("ability_scores") or {})
+    ability_labels = {"str": "strength", "dex": "dexterity", "con": "constitution",
+                      "int": "intelligence", "wis": "wisdom", "cha": "charisma"}
+    for key in ability_keys:
+        row = dict(abilities.get(key) or {})
+        resolved = dict(projected_abilities.get(key) or {})
+        if key in provable_abilities and type(resolved.get("score")) is int:
+            for field in ("score", "modifier", "save_bonus"):
+                row[field] = resolved.get(field)
+        else:
+            for field in ("score", "modifier", "save_bonus"):
+                row[field] = None
+            input_payload = dict(stats.get("ability_inputs") or {})
+            score_inputs = dict(input_payload.get("scores") or {})
+            score_inputs[key] = {"stage": "unresolved", "provenance": "item_transition_needs_repair"}
+            input_payload["scores"] = score_inputs
+            stats["ability_inputs"] = input_payload
+        row["authority_status"] = NEEDS_REPAIR if row.get("score") is None else row.get("authority_status")
+        abilities[key] = row
+        if ability_labels[key] in abilities:
+            abilities[ability_labels[key]] = deepcopy(row)
+    stats["ability_scores"] = abilities
+    dependent_stats = {
+        "str": ("carrying_capacity", "push_drag_lift"),
+        "dex": ("initiative_bonus",),
+        "int": ("passive_investigation",),
+        "wis": ("passive_perception", "passive_insight"),
+        "con": ("max_hp",),
+    }
+    for key in ability_keys:
+        for field in dependent_stats.get(key, ()):
+            candidate = projected_stats.get(field)
+            stats[field] = (candidate if key in provable_abilities
+                            and type(candidate) is int else None)
+    spellcasting = dict(payload.get("spellcasting") or {})
+    projected_spellcasting = dict(projected.spellcasting or {}) if projected else {}
+    spell_ability_keys = {
+        label: key for key, label in ability_labels.items()
+    }
+    spell_ability_keys.update({key: key for key in ability_labels})
+    def spell_ability(row):
+        raw = str(row.get("ability_key") or row.get("spellcasting_ability") or "").strip().casefold()
+        return spell_ability_keys.get(raw)
+    pb_proved = candidate_authority.field_status("stats.proficiency_bonus").is_effective
+    affected_spell_row = False
+    for row_key, id_key in (("class_rows", "class_row_id"),
+                            ("source_rows", "source_row_id")):
+        computed_rows = {str(row.get(id_key) or "").strip(): row
+                         for row in projected_spellcasting.get(row_key) or []
+                         if isinstance(row, dict) and str(row.get(id_key) or "").strip()}
+        for row in spellcasting.get(row_key) or []:
+            if not isinstance(row, dict):
+                continue
+            key = spell_ability(row)
+            if key not in ability_keys:
+                continue
+            affected_spell_row = True
+            row_id = str(row.get(id_key) or "").strip()
+            computed = computed_rows.get(row_id, {})
+            verified_rows = (candidate_authority.verified_class_rows
+                             if row_key == "class_rows" else
+                             candidate_authority.verified_source_rows)
+            provenance = row.get("spell_metric_provenance")
+            formula = provenance if isinstance(provenance, dict) else {}
+            for metric in ("spell_save_dc", "spell_attack_bonus"):
+                value = computed.get(metric)
+                row[metric] = (value if pb_proved and key in provable_abilities
+                               and row_id in verified_rows
+                               and spell_ability(computed) == key
+                               and isinstance(formula.get(metric), dict)
+                               and formula[metric].get("kind") == "formula"
+                               and type(value) is int else None)
+            if any(row.get(metric) is None for metric in
+                   ("spell_save_dc", "spell_attack_bonus")):
+                row["authority_status"] = NEEDS_REPAIR
+    top_ability = spell_ability(spellcasting)
+    if not top_ability and len(spellcasting.get("class_rows") or []) == 1:
+        top_ability = spell_ability(spellcasting["class_rows"][0])
+    if top_ability in ability_keys or (not top_ability and affected_spell_row):
+        computed = projected_spellcasting
+        provenance = spellcasting.get("spell_metric_provenance")
+        formula = provenance if isinstance(provenance, dict) else {}
+        for metric in ("spell_save_dc", "spell_attack_bonus"):
+            value = computed.get(metric)
+            spellcasting[metric] = (
+                value if pb_proved and top_ability in provable_abilities
+                and spell_ability(computed) == top_ability
+                and isinstance(formula.get(metric), dict)
+                and formula[metric].get("kind") == "formula"
+                and type(value) is int else None
+            )
+        if any(spellcasting.get(metric) is None for metric in
+               ("spell_save_dc", "spell_attack_bonus")):
+            spellcasting["authority_status"] = NEEDS_REPAIR
+    payload["spellcasting"] = spellcasting
+    skill_abilities = {
+        "athletics": "str", "acrobatics": "dex", "sleight of hand": "dex",
+        "stealth": "dex", "arcana": "int", "history": "int",
+        "investigation": "int", "nature": "int", "religion": "int",
+        "animal handling": "wis", "insight": "wis", "medicine": "wis",
+        "perception": "wis", "survival": "wis", "deception": "cha",
+        "intimidation": "cha", "performance": "cha", "persuasion": "cha",
+    }
+    projected_skills = {str(row.get("name") or "").strip().casefold(): row
+                        for row in list(projected.skills or []) if isinstance(row, dict)} if projected else {}
+    for row in payload.get("skills") or []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip().casefold()
+        key = skill_abilities.get(name)
+        if key not in ability_keys:
+            continue
+        computed = projected_skills.get(name, {}).get("bonus")
+        row["bonus"] = (computed if key in provable_abilities and type(computed) is int
+                        and candidate_authority.field_status(f"skills.{name}").is_effective
+                        else None)
+        if row["bonus"] is None:
+            row["authority_status"] = NEEDS_REPAIR
+    projected_attacks = {str(row.get("id") or "").strip(): row
+                         for row in list(projected.attacks or []) if isinstance(row, dict)} if projected else {}
+    for attack in payload.get("attacks") or []:
+        if not isinstance(attack, dict):
+            continue
+        dependencies = attack.get("authority_ability_dependencies")
+        affected = bool(isinstance(dependencies, list)
+                        and set(dependencies).intersection(ability_keys))
+        if not affected and not dependencies and {"str", "dex"}.intersection(ability_keys):
+            affected = True
+        if not affected:
+            continue
+        computed = projected_attacks.get(str(attack.get("id") or "").strip(), {})
+        proven = (projected is not None
+                  and all(key in provable_abilities for key in set(dependencies or [])
+                          .intersection(ability_keys))
+                  and candidate_authority.attack_inputs_effective(computed, definition))
+        for field in ("attack_bonus", "attack_roll_bonus", "to_hit_bonus",
+                      "damage_bonus", "save_dc", "damage_formula", "damage"):
+            if field in attack:
+                attack[field] = deepcopy(computed.get(field)) if proven else None
+        if not proven:
+            attack["authority_status"] = NEEDS_REPAIR
+            attack["mechanics_suppressed"] = True
+    if ac_paths or {"dex", "con", "wis"}.intersection(ability_keys):
+        dependent_keys = {"dex", "con", "wis"}
+        safe_inputs = all(
+            (key not in ability_keys or key in provable_abilities)
+            and candidate_authority.field_status(
+                f"stats.ability_scores.{key}.score"
+            ).is_effective
+            for key in dependent_keys
+        )
+        exact_remaining = all(
+            candidate_authority.status_for("item", str(item.get("id") or "")) == VERIFIED
+            for item in definition.equipment_catalog
+            if isinstance(item, dict) and item.get("is_equipped")
+        )
+        derived_ac = None
+        if (safe_inputs and exact_remaining and projected is not None
+                and candidate_authority.verified_class_rows
+                and all(candidate_authority.status_for("feature", str(row.get("id") or ""))
+                        == VERIFIED for row in definition.features if isinstance(row, dict))):
+            effective = candidate_authority.effective_definition(definition)
+            scores = {key: dict(projected_abilities.get(key) or {}).get("score")
+                      for key in ("str", "dex", "con", "int", "wis", "cha")}
+            if all(type(score) is int for score in scores.values()):
+                catalog = _effective_item_catalog_for_definition(
+                    effective, systems_service=current_app.extensions.get("systems_service"),
+                )
+                derived_ac = _derive_armor_class_from_character_inputs(
+                    ability_scores=scores,
+                    equipment_catalog=list(effective.equipment_catalog or []),
+                    features=list(effective.features or []),
+                    class_names=_character_profile_class_names(effective),
+                    subclass_names=_character_profile_subclass_names(effective),
+                    item_catalog=catalog,
+                    allow_plain_unarmored_base=(
+                        str((effective.source or {}).get("source_type") or "")
+                        == "native_character_builder"
+                    ),
+                )
+        if derived_ac is not None:
+            stats["armor_class"] = derived_ac
+            stats["defensive_state"] = deepcopy(projected_stats.get("defensive_state"))
+        else:
+            stats["armor_class"] = None
+            stats["defensive_state"] = None
+    payload["stats"] = stats
+
+    withheld = set(resource_ids)
+    for template in payload.get("resource_templates") or []:
+        if isinstance(template, dict) and str(template.get("id") or "").strip() in withheld:
+            template["max"] = None
+            template["initial_current"] = None
+            template["authority_status"] = NEEDS_REPAIR
+    for resource in next_state.get("resources") or []:
+        if isinstance(resource, dict) and str(resource.get("id") or "").strip() in withheld:
+            resource["current"] = None
+            resource["max"] = None
+            resource["authority_status"] = "Needs repair"
+    if withheld:
+        source["item_transition_withheld_resources"] = sorted(withheld)
+    payload["source"] = source
+    return type(definition).from_dict(payload), next_state
+
+
 def publish_update(coordinator, prior_record, definition, import_metadata, desired_state, *,
                    expected_revision, updated_by_user_id=None, operation_kind,
                    desired_asset_ref="", desired_asset_bytes=b"", audit_event_type=None,
                    audit_actor_user_id=None, audit_target_user_id=None, audit_metadata=None,
                    pending_numeric_authority=None, reviewed_source_proof=None,
                    trusted_spell_choice_authoring=False,
+                   explicit_removed_item_id=None,
                    reconcile_reimport_state=False, reimport_source_authority=None):
     coordinator._validate_update_input(prior_record, definition, import_metadata,
                                        expected_revision=expected_revision,
                                        operation_kind=operation_kind)
+    _reject_retired_item_spell_rows(prior_record.definition, definition)
     expected_config, _ = config(definition.campaign_slug)
     if reconcile_reimport_state and operation_kind not in {"markdown_import", "pdf_import"}:
         raise CharacterStateConflictError("Reimport reconciliation is unavailable for this update.")
@@ -941,11 +1738,19 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
     if operation_kind != "activation_repair" and is_dnd_5e_system(definition.system):
         if analyze_activation(definition, desired_state)["blocked"]:
             raise CharacterStateConflictError("Equipment activation identity needs manager repair.")
-    primary, secondary = _pair(definition, import_metadata)
+    if explicit_removed_item_id and operation_kind != "interactive_update":
+        raise CharacterStateConflictError("Explicit equipment removal is unavailable for this update.")
+    if explicit_removed_item_id:
+        from .character_service import prospective_exact_item_removal_state
+        prospective_exact_item_removal_state(
+            prior_record.definition, definition, prior_record.state_record.state,
+            explicit_removed_item_id,
+        )
+    original_definition, original_state = definition, desired_state
     authority = (
         pending_numeric_authority.recheck(prior_record, definition, desired_state)
         if pending_numeric_authority is not None else
-        coordinator.numeric_authority_provider(prior_record, definition)
+        coordinator.numeric_authority_provider(prior_record, definition, desired_state)
         if coordinator.numeric_authority_provider is not None else None
     )
     if reviewed_source_proof is not None:
@@ -954,6 +1759,49 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         )
         reviewed_source_proof.recheck(prior_record, definition, desired_state,
                                       authority, expected_config["revision"])
+    prior_authority = (coordinator.numeric_authority_provider(
+        prior_record, prior_record.definition, prior_record.state_record.state,
+    ) if coordinator.numeric_authority_provider is not None else None)
+    item_baseline = _exact_item_transition_baseline(
+        prior_record.definition, definition, prior_authority, authority,
+    )
+    if not item_baseline[0] and dict(definition.source or {}).get(
+            "item_transition_withheld_resources") != dict(
+            prior_record.definition.source or {}).get("item_transition_withheld_resources"):
+        raise CharacterStateConflictError("Item transition repair marker needs an exact retired source.")
+    if not item_baseline[0] and dict(definition.source or {}).get(
+            "item_transition_cleared_charges") not in (
+            None, dict(prior_record.definition.source or {}).get(
+                "item_transition_cleared_charges")):
+        raise CharacterStateConflictError("Item charge repair marker needs an exact relinked source.")
+    if not item_baseline[0]:
+        carried_charge_ids = set(dict(definition.source or {}).get(
+            "item_transition_cleared_charges") or [])
+        if any((row.get("charges_current"), row.get("charges_max")) != (None, None)
+               for row in prior_record.state_record.state.get("inventory") or []
+               if isinstance(row, dict)
+               and str(row.get("catalog_ref") or row.get("id") or "").strip()
+               in carried_charge_ids):
+            raise CharacterStateConflictError("Item charge repair marker is stale.")
+    if item_baseline[0]:
+        definition, desired_state = _withhold_item_transition_aggregates(
+            prior_record.definition, definition, desired_state,
+            prior_authority, authority, item_baseline,
+        )
+        authority = coordinator.numeric_authority_provider(
+            prior_record, definition, desired_state,
+        )
+    primary, secondary = _pair(definition, import_metadata)
+    if explicit_removed_item_id:
+        from .character_service import merge_state_with_definition
+        expected_state = merge_state_with_definition(
+            definition, prior_record.state_record.state,
+            prior_definition=prior_record.definition,
+            explicit_removed_item_id=explicit_removed_item_id,
+            source_authority=authority,
+        )
+        if desired_state != expected_state:
+            raise CharacterStateConflictError("Equipment removal state changed before publication.")
     if reimport_source_authority is not None and (
         authority is None
         or authority.identity != reimport_source_authority.identity
@@ -965,6 +1813,10 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
     prepared = coordinator.state_store.prepare_initial_state(
         definition, desired_state, source_authority=authority,
         previous_state=prior_record.state_record.state,
+    )
+    prospective_transitions = _prepare_transition_renewals(
+        prior_record, definition, prepared.validated_state, authority, prior_authority, get_db(),
+        withheld_resource_ids=item_baseline[3] if item_baseline[0] else (),
     )
     if (reviewed_source_proof is not None and reviewed_source_proof.page_feature_markers
             and prepared.validated_state != desired_state):
@@ -1039,7 +1891,7 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
             refreshed = (
                 pending_numeric_authority.recheck(prior_record, definition, desired_state)
                 if pending_numeric_authority is not None else
-                coordinator.numeric_authority_provider(prior_record, definition)
+                coordinator.numeric_authority_provider(prior_record, definition, desired_state)
             )
             if reviewed_source_proof is not None:
                 refreshed = reviewed_source_proof.prospective_authority(
@@ -1048,9 +1900,18 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
             if (refreshed is None or refreshed.identity != authority.identity
                     or refreshed.source_snapshot_digest != authority.source_snapshot_digest):
                 raise CharacterStateConflictError("Character source proof changed before publication.")
-            if reviewed_source_proof is not None:
+            if reviewed_source_proof is not None and not item_baseline[0]:
                 reviewed_source_proof.recheck(prior_record, definition, desired_state,
                                               refreshed, locked_config["revision"])
+            if explicit_removed_item_id:
+                locked_expected_state = merge_state_with_definition(
+                    definition, prior_record.state_record.state,
+                    prior_definition=prior_record.definition,
+                    explicit_removed_item_id=explicit_removed_item_id,
+                    source_authority=refreshed,
+                )
+                if desired_state != locked_expected_state:
+                    raise CharacterStateConflictError("Equipment removal state changed before publication.")
         if reconcile_reimport_state:
             from .character_importer import reconcile_imported_state
             from .system_policy import is_xianxia_system
@@ -1093,6 +1954,44 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         if (locked_source != expected_source
                 or locked_source.config_revision != locked_config["revision"]):
             raise CommittedSourceConflict("Character source changed before publication.")
+        locked_prior_authority = (coordinator.numeric_authority_provider(
+            prior_record, prior_record.definition, prior_record.state_record.state,
+        ) if coordinator.numeric_authority_provider is not None else None)
+        if _exact_item_transition_baseline(
+            prior_record.definition, definition, locked_prior_authority, refreshed,
+        ) != item_baseline:
+            raise CharacterStateConflictError("Item baseline changed before publication.")
+        if item_baseline[0]:
+            locked_original_authority = coordinator.numeric_authority_provider(
+                prior_record, original_definition, original_state,
+            )
+            if reviewed_source_proof is not None:
+                locked_original_authority = reviewed_source_proof.prospective_authority(
+                    locked_original_authority, original_definition,
+                    prior_record.state_record.state,
+                )
+                reviewed_source_proof.recheck(
+                    prior_record, original_definition, original_state,
+                    locked_original_authority, locked_config["revision"],
+                )
+            if (locked_original_authority is None or authority is None
+                    or locked_original_authority.source_snapshot_digest
+                       != authority.source_snapshot_digest):
+                raise CharacterStateConflictError("Item transition source changed before publication.")
+            locked_definition, locked_state = _withhold_item_transition_aggregates(
+                prior_record.definition, original_definition, original_state,
+                locked_prior_authority, locked_original_authority, item_baseline,
+            )
+            if (locked_definition.to_dict() != definition.to_dict()
+                    or locked_state != desired_state):
+                raise CharacterStateConflictError("Item transition proof changed before publication.")
+        locked_transitions = _prepare_transition_renewals(
+            prior_record, definition, prepared.validated_state, refreshed,
+            locked_prior_authority, connection,
+            withheld_resource_ids=item_baseline[3] if item_baseline[0] else (),
+        )
+        if locked_transitions != prospective_transitions:
+            raise CharacterStateConflictError("Character transition proof changed before publication.")
         prior_portrait = portrait_bytes(campaign, slug, connection=connection)
         ref = str((definition.profile or {}).get("portrait_asset_ref") or "").strip()
         if operation_kind == "portrait_upsert":
@@ -1125,10 +2024,22 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
                          primary=primary, secondary=secondary, portrait=portrait,
                          actor=updated_by_user_id, system=definition.system)
         if clean_audit[0] is not None:
+            audit_payload = json.loads(clean_audit[3])
+            if (clean_audit[0] == "character_update_applied"
+                    and audit_payload.get("source") == "character_source_repair"
+                    and audit_payload.get("review_digest")):
+                from .character_update_apply import canonical_digest
+                audit_payload["published_definition_digest"] = canonical_digest(
+                    definition.to_dict())
+                audit_payload["published_revision"] = number
+                audit_payload["published_state_revision"] = connection.execute(
+                    "SELECT revision FROM character_state WHERE campaign_slug=? AND character_slug=?",
+                    (campaign, slug),
+                ).fetchone()[0]
             coordinator.auth_store.insert_audit_event(
                 event_type=clean_audit[0], actor_user_id=clean_audit[1],
                 target_user_id=clean_audit[2], campaign_slug=campaign,
-                character_slug=slug, metadata=json.loads(clean_audit[3]), commit=False,
+                character_slug=slug, metadata=audit_payload, commit=False,
             )
         if reviewed_source_proof is not None and reviewed_source_proof.page_feature_markers:
             if (operation_kind != "character_update_apply" or clean_audit[0] != "character_update_applied"
@@ -1184,6 +2095,7 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
                         "state_revision": expected_revision + 1,
                     }, commit=False,
                 )
+        _append_transition_renewals(connection, campaign, slug, locked_transitions)
         state = coordinator.state_store.get_state(campaign, slug)
         if state is None:
             raise CharacterStateUnavailableError("Committed Character state disappeared before publication.")

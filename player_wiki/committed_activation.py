@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from copy import deepcopy
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,8 +23,10 @@ from .campaign_content_service import validated_campaign_asset_media_type
 from .character_assets import validate_character_portrait_asset_ref
 from .managed_wiki_images import is_canonical_managed_wiki_image_ref
 from .character_models import CharacterDefinition
-from .character_source_authority import (MANUAL, VERIFIED,
+from .character_source_authority import (CONFLICT, MANUAL, NEEDS_REPAIR, VERIFIED,
+                                         _FEATURE_EFFECT_FIELDS, _ITEM_EFFECT_FIELDS,
                                          build_source_authority,
+                                         _page_ref,
                                          numeric_target_values,
                                          numeric_target_owner_digest,
                                          numeric_value_digest,
@@ -37,7 +40,8 @@ from .campaign_page_store import CampaignPageStore
 from .systems_service import BUILTIN_LIBRARY_CATALOG
 from .systems_store import SystemsStore
 from .system_policy import default_systems_library_slug
-from .committed_character_publication import _create_source_links, _create_source_proof
+from .committed_character_publication import (_create_source_links, _create_source_proof,
+                                              _exact_systems_link, MAX_CREATE_SOURCE_LINKS)
 from .runtime_lease import acquire_exclusive_state_lease, RuntimeStateLeaseError
 from .snapshot_coherence import SnapshotCoherenceError
 from .legacy_page_exclusion import proved_exclusions
@@ -216,9 +220,26 @@ def _transition_targets(definition: CharacterDefinition, state: dict,
     """Prove a mode-only change for each presently effective source-bound owner."""
     values = numeric_target_values(definition, state)
     markers = list(dict(definition.source or {}).get("source_authorizations") or [])
+    for marker in markers:
+        if (isinstance(marker, dict)
+                and str(marker.get("target_id") or "").startswith(
+                    "resource:campaign-option-tracker:")
+                and (marker.get("target_kind"), marker.get("target_id"),
+                     marker.get("metric")) not in values):
+            raise ValueError("Claimed page tracker has no exact raw target")
     old_bases = dict(closed.resource_basis_digests)
     new_bases = dict(projected.resource_basis_digests)
     spellcasting = dict(definition.spellcasting or {})
+    formula_claims = set()
+    for family, id_key in (("class", "class_row_id"), ("source", "source_row_id")):
+        for row in list(spellcasting.get(f"{family}_rows") or []):
+            if not isinstance(row, dict):
+                continue
+            provenance = row.get("spell_metric_provenance")
+            for metric in ("spell_attack_bonus", "spell_save_dc"):
+                record = provenance.get(metric) if isinstance(provenance, dict) else None
+                if isinstance(record, dict) and record.get("kind") == "formula":
+                    formula_claims.add(f"spell_metric:{family}:{row.get(id_key)}:{metric}")
     for rows, id_key in ((spellcasting.get("spells"), "id"),
                          (spellcasting.get("class_rows"), "class_row_id"),
                          (spellcasting.get("source_rows"), "source_row_id")):
@@ -242,24 +263,44 @@ def _transition_targets(definition: CharacterDefinition, state: dict,
         raise ValueError("Unexpected numeric basis change")
     proofs: list[dict[str, object]] = []
     for (kind, target_id, metric), raw in values.items():
+        old_basis, new_basis = old_bases.get(target_id), new_bases.get(target_id)
+        matching = [row for row in markers if isinstance(row, dict)
+                    and (row.get("target_kind"), row.get("target_id"), row.get("metric"))
+                    == (kind, target_id, metric)]
+        if kind in {"spell_choice","spell_metric"} and bool(old_basis) != bool(new_basis):
+            raise ValueError("Source-bound basis is one-sided")
         if kind == "spell_choice":
-            required = target_id.removeprefix("spell_choice:") in closed.verified_spell_choices
+            required = (target_id.removeprefix("spell_choice:") in closed.verified_spell_choices
+                        or bool(matching))
         elif kind == "spell_metric":
-            required = isinstance(raw, dict) and raw.get("value") is not None
+            required = (target_id in formula_claims or bool(matching)
+                        or target_id in closed.verified_formula_rows
+                        or target_id in projected.verified_formula_rows)
         elif kind == "resource":
-            required = target_id.startswith("resource:campaign-option-tracker:")
+            required = (target_id.startswith("resource:campaign-option-tracker:")
+                        and (bool(matching) or bool(old_basis) or bool(new_basis)
+                             or any(row.path == target_id and row.is_effective
+                                    for authority in (closed, projected)
+                                    for row in authority.resource_statuses)))
         else:
             continue
         if not required:
             continue
-        old_basis, new_basis = old_bases.get(target_id), new_bases.get(target_id)
         if not old_basis or not new_basis:
             raise ValueError("Source-bound basis unavailable")
         if old_basis == new_basis:
+            if matching:
+                if kind == "spell_choice":
+                    original_effective = (target_id.removeprefix("spell_choice:")
+                                          in closed.verified_spell_choices)
+                elif kind == "spell_metric":
+                    original_effective = target_id in closed.verified_formula_rows
+                else:
+                    original_effective = any(row.path == target_id and row.is_effective
+                                             for row in closed.resource_statuses)
+                if len(matching) != 1 or not original_effective:
+                    raise ValueError("Claimed source-bound value is unproved")
             continue
-        matching = [row for row in markers if isinstance(row, dict)
-                    and (row.get("target_kind"), row.get("target_id"), row.get("metric"))
-                    == (kind, target_id, metric)]
         if len(matching) != 1:
             raise ValueError("Source-bound marker ambiguous")
         marker = matching[0]
@@ -298,6 +339,145 @@ def _transition_targets(definition: CharacterDefinition, state: dict,
                  "identity": identity}
         proofs.append(proof)
     return tuple(proofs)
+
+
+def _current_publication_pair(definition: CharacterDefinition,
+                              reconciled: CharacterDefinition, state: dict,
+                              authorities: tuple) -> tuple[CharacterDefinition, dict, tuple, tuple]:
+    """Keep original current claims and their exact dependencies for publication proof."""
+    statuses: dict[tuple[str, str], list[str]] = {}
+    grants: set[tuple[str, str]] = set()
+    active_items: set[str] = set()
+    class_ids: set[str] = set()
+    source_ids: set[str] = set()
+    spell_ids: set[str] = set()
+    choice_ids: set[str] = set()
+    for authority in authorities:
+        local_statuses: set[tuple[str, str]] = set()
+        for row in authority.statuses:
+            key = (row.kind, row.instance_id)
+            if key in local_statuses and (row.status == VERIFIED or
+                                          VERIFIED in statuses.get(key, [])):
+                raise ValueError("Current source row identity is duplicated")
+            local_statuses.add(key)
+            statuses.setdefault((row.kind, row.instance_id), []).append(row.status)
+            if row.kind == "spell" and row.status == VERIFIED:
+                spell_ids.add(row.instance_id)
+        grants.update((row.kind, row.instance_id) for row in authority.grants)
+        active_items.update(authority.active_item_ids)
+        source_ids.update(authority.verified_source_rows)
+        spell_ids.update(authority.verified_spell_choices)
+        choice_ids.update(authority.verified_spell_choices)
+        spell_ids.update(spell_id for spell_id, _key in authority.current_spell_keys)
+        source_ids.update(row_id for row_id, _key in authority.verified_spell_grants)
+        for target in authority.verified_formula_rows:
+            for family, destination in (("class", class_ids), ("source", source_ids)):
+                prefix = f"spell_metric:{family}:"
+                if target.startswith(prefix):
+                    destination.add(target[len(prefix):].rsplit(":", 1)[0])
+
+    def current(kind: str, instance_id: str, *, companion: bool = False) -> bool:
+        decisions = statuses.get((kind, instance_id), [])
+        selected = (VERIFIED in decisions or (kind, instance_id) in grants
+                    or kind == "item" and instance_id in active_items
+                    or kind == "spell" and instance_id in spell_ids or companion)
+        if selected and (not instance_id or any(value != VERIFIED for value in decisions)
+                         or len(decisions) != len(authorities)):
+            raise ValueError("Current source row identity or status is ambiguous")
+        return selected
+
+    # A single status per authority is required for every retained current row.
+    for key, decisions in statuses.items():
+        if (VERIFIED in decisions or key in grants
+                or key[0] == "item" and key[1] in active_items
+                or key[0] == "spell" and key[1] in spell_ids):
+            if len(decisions) != len(authorities) or any(value != VERIFIED for value in decisions):
+                raise ValueError("Current source row identity or status is ambiguous")
+
+    payload = definition.to_dict()
+    features = []
+    companion_trackers: set[str] = set()
+    for row in definition.features:
+        if not isinstance(row, dict):
+            continue
+        option = row.get("campaign_option")
+        category = str(row.get("category") or row.get("kind") or "").strip()
+        subject = {"species_trait": "species", "background_feature": "background"}.get(category)
+        option_kind = (str(option.get("kind") or "").strip().lower()
+                       if isinstance(option, dict) else "")
+        if option_kind in {"species", "background"}:
+            subject = option_kind
+        profile_page = _page_ref((definition.profile or {}).get(f"{subject}_page_ref")) if subject else ""
+        companion = bool(profile_page and (_page_ref(row.get("page_ref")) == profile_page
+            or isinstance(option, dict) and _page_ref(option.get("page_ref")) == profile_page))
+        if current("feature", str(row.get("id") or "").strip(), companion=companion):
+            retained = deepcopy(row)
+            for field in _FEATURE_EFFECT_FIELDS - {"campaign_option", "spell_manager"}:
+                retained.pop(field, None)
+            features.append(retained)
+            if companion:
+                feature_id = str(row.get("id") or "").strip()
+                if feature_id:
+                    companion_trackers.add(f"campaign-option-tracker:{feature_id}")
+                if row.get("tracker_ref"):
+                    companion_trackers.add(str(row["tracker_ref"]))
+    payload["features"] = features
+
+    items = []
+    for row in definition.equipment_catalog:
+        if not isinstance(row, dict):
+            continue
+        if current("item", str(row.get("id") or "").strip()):
+            retained = deepcopy(row)
+            for field in _ITEM_EFFECT_FIELDS - {"campaign_option"}:
+                retained.pop(field, None)
+            items.append(retained)
+    payload["equipment_catalog"] = items
+    item_ids = {str(row.get("id") or "").strip() for row in items}
+    payload["resource_templates"] = [row for row in definition.resource_templates
+        if isinstance(row, dict) and row.get("id") in companion_trackers]
+
+    spellcasting = deepcopy(definition.spellcasting)
+    spellcasting["spells"] = [row for row in list(spellcasting.get("spells") or [])
+        if isinstance(row, dict) and current("spell", str(row.get("id") or "").strip())]
+    class_ids.update(str(row.get("class_row_id") or row.get("authority_original_class_row_id") or "").strip()
+                     for row in spellcasting["spells"]
+                     if row.get("id") in choice_ids and
+                     (row.get("class_row_id") or row.get("authority_original_class_row_id")))
+    spellcasting["class_rows"] = [row for row in list(spellcasting.get("class_rows") or [])
+        if isinstance(row, dict) and str(row.get("class_row_id") or "").strip() in class_ids]
+    spellcasting["source_rows"] = [row for row in list(spellcasting.get("source_rows") or [])
+        if isinstance(row, dict) and str(row.get("source_row_id") or "").strip() in source_ids]
+    # The create-time walker only accepts class_ref under profile.classes.
+    # Prove a retained spell class row's original ref with the same exact typed
+    # Systems link and omit that field solely from the walker projection.
+    extra_entries = []
+    class_pairs = []
+    profile_classes: dict[str, list[int]] = {}
+    for index, row in enumerate(list((definition.profile or {}).get("classes") or [])):
+        if isinstance(row, dict) and row.get("row_id"):
+            profile_classes.setdefault(str(row["row_id"]).strip(), []).append(index)
+    for index, row in enumerate(spellcasting["class_rows"]):
+        ref = row.pop("class_ref", None)
+        if ref is None:
+            continue
+        matches = profile_classes.get(str(row.get("class_row_id") or "").strip(), [])
+        if len(matches) != 1:
+            raise ValueError("Spell class source has no unique profile class")
+        owner = f"definition.spellcasting.class_rows[{index}].class_ref"
+        extra_entries.append(_exact_systems_link(ref, owner, "class"))
+        class_pairs.append((owner, f"definition.profile.classes[{matches[0]}].systems_ref"))
+    payload["spellcasting"] = spellcasting
+    payload["attacks"] = [row for row in definition.attacks if isinstance(row, dict)
+        and any(authority.attack_inputs_effective(row, reconciled) for authority in authorities)]
+    # Historical progression and numeric witnesses are proved by SourceAuthority;
+    # they are not independent publication links.
+    payload["source"] = {"source_type": (definition.source or {}).get("source_type")}
+    proof_state = {"inventory": [row for row in list(state.get("inventory") or [])
+        if isinstance(row, dict) and str(row.get("catalog_ref") or row.get("id") or "").strip()
+        in item_ids]}
+    return (CharacterDefinition.from_dict(payload), proof_state,
+            tuple(extra_entries), tuple(class_pairs))
 
 
 def _inventory(connection: sqlite3.Connection, campaigns_dir: Path, *,
@@ -524,27 +704,67 @@ def _inventory(connection: sqlite3.Connection, campaigns_dir: Path, *,
                         },sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()))
                         values = numeric_target_values(reconciled,state)
                         required_choices = closed_authority.verified_spell_choices
+                        required_trackers = {target for (kind,target,_metric) in values
+                            if kind == "resource" and target.startswith(
+                                "resource:campaign-option-tracker:")
+                            and any(row.path == target and row.is_effective
+                                    for row in closed_authority.resource_statuses)}
                         for authority in projected_authorities:
                             if any(status.status not in {VERIFIED,MANUAL} for status in authority.statuses
-                                   if (status.kind in {"class_row","feature","item","source_row"}
+                                   if (status.kind in {"class_row","source_row"}
                                        or status.kind == "spell" and status.instance_id in required_choices)):
                                 raise ValueError("current source unproved")
-                            if any(status.raw is not None and not status.is_effective
+                            if any(status.status != VERIFIED and status.status != MANUAL
+                                   and (status.status != NEEDS_REPAIR
+                                        or any(grant.kind == status.kind
+                                               and grant.instance_id == status.instance_id
+                                               for grant in authority.grants)
+                                        or status.kind == "item"
+                                           and status.instance_id in authority.active_item_ids)
+                                   for status in authority.statuses
+                                   if status.kind in {"feature","item"}):
+                                raise ValueError("unresolved source has effective mechanics")
+                            if any(status.status == CONFLICT or
+                                   not status.is_effective and status.effective is not None
                                    for status in authority.field_statuses):
                                 raise ValueError("numeric owner unproved")
-                            if any(not status.path.startswith("item_charge:")
-                                   and status.raw is not None and not status.is_effective
+                            if any(status.status == CONFLICT or
+                                   not status.is_effective and status.effective is not None
                                    for status in authority.resource_statuses):
                                 raise ValueError("resource owner unproved")
-                            if any(kind == "spell_metric" and isinstance(value,dict)
-                                   and value.get("value") is not None and target not in authority.verified_formula_rows
+                            if any(not any(row.path == target and row.is_effective
+                                           for row in authority.resource_statuses)
+                                   for target in required_trackers):
+                                raise ValueError("page tracker source unproved")
+                            if any(kind == "spell_metric"
+                                    and (target in closed_authority.verified_formula_rows
+                                         or target in dict(authority.resource_basis_digests))
+                                    and target not in authority.verified_formula_rows
                                    for (kind,target,_metric),value in values.items()):
                                 raise ValueError("spell formula unproved")
                             if any(choice not in authority.verified_spell_choices
                                    for choice in required_choices):
                                 raise ValueError("spell choice unproved")
-                    pages,entries = _create_source_links(definition,state)
-                    _create_source_proof(slug,pages,entries,connection=connection)
+                        publication_definition, publication_state, extra_entries, class_pairs = _current_publication_pair(
+                            definition,reconciled,state,
+                            (closed_authority,*projected_authorities))
+                        pages,entries = _create_source_links(publication_definition,
+                                                              publication_state)
+                        entries = tuple(sorted((*entries,*extra_entries)))
+                        if len(pages) + len(entries) > MAX_CREATE_SOURCE_LINKS:
+                            raise ValueError("Current source links exceed publication bound")
+                        if ((definition.source or {}).get("source_type") == "native_character_builder"
+                                and not entries):
+                            raise ValueError("Native Character has no exact Systems source")
+                    else:
+                        pages,entries = _create_source_links(definition,state)
+                    publication_proof = _create_source_proof(slug,pages,entries,connection=connection)
+                    if definition.system.lower() in {"dnd-5e","dnd5e","dnd_5e"}:
+                        resolved = {row[0]: row[4] for row in publication_proof.entries}
+                        if any(not resolved.get(spell_owner)
+                               or resolved.get(spell_owner) != resolved.get(profile_owner)
+                               for spell_owner, profile_owner in class_pairs):
+                            raise ValueError("Spell class source differs from its current profile class")
                 except Exception:
                     issue(*key,"unproved_character_source")
                 profile = (_decode_mapping(primary) or {}).get("profile") or {}

@@ -336,7 +336,7 @@ DND_SECTION_DEPENDENCY_MANIFEST = MappingProxyType(
                     "inventory",
                 }
             ),
-            catalog_components=frozenset(),
+            catalog_components=frozenset({"spells"}),
             derivation_components=frozenset(
                 {
                     "item_ability_minimums",
@@ -574,7 +574,7 @@ def present_character_roster(
         }
         resource_preview = []
         for resource in resources[:3]:
-            value = summarize_resource_value(resource)
+            value = summarize_resource_value(resource) if resource.get("current") is not None else "Needs repair"
             if needs_authority:
                 stable_id = str(resource.get("id") or "")
                 status = authority.resource_status("resource", stable_id) if authority is not None else None
@@ -582,7 +582,7 @@ def present_character_roster(
                 if status is not None and status.is_effective and projected is not None:
                     value = summarize_resource_value(projected)
                 else:
-                    value = raw_label(value, status)
+                    value = "Needs repair" if resource.get("current") is None else raw_label(value, status)
             resource_preview.append({"label": str(resource.get("label") or "Resource"), "value": value})
 
         if needs_authority:
@@ -973,7 +973,12 @@ def _count_presented_dnd_spells(
         )
         if authority_status in {"NEEDS REPAIR", "NEEDS ATTENTION", "MANUAL"}:
             action_state["can_show_in_current_view"] = True
-        count += int(bool(action_state.get("can_show_in_current_view")))
+        count += int(
+            authority_status in {"VERIFIED", "MANUAL"}
+            and not spell.get("item_spell_review_only")
+            and not spell.get("spell_source_review_only")
+            and bool(action_state.get("can_show_in_current_view"))
+        )
     return count
 
 
@@ -1557,11 +1562,10 @@ def _present_character_detail(
         resources.append({
             "id": resource_id,
             "label": str(resource.get("label") or "Resource"),
-            "current": int(resource.get("current") or 0),
+            "current": int(resource["current"]) if can_edit and resource.get("current") is not None else None,
             "max": int(raw_max) if can_edit and raw_max is not None else None,
-            "raw_max": raw_max,
-            "value": summarize_resource_value(resource) if can_edit else
-                     f"Raw {summarize_resource_value(resource)} · {status['status']}",
+            "raw_max": raw_max if can_edit else None,
+            "value": summarize_resource_value(resource) if can_edit else status["status"],
             "reset_on": str(resource.get("reset_on") or "") if can_edit else "",
             "reset_label": humanize_value(resource.get("reset_on")) if can_edit else status["status"],
             "is_manual": str(resource.get("reset_on") or "").lower() in {"manual", "other"},
@@ -1686,6 +1690,22 @@ def _present_character_detail(
             for row in spell_rows
             if str(row.get("class_row_id") or "").strip()
         }
+        effective_source_spell_rows: set[str] = set()
+        review_source_spell_rows: set[str] = set()
+        for row_spell in list(spellcasting_payload.get("spells") or []):
+            if not isinstance(row_spell, dict):
+                continue
+            source_row_id = str(row_spell.get("spell_source_row_id") or "").strip()
+            source_row = spell_rows_by_id.get(source_row_id) or {}
+            if not source_row or str(source_row.get("row_kind") or "class").strip() == "class":
+                continue
+            status = str(row_spell.get("authority_status") or "VERIFIED").strip().upper()
+            if (row_spell.get("item_spell_review_only")
+                    or row_spell.get("spell_source_review_only")
+                    or status not in {"VERIFIED", "MANUAL"}):
+                review_source_spell_rows.add(source_row_id)
+            else:
+                effective_source_spell_rows.add(source_row_id)
         if len(class_spell_rows) > 1 and len(slot_pools) == 1 and not bool((slot_pools[0] or {}).get("shared")):
             slot_pools[0]["shared"] = True
             slot_pools[0]["title"] = "Shared spell slots"
@@ -1695,6 +1715,7 @@ def _present_character_detail(
             for row in spell_rows
             if str(row.get("class_row_id") or "").strip()
         }
+        review_source_spells_by_row_id: dict[str, list[dict[str, Any]]] = {}
         fallback_row_id = (
             str((class_spell_rows[0] or {}).get("class_row_id") or "").strip()
             if len(class_spell_rows) == 1
@@ -1762,12 +1783,21 @@ def _present_character_detail(
             if access_badge and access_badge not in badges:
                 badges.append(access_badge)
             mark = str(spell.get("mark") or "").strip()
-            if mark and not (not verified_source and mark.casefold() == "granted") and mark not in badges:
+            if verified_source and mark and mark not in badges:
                 badges.append(mark)
+            historical_mark = (
+                str(spell.get("historical_mark") or "").strip()
+                if authority_status in {"NEEDS REPAIR", "NEEDS ATTENTION"} else ""
+            )
+            if historical_mark:
+                badges.append(f"Saved {historical_mark} (historical)")
             source_label = str(spell.get("grant_source_label") or spell.get("source") or "").strip()
             management_note = ""
             if authority_note:
-                management_note = authority_note
+                management_note = (
+                    f"Saved {historical_mark} mark (historical; not an active choice). {authority_note}"
+                    if historical_mark else authority_note
+                )
             elif always_prepared and source_label:
                 management_note = f"Always prepared from {source_label}."
             elif verified_source and bool(spell.get("is_bonus_known")) and source_label:
@@ -1801,6 +1831,7 @@ def _present_character_detail(
                     "badges": badges,
                     "authority_status": player_status,
                     "authority_note": authority_note,
+                    "historical_mark": historical_mark,
                     "class_row_id": str(
                         spell.get("class_row_id") or spell.get("spell_source_row_id") or fallback_row_id
                     ).strip(),
@@ -1819,12 +1850,17 @@ def _present_character_detail(
             row_payload = dict(spell_rows_by_id.get(target_row_id) or {})
             row_mode = str(row_payload.get("spell_mode") or "").strip()
             row_kind = str(row_payload.get("row_kind") or "class").strip() or "class"
+            source_review_only = bool(
+                spell.get("item_spell_review_only")
+                or (row_kind != "class" and (spell.get("spell_source_review_only")
+                    or authority_status not in {"VERIFIED", "MANUAL"}))
+            )
             source_package_label = ""
             source_package_note = ""
             source_package_meta = ""
             source_package_key = ""
             source_package_kind_label = ""
-            if row_kind != "class" and target_row_id:
+            if row_kind != "class" and target_row_id and not source_review_only:
                 source_package_label = str(row_payload.get("class_name") or "").strip()
                 if row_kind == "feat":
                     source_package_kind_label = "Feat spells"
@@ -1867,13 +1903,24 @@ def _present_character_detail(
             )
             if authority_status in {"NEEDS REPAIR", "NEEDS ATTENTION", "MANUAL"}:
                 spell_action_state["can_show_in_current_view"] = True
+            if authority_status in {"NEEDS REPAIR", "NEEDS ATTENTION"} or source_review_only:
+                spell_action_state["can_toggle_prepared"] = False
+                spell_action_state["can_remove"] = False
+                spell_action_state["is_prepared"] = False
+                spell_action_state["is_fixed"] = False
             presented_spell.update(spell_action_state)
-            presented_spell["remove_label"] = _presented_spell_remove_label(
-                mode=row_mode,
-                is_cantrip=bool(spell_action_state.get("is_cantrip")),
-                is_prepared=bool(spell_action_state.get("is_prepared")),
+            presented_spell["remove_label"] = (
+                "" if not spell_action_state.get("can_remove") else _presented_spell_remove_label(
+                    mode=row_mode,
+                    is_cantrip=bool(spell_action_state.get("is_cantrip")),
+                    is_prepared=bool(spell_action_state.get("is_prepared")),
+                )
             )
-            if target_row_id and target_row_id in spells_by_row_id:
+            if spell.get("item_spell_review_only") and row_kind == "class":
+                spells_by_row_id.setdefault("", []).append(presented_spell)
+            elif source_review_only and row_kind != "class" and target_row_id in spells_by_row_id:
+                review_source_spells_by_row_id.setdefault(target_row_id, []).append(presented_spell)
+            elif target_row_id and target_row_id in spells_by_row_id:
                 spells_by_row_id[target_row_id].append(presented_spell)
             else:
                 spells_by_row_id.setdefault("", []).append(presented_spell)
@@ -1883,6 +1930,9 @@ def _present_character_detail(
         for row in spell_rows:
             row_id = str(row.get("class_row_id") or "").strip()
             row_spells = list(spells_by_row_id.get(row_id) or [])
+            review_source_spells = list(review_source_spells_by_row_id.get(row_id) or [])
+            source_row = str(row.get("row_kind") or "class").strip() != "class"
+            has_effective_source_spell = row_id in effective_source_spell_rows
             current_spells = [
                 dict(spell)
                 for spell in row_spells
@@ -1900,37 +1950,54 @@ def _present_character_detail(
                     if int(row.get("level") or 0) > 0
                     else str(row.get("class_name") or "Spellcasting").strip()
                 ),
-                "spellcasting_ability": str(row.get("spellcasting_ability") or "").strip(),
-                "spell_save_dc": row.get("spell_save_dc"),
-                "spell_attack_bonus": format_signed(row.get("spell_attack_bonus")),
-                "spell_metric_notes": list(row.get("spell_metric_notes") or []),
+                "spellcasting_ability": (
+                    str(row.get("spellcasting_ability") or "").strip()
+                    if not source_row or has_effective_source_spell else ""
+                ),
+                "spell_save_dc": (
+                    row.get("spell_save_dc") if not source_row or has_effective_source_spell else None
+                ),
+                "spell_attack_bonus": (
+                    format_signed(row.get("spell_attack_bonus"))
+                    if not source_row or has_effective_source_spell else ""
+                ),
+                "spell_metric_notes": (
+                    list(row.get("spell_metric_notes") or [])
+                    if not source_row or has_effective_source_spell else []
+                ),
                 "row_kind": str(row.get("row_kind") or "class").strip() or "class",
                 "spell_mode": str(row.get("spell_mode") or "").strip(),
             }
 
             current_counts = []
+            effective_current_spells = [
+                spell for spell in current_spells
+                if str(spell.get("authority_status") or "VERIFIED").strip().upper()
+                in {"VERIFIED", "MANUAL"}
+            ]
             cantrip_count = sum(
-                1 for spell in current_spells if "Cantrip" in list(spell.get("badges") or [])
+                1 for spell in effective_current_spells if "Cantrip" in list(spell.get("badges") or [])
             )
-            prepared_count = sum(1 for spell in current_spells if bool(spell.get("is_prepared")))
+            prepared_count = sum(1 for spell in effective_current_spells if bool(spell.get("is_prepared")))
             spellbook_count = sum(
-                1 for spell in current_spells if any("Spellbook" in badge for badge in list(spell.get("badges") or []))
+                1 for spell in effective_current_spells if any("Spellbook" in badge for badge in list(spell.get("badges") or []))
             )
             ritual_book_count = sum(
-                1 for spell in current_spells if any("Ritual book" in badge for badge in list(spell.get("badges") or []))
+                1 for spell in effective_current_spells if any("Ritual book" in badge for badge in list(spell.get("badges") or []))
             )
             known_count = sum(
-                1 for spell in current_spells if "Known" in list(spell.get("badges") or [])
+                1 for spell in effective_current_spells if "Known" in list(spell.get("badges") or [])
             )
             if cantrip_count:
                 current_counts.append({"label": "Cantrips", "value": str(cantrip_count)})
             if str(row.get("row_kind") or "class").strip() != "class":
                 if str(row.get("spell_mode") or "").strip() == "ritual_book":
-                    current_counts.append(
-                        {"label": "Ritual book spells", "value": str(ritual_book_count or len(current_spells))}
-                    )
-                elif current_spells:
-                    current_counts.append({"label": "Feature spells", "value": str(len(current_spells))})
+                    if effective_current_spells:
+                        current_counts.append(
+                            {"label": "Ritual book spells", "value": str(ritual_book_count or len(effective_current_spells))}
+                        )
+                elif effective_current_spells:
+                    current_counts.append({"label": "Feature spells", "value": str(len(effective_current_spells))})
             elif str(row.get("spell_mode") or "").strip() == "known" and known_count:
                 current_counts.append({"label": "Known spells", "value": str(known_count)})
             elif str(row.get("spell_mode") or "").strip() == "prepared" and prepared_count:
@@ -1943,27 +2010,53 @@ def _present_character_detail(
             elif str(row.get("spell_mode") or "").strip() == "ritual_book":
                 current_counts.append({"label": "Ritual book spells", "value": str(ritual_book_count)})
 
-            current_row_sections.append(
-                {
+            if not (source_row and row_id in review_source_spell_rows and not has_effective_source_spell):
+                current_row_sections.append(
+                    {
+                        **row_common_fields,
+                        "counts": current_counts,
+                        "spells": current_spells,
+                        "spell_level_sections": spell_level_sections(
+                            current_spells,
+                            suppress_always_prepared_source_package=True,
+                        ),
+                    }
+                )
+            if row_id in review_source_spell_rows:
+                review_current_spells = [
+                    dict(spell) for spell in review_source_spells
+                    if bool(spell.get("can_show_in_current_view"))
+                ]
+                current_row_sections.append({
                     **row_common_fields,
-                    "counts": current_counts,
-                    "spells": current_spells,
+                    "review_only": True,
+                    "title": f"{row_common_fields['title']} — spells needing review",
+                    "spellcasting_ability": "",
+                    "spell_save_dc": None,
+                    "spell_attack_bonus": "",
+                    "spell_metric_notes": [],
+                    "counts": [],
+                    "spells": review_current_spells,
                     "spell_level_sections": spell_level_sections(
-                        current_spells,
+                        review_current_spells,
                         suppress_always_prepared_source_package=True,
                     ),
-                }
-            )
+                })
             if preparation_row_mode:
+                effective_preparation_spells = [
+                    spell for spell in preparation_spells
+                    if str(spell.get("authority_status") or "VERIFIED").strip().upper()
+                    in {"VERIFIED", "MANUAL"}
+                ]
                 preparation_counts = []
                 prep_cantrip_count = sum(
-                    1 for spell in preparation_spells if "Cantrip" in list(spell.get("badges") or [])
+                    1 for spell in effective_preparation_spells if "Cantrip" in list(spell.get("badges") or [])
                 )
                 prep_prepared_count = sum(
-                    1 for spell in preparation_spells if any("Prepared" in badge for badge in list(spell.get("badges") or []))
+                    1 for spell in effective_preparation_spells if any("Prepared" in badge for badge in list(spell.get("badges") or []))
                 )
                 prep_fixed_count = sum(
-                    1 for spell in preparation_spells
+                    1 for spell in effective_preparation_spells
                     if "Always prepared" in list(spell.get("badges") or []) or "Feature granted" in list(spell.get("badges") or [])
                 )
                 if prep_cantrip_count:
@@ -2011,6 +2104,33 @@ def _present_character_detail(
                 }
             )
 
+        has_item_spell_review = any(
+            isinstance(spell, dict) and spell.get("item_spell_review_only")
+            for spell in list(spellcasting_payload.get("spells") or [])
+        )
+        if build_spellcasting_summary_only and has_item_spell_review:
+            current_row_sections.append({
+                "class_row_id": "item-spells-needing-repair",
+                "title": "Item spells — Needs repair",
+                "spellcasting_ability": "",
+                "spell_save_dc": None,
+                "spell_attack_bonus": "",
+                "spell_metric_notes": [
+                    "Saved item spell references need repair; automatic spell effects are unavailable."
+                ],
+                "row_kind": "item", "spell_mode": "",
+            })
+        elif build_spellcasting_summary_only and review_source_spells_by_row_id:
+            current_row_sections.append({
+                "class_row_id": "spell-references-needing-repair",
+                "title": "Spell references — Needs repair",
+                "spellcasting_ability": "", "spell_save_dc": None,
+                "spell_attack_bonus": "",
+                "spell_metric_notes": [
+                    "Some saved spell references need source repair; automatic benefits are unavailable."
+                ],
+                "row_kind": "source", "spell_mode": "",
+            })
         summary_row_sections = (
             [
                 {
@@ -2026,7 +2146,7 @@ def _present_character_detail(
                         "spell_mode",
                     )
                 }
-                for row in current_row_sections
+                for row in current_row_sections if not row.get("review_only")
             ]
             if build_spellcasting_summary_only
             else current_row_sections

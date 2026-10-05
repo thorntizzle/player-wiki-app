@@ -94,6 +94,7 @@ from .character_campaign_options import (
     collect_campaign_option_stat_adjustments,
 )
 from .character_importer import converge_imported_definition
+from .character_builder_spells import _quarantine_reviewed_spell_entitlement
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_profile import ensure_profile_class_rows, profile_primary_class_name, profile_total_level
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
@@ -1116,39 +1117,46 @@ def _build_spell_management_rows(
             continue
 
         normalized_mark = normalize_lookup(str(normalized_payload.get("mark") or "").strip())
+        review_only = bool(
+            normalized_payload.get("item_spell_review_only")
+            or normalized_payload.get("spell_source_review_only")
+        )
         source_label = str(
             normalized_payload.get("grant_source_label")
             or normalized_payload.get("source")
             or ""
         ).strip()
-        is_cantrip = spell_level == 0
+        is_cantrip = spell_level == 0 and not review_only
         is_prepared = bool(
-            not is_cantrip
+            not review_only and not is_cantrip
             and (
                 bool(normalized_payload.get("is_always_prepared"))
                 or "prepared" in normalized_mark
             )
         )
-        in_spellbook = bool(not is_cantrip and "spellbook" in normalized_mark)
+        in_spellbook = bool(not review_only and not is_cantrip and "spellbook" in normalized_mark)
         in_ritual_book = bool(
-            not is_cantrip
+            not review_only and not is_cantrip
             and (
                 "ritual book" in normalized_mark
                 or mode == "ritual_book"
             )
         )
-        is_fixed = bool(normalized_payload.get("is_always_prepared") or normalized_payload.get("is_bonus_known"))
+        is_fixed = bool(
+            not review_only
+            and (normalized_payload.get("is_always_prepared") or normalized_payload.get("is_bonus_known"))
+        )
 
         managed_group = ""
         if is_cantrip:
             managed_group = "cantrip"
-        elif mode == "known":
+        elif not review_only and mode == "known":
             managed_group = "known"
-        elif mode == "prepared":
+        elif not review_only and mode == "prepared":
             managed_group = "prepared"
-        elif mode == "wizard":
+        elif not review_only and mode == "wizard":
             managed_group = "spellbook"
-        elif mode == "ritual_book":
+        elif not review_only and mode == "ritual_book":
             managed_group = "ritual_book"
 
         badges: list[str] = []
@@ -1158,7 +1166,7 @@ def _build_spell_management_rows(
             badges.append("Spellbook")
         elif mode == "ritual_book" and in_ritual_book:
             badges.append("Ritual book")
-        elif mode == "known":
+        elif not review_only and mode == "known":
             badges.append("Known")
         elif is_prepared:
             badges.append("Prepared")
@@ -1209,19 +1217,19 @@ def _build_spell_management_rows(
                 "counts_against_spellbook_total": bool(not is_cantrip and in_spellbook),
                 "counts_against_ritual_book_total": bool(not is_cantrip and in_ritual_book),
                 "can_remove": bool(
-                    not is_cantrip
+                    not review_only and not is_cantrip
                     and (row_kind == "class" or mode == "ritual_book")
                     and not is_fixed
                     and mode != "prepared"
                 ),
                 "can_toggle_prepared": bool(
-                    row_kind == "class"
+                    not review_only and row_kind == "class"
                     and mode in {"prepared", "wizard"}
                     and not is_cantrip
                     and (mode != "wizard" or in_spellbook)
                     and not bool(normalized_payload.get("is_always_prepared"))
                 ),
-                "remove_label": _spell_management_remove_label(
+                "remove_label": "" if review_only else _spell_management_remove_label(
                     mode=mode,
                     is_cantrip=is_cantrip,
                     is_prepared=is_prepared,
@@ -1254,6 +1262,9 @@ def _normalize_spell_management_payload(
         }
 
     spell_level = _spell_entry_level(spell_entry) if spell_entry is not None else int(payload.get("level") or 0)
+    if payload.get("item_spell_review_only") or payload.get("spell_source_review_only"):
+        _quarantine_reviewed_spell_entitlement(payload)
+        return payload, spell_entry, spell_level
     source_label = str(payload.get("source") or "").strip()
     normalized_mark = normalize_lookup(str(payload.get("mark") or "").strip())
     always_prepared = _spell_payload_is_always_prepared(payload)
@@ -1573,8 +1584,10 @@ def apply_equipment_catalog_edit(
     }
 
     normalized_remove_item_id = str(remove_item_id or "").strip()
+    retired_item_id = normalized_remove_item_id
     if normalized_remove_item_id:
-        if normalized_remove_item_id not in item_lookup:
+        if sum(str(item.get("id") or "").strip() == normalized_remove_item_id
+               for item in all_items) != 1:
             raise CharacterEditValidationError("Choose a valid inventory entry to remove.")
         next_equipment_catalog = [
             dict(item)
@@ -1615,6 +1628,10 @@ def apply_equipment_catalog_edit(
             campaign_option=campaign_option,
             systems_ref=systems_ref,
         )
+        if (existing_item is not None
+                and dict(existing_item.get("systems_ref") or {})
+                    != dict(next_item.get("systems_ref") or {})):
+            retired_item_id = normalized_target_item_id
         next_manual_items = [
             dict(item)
             for item in manual_items
@@ -1632,6 +1649,110 @@ def apply_equipment_catalog_edit(
     payload["campaign_slug"] = campaign_slug
     payload["character_slug"] = current_definition.character_slug
     payload["equipment_catalog"] = next_equipment_catalog
+    if retired_item_id:
+        from .character_builder_equipment import _resolve_item_support_metadata
+        from .item_spell_support import parse_item_spell_support
+
+        removed_item = item_lookup[retired_item_id]
+        metadata = _resolve_item_support_metadata(removed_item, item_catalog)
+        parsed = parse_item_spell_support(metadata.get("spell_support"))
+        removed_source_ids = {
+            record.source_row_id for record in parsed.records if record.source_row_id
+        }
+        removed_source_ids.update(
+            source_id for _, source_id, _, _ in parsed.source_declarations if source_id
+        )
+        remaining_source_ids: set[str] = set()
+        compatible_source_owners: dict[str, list[str]] = {}
+        for item in next_equipment_catalog:
+            remaining_metadata = _resolve_item_support_metadata(item, item_catalog)
+            remaining_parsed = parse_item_spell_support(remaining_metadata.get("spell_support"))
+            item_source_ids = {record.source_row_id for record in remaining_parsed.records
+                               if record.source_row_id}
+            item_source_ids.update(source_id for _, source_id, _, _ in
+                                   remaining_parsed.source_declarations if source_id)
+            if item_source_ids & removed_source_ids:
+                # A shared source row belongs to identical approved item
+                # definitions. A colliding source ID from another item cannot
+                # inherit a removed copy's saved spell choice or formula.
+                if (not isinstance(item.get("systems_ref"), dict)
+                        or not item["systems_ref"]
+                        or item.get("systems_ref") != removed_item.get("systems_ref")):
+                    raise CharacterEditValidationError(
+                        "Item spell source ownership needs manager repair before removal."
+                    )
+                remaining_source_ids.update(item_source_ids)
+                for source_id in item_source_ids & removed_source_ids:
+                    compatible_source_owners.setdefault(source_id, []).append(
+                        str(item.get("id") or "").strip()
+                    )
+        spellcasting = dict(payload.get("spellcasting") or {})
+        kept_spells: list[dict[str, Any]] = []
+        for raw_spell in list(spellcasting.get("spells") or []):
+            spell = dict(raw_spell or {})
+            owners = spell.get("item_owner_ids")
+            source_id = str(spell.get("spell_source_row_id") or "").strip()
+            item_row = (spell.get("spell_grant_origin") == "item_effect"
+                        or str(spell.get("spell_source_row_kind") or "").strip() == "item")
+            if isinstance(owners, list) and retired_item_id in owners:
+                remaining_owners = [owner for owner in owners if owner != retired_item_id]
+                if any(owner not in compatible_source_owners.get(source_id, [])
+                       for owner in remaining_owners):
+                    raise CharacterEditValidationError(
+                        "Item spell owner identity needs manager repair before removal."
+                    )
+                if remaining_owners:
+                    spell["item_owner_ids"] = remaining_owners
+                    kept_spells.append(spell)
+                continue
+            if item_row and source_id in removed_source_ids:
+                # Promote an older generated row only when a surviving copy
+                # has the same exact Systems source. Retaining its stable ID
+                # lets current source authority verify it on this generation.
+                surviving = compatible_source_owners.get(source_id, [])
+                if surviving and all(surviving) and len(surviving) == len(set(surviving)):
+                    spell["item_owner_ids"] = sorted(surviving)
+                    kept_spells.append(spell)
+                continue
+            if item_row and not owners and not source_id:
+                raise CharacterEditValidationError(
+                    "Legacy item spell ownership needs manager repair before removal."
+                )
+            kept_spells.append(spell)
+        spellcasting["spells"] = kept_spells
+        spellcasting["source_rows"] = [
+            row for row in list(spellcasting.get("source_rows") or [])
+            if str(dict(row or {}).get("source_row_id") or "").strip()
+            not in (removed_source_ids - remaining_source_ids)
+        ]
+        payload["spellcasting"] = spellcasting
+        retired_source_ids = removed_source_ids - remaining_source_ids
+        if retired_source_ids:
+            source = dict(payload.get("source") or {})
+            source["source_authorizations"] = [
+                marker for marker in list(source.get("source_authorizations") or [])
+                if not (
+                    isinstance(marker, dict)
+                    and str(marker.get("target_id") or "").startswith(
+                        tuple(f"spell_metric:source:{source_id}:" for source_id in retired_source_ids)
+                    )
+                )
+            ]
+            payload["source"] = source
+
+        kept_attacks: list[dict[str, Any]] = []
+        for raw_attack in list(payload.get("attacks") or []):
+            attack = dict(raw_attack or {})
+            refs = attack.get("equipment_refs", attack.get("equipment_ref"))
+            refs = list(refs) if isinstance(refs, (list, tuple)) else [refs] if refs else []
+            if retired_item_id in refs:
+                remaining_refs = [ref for ref in refs if ref != retired_item_id]
+                if not remaining_refs:
+                    continue
+                attack["equipment_refs"] = remaining_refs
+                attack.pop("equipment_ref", None)
+            kept_attacks.append(attack)
+        payload["attacks"] = kept_attacks
 
     definition = CharacterDefinition.from_dict(payload)
     source_type = str((current_definition.source or {}).get("source_type") or "").strip()
@@ -1650,6 +1771,28 @@ def apply_equipment_catalog_edit(
             systems_service=systems_service,
             campaign_page_records=campaign_page_records,
         )
+    if retired_item_id and retired_source_ids:
+        # Imported convergence can restore saved spell overrides after the
+        # editor has removed the exact retired item source. Its old item rows
+        # must not become current raw definition data on this generation.
+        cleaned = deepcopy(definition.to_dict())
+        current_spells = dict(cleaned.get("spellcasting") or {})
+        current_spells["spells"] = [
+            spell for spell in list(current_spells.get("spells") or [])
+            if not (isinstance(spell, dict)
+                    and (spell.get("spell_grant_origin") == "item_effect"
+                         or spell.get("spell_source_row_kind") == "item")
+                    and str(spell.get("spell_source_row_id") or "").strip()
+                    in retired_source_ids)
+        ]
+        current_spells["source_rows"] = [
+            row for row in list(current_spells.get("source_rows") or [])
+            if not (isinstance(row, dict) and row.get("source_row_kind") == "item"
+                    and str(row.get("source_row_id") or "").strip()
+                    in retired_source_ids)
+        ]
+        cleaned["spellcasting"] = current_spells
+        definition = CharacterDefinition.from_dict(cleaned)
     import_metadata = build_managed_character_import_metadata(
         campaign_slug,
         current_definition.character_slug,
@@ -4614,6 +4757,8 @@ def _reset_spell_payload_to_base(payload: dict[str, Any]) -> None:
     payload["is_ritual"] = bool(payload.get("base_is_ritual"))
     payload["campaign_option_sources"] = []
     payload["campaign_option_replaced_by"] = []
+    if payload.get("item_spell_review_only") or payload.get("spell_source_review_only"):
+        _quarantine_reviewed_spell_entitlement(payload)
 
 
 def _normalize_campaign_option_source_annotations(value: Any) -> list[dict[str, Any]]:

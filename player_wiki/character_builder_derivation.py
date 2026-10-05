@@ -19,7 +19,6 @@ from .character_adjustments import (
 from .character_builder_constants import *  # noqa: F403
 from .character_builder_equipment import (
     _ability_modifier,
-    _active_item_effect_entries,
     _attack_matches_equipment_catalog,
     _attack_mode_components,
     _build_level_one_attacks,
@@ -34,6 +33,7 @@ from .character_builder_equipment import (
     _humanize_words,
     _infer_attack_mode_key_from_payload,
     _item_effect_metadata,
+    _item_effect_is_active,
     _load_phb_armor_profiles,
     _load_phb_weapon_profiles,
     _mechanic_effect_numeric_value,
@@ -73,9 +73,16 @@ from .character_builder_spells import (
     _derive_spell_source_rows,
     _merge_name_candidates,
     _normalize_spell_payloads,
+    _quarantine_spell_access,
+    _quarantine_item_spell_entitlement,
+    _quarantine_conflicting_source_spell_entitlement,
+    _restore_conflicting_source_spell_entitlement,
+    _selected_item_spell_support_grants,
+    _resolve_item_spell_selector,
     _spell_payload_map_key,
     _spell_source_support_payload,
 )
+from .item_spell_support import parse_item_spell_support
 from .character_campaign_options import (
     collect_campaign_option_proficiency_grants,
     collect_campaign_option_spell_grants,
@@ -1264,6 +1271,21 @@ def _current_spell_source_rows(
         ability_scores=ability_scores,
         proficiency_bonus=proficiency_bonus,
     )
+    review_source_ids = {
+        str(spell.get("spell_source_row_id") or "").strip()
+        for spell in list(spellcasting.get("spells") or [])
+        if isinstance(spell, dict) and (
+            spell.get("item_spell_review_only") or spell.get("spell_source_review_only")
+        )
+    }
+    effective_source_ids = {
+        str(spell.get("spell_source_row_id") or "").strip()
+        for spell in list(spellcasting.get("spells") or [])
+        if isinstance(spell, dict) and not (
+            spell.get("item_spell_review_only") or spell.get("spell_source_review_only")
+        )
+    }
+    review_source_ids -= effective_source_ids
     current_ids = {str(row.get("source_row_id") or "").strip() for row in current}
     from .committed_publication import active
     closed_legacy = not active()
@@ -1274,6 +1296,13 @@ def _current_spell_source_rows(
         )
         for row in current
     ]
+    for row in rows:
+        if str(row.get("source_row_id") or "").strip() in review_source_ids:
+            row["spellcasting_ability"] = ""
+            row["spell_save_dc"] = None
+            row["spell_attack_bonus"] = None
+            row["review_only"] = True
+            row.pop("spell_metric_provenance", None)
     manual_authorizations: dict[str, str] = {}
     for feature in features:
         if not isinstance(feature, dict):
@@ -1753,7 +1782,7 @@ def _derive_definition_core_sheet_payloads(
         list(sanitized_definition.equipment_catalog or []),
         item_catalog=effective_item_catalog,
     )
-    item_effect_entries = _active_item_effect_entries(
+    item_effect_entries = _active_item_effect_entries_with_legacy_spell_review(
         normalized_equipment,
         item_catalog=effective_item_catalog,
     )
@@ -1861,6 +1890,14 @@ def _derive_definition_core_sheet_payloads(
     derived_payload["stats"] = stats
     derived_definition = CharacterDefinition.from_dict(derived_payload)
     if "spellcasting" in selected_derivation_components:
+        if "item_spell_grants" in selected_derivation_components:
+            # Strip generated item rows before the general spellcasting pass
+            # can merge them with a class or manual row of the same identity.
+            initial_spellcasting = dict(derived_definition.spellcasting or {})
+            initial_spellcasting["spells"] = _without_prior_item_spell_grants(
+                list(initial_spellcasting.get("spells") or [])
+            )
+            derived_definition.spellcasting = initial_spellcasting
         derived_spellcasting = _derive_definition_spellcasting(
             derived_definition,
             ability_scores=ability_scores,
@@ -1902,7 +1939,7 @@ def _derive_definition_core_sheet_payloads(
                 item_effect_entries=item_effect_entries,
                 known_source_row_ids=item_effect_source_row_ids,
                 spell_catalog=effective_spell_catalog,
-                current_level=max(current_level, 1),
+                current_level=current_level,
             )
         derived_spellcasting["spells"] = _canonicalize_legacy_spell_payload_marks(
             list(derived_spellcasting.get("spells") or []),
@@ -2015,6 +2052,61 @@ def _campaign_item_effect_source_row_ids() -> set[str]:
     return set()
 
 
+def _active_item_effect_entries_with_legacy_spell_review(
+    equipment_catalog: list[dict[str, Any]] | None,
+    *,
+    item_catalog: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Retain malformed historical spell blocks for tolerant review."""
+    entries: list[dict[str, Any]] = []
+    for item_index, raw_item in enumerate(list(equipment_catalog or [])):
+        item = dict(raw_item or {})
+        metadata = _resolve_item_support_metadata(item, item_catalog)
+        raw_blocks = metadata.get("spell_support")
+        safe_metadata = dict(metadata)
+        if not isinstance(raw_blocks, list) or any(not isinstance(block, dict) for block in raw_blocks):
+            safe_metadata["spell_support"] = [block for block in raw_blocks if isinstance(block, dict)] if isinstance(raw_blocks, list) else []
+        effects = _item_effect_metadata(safe_metadata)
+        if raw_blocks not in (None, "", [], {}):
+            effects["spell_support"] = raw_blocks
+        if not effects or not _item_effect_is_active(item, metadata=metadata):
+            continue
+        entries.append({
+            "item_id": str(item.get("id") or "").strip(),
+            "item_name": str(item.get("name") or "").strip(),
+            "page_ref": str(item.get("page_ref") or "").strip(),
+            # An equipment ID identifies a copy, not an item definition. If
+            # no durable link proves a common definition, separate rows must
+            # not acquire shared ownership of an effective spell source.
+            "item_definition_identity": _normalize_explicit_link_identity(
+                systems_ref=item.get("systems_ref"), page_ref=item.get("page_ref"),
+                allow_page=False,
+            ) or f"unlinked-item-row:{item_index}",
+            **effects,
+        })
+    return entries
+
+
+def _without_prior_item_spell_grants(
+    spell_payloads: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    kept: list[dict[str, Any]] = []
+    for raw_payload in list(spell_payloads or []):
+        if not isinstance(raw_payload, dict):
+            continue
+        payload = dict(raw_payload)
+        source_row_id = str(payload.get("spell_source_row_id") or "").strip()
+        source_kind = str(payload.get("spell_source_row_kind") or "source").strip() or "source"
+        if payload.get("spell_source_review_only"):
+            _restore_conflicting_source_spell_entitlement(payload)
+        if payload.get("spell_grant_origin") == "item_effect" or (
+            source_row_id.startswith("spell-source:item:") and source_kind == "item"
+        ):
+            continue
+        kept.append(payload)
+    return kept
+
+
 def _item_effect_source_row_ids_from_equipment(
     equipment_catalog: list[dict[str, Any]] | None,
     *,
@@ -2024,12 +2116,12 @@ def _item_effect_source_row_ids_from_equipment(
     for item in list(equipment_catalog or []):
         payload = dict(item or {})
         metadata = _resolve_item_support_metadata(payload, item_catalog)
-        effect_payload = _item_effect_metadata(metadata)
-        for block in list(effect_payload.get("spell_support") or []):
-            support_payload = _spell_source_support_payload(block)
-            source_row_id = str(support_payload.get("spell_source_row_id") or "").strip()
-            if source_row_id:
-                source_row_ids.add(source_row_id)
+        blocks = metadata.get("spell_support")
+        parsed = parse_item_spell_support(blocks)
+        for record in parsed.records:
+            if record.source_row_id:
+                source_row_ids.add(record.source_row_id)
+        source_row_ids.update(source_id for _, source_id, _, _ in parsed.source_declarations)
     return source_row_ids
 
 def _apply_item_effect_ability_score_minimums(
@@ -2058,33 +2150,96 @@ def _apply_item_effect_spell_grants(
     current_level: int,
 ) -> list[dict[str, Any]]:
     spells_by_key: dict[str, dict[str, Any]] = {}
-    generated_item_source_row_ids = set(known_source_row_ids or set()) | _campaign_item_effect_source_row_ids()
-    for spell_payload in _normalize_spell_payloads(list(spell_payloads or [])):
-        source_row_id = str(spell_payload.get("spell_source_row_id") or "").strip()
-        if source_row_id in generated_item_source_row_ids or source_row_id.startswith("spell-source:item:"):
-            continue
+    # Arbitrary source IDs alone cannot prove a legacy row came from an item.
+    # The effective ID inventory is retained for current source reconciliation.
+    _ = known_source_row_ids
+    for spell_payload in _normalize_spell_payloads(_without_prior_item_spell_grants(spell_payloads)):
         payload_key = _spell_payload_map_key(spell_payload)
         if payload_key:
             spells_by_key[payload_key] = dict(spell_payload)
-    feature_entries = [
-        {
-            "campaign_option": {
-                "spell_support": [dict(block or {}) for block in list(entry.get("spell_support") or []) if isinstance(block, dict)]
-            }
-        }
-        for entry in list(item_effect_entries or [])
-        if list(entry.get("spell_support") or [])
-    ]
-    _apply_spell_support_grants_to_payloads(
-        spells_by_key,
-        grants=_automatic_spell_support_grants(
-            selected_class=None,
-            selected_subclass=None,
-            target_level=max(int(current_level or 1), 1),
-            feature_entries=feature_entries,
-        ),
-        spell_catalog=spell_catalog,
+    non_item_spells = list(spells_by_key.values())
+    item_source_owners: dict[str, set[str]] = {}
+    for entry_index, entry in enumerate(list(item_effect_entries or [])):
+        definition_identity = str(entry.get("item_definition_identity") or "").strip()
+        parsed = parse_item_spell_support(entry.get("spell_support"))
+        effective_ids = {record.source_row_id for record in parsed.records if record.source_row_id}
+        effective_ids.update(source_id for _, source_id, _, _ in parsed.source_declarations)
+        for source_id in effective_ids:
+            if source_id:
+                item_source_owners.setdefault(source_id, set()).add(
+                    definition_identity or f"unidentified-item:{entry_index}"
+                )
+    item_source_ids = set(item_source_owners)
+    non_item_source_ids = {
+        str(payload.get("spell_source_row_id") or "").strip()
+        for payload in non_item_spells
+        if str(payload.get("spell_source_row_id") or "").strip()
+    }
+    # An unrelated owner of the same effective source invalidates every
+    # sibling claim, including rows that precede it in spell order.
+    for payload in non_item_spells:
+        if str(payload.get("spell_source_row_id") or "").strip() in item_source_ids:
+            _quarantine_conflicting_source_spell_entitlement(payload)
+    selected_grants = _selected_item_spell_support_grants(
+        item_effect_entries,
+        target_level=max(int(current_level or 0), 0),
     )
+    resolved_claims: dict[tuple[str, str], set[tuple[Any, ...]]] = {}
+    for claim in selected_grants:
+        resolved = _resolve_item_spell_selector(str(claim.get("value") or ""), spell_catalog)
+        if resolved is None:
+            continue
+        claim_key = (
+            str(claim.get("spell_source_row_id") or "").strip(),
+            str(resolved.entry_key or resolved.slug or "").strip(),
+        )
+        resolved_claims.setdefault(claim_key, set()).add((
+            str(claim.get("spell_access_type") or ""),
+            int(claim.get("spell_access_uses") or 0),
+            str(claim.get("spell_access_reset_on") or ""),
+            str(claim.get("mark") or ""),
+            bool(claim.get("always_prepared")),
+            bool(claim.get("bonus_known")),
+            bool(claim.get("ritual")),
+        ))
+    for grant in selected_grants:
+        selector = str(grant.get("value") or "").strip()
+        spell_entry = _resolve_item_spell_selector(selector, spell_catalog)
+        grant = dict(grant)
+        if spell_entry is None:
+            grant["spell_access_needs_review"] = True
+            grant["item_spell_review_placeholder"] = grant.get("item_spell_review_placeholder") or selector
+        else:
+            claim_key = (
+                str(grant.get("spell_source_row_id") or "").strip(),
+                str(spell_entry.entry_key or spell_entry.slug or "").strip(),
+            )
+            if len(resolved_claims.get(claim_key, set())) > 1:
+                grant["spell_access_needs_review"] = True
+            grant["value"] = str(spell_entry.entry_key or spell_entry.slug or "").strip()
+        item_payloads: dict[str, dict[str, Any]] = {}
+        _apply_spell_support_grants_to_payloads(
+            item_payloads, grants=[grant], spell_catalog=spell_catalog,
+        )
+        for payload_key, payload in item_payloads.items():
+            payload["item_owner_ids"] = list(grant.get("item_owner_ids") or [])
+            if spell_entry is None:
+                payload["name"] = selector.split("|", 1)[0].split("#", 1)[0].replace("_", " ").strip()
+            if grant.get("spell_access_needs_review"):
+                _quarantine_item_spell_entitlement(payload)
+            if grant.get("item_spell_review_placeholder"):
+                payload["item_spell_review_placeholder"] = grant["item_spell_review_placeholder"]
+            candidate_source_id = str(payload.get("spell_source_row_id") or "").strip()
+            if candidate_source_id and (
+                len(item_source_owners.get(candidate_source_id, set())) > 1
+                or candidate_source_id in non_item_source_ids
+            ):
+                _quarantine_item_spell_entitlement(payload)
+            if _spell_payload_map_key(payload) in spells_by_key:
+                _quarantine_item_spell_entitlement(payload)
+                continue
+            payload["spell_grant_origin"] = "item_effect"
+            spells_by_key[_spell_payload_map_key(payload)] = payload
     return _normalize_spell_payloads(list(spells_by_key.values()))
 
 def _apply_campaign_option_spell_grants(

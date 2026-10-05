@@ -115,13 +115,23 @@ def _eligible_page_records(records: list[Any] | None) -> dict[str, list[Any]]:
 def _current_payload(
     *, campaign_slug: str, kind: str, source_kind: str, source_key: str,
     systems_service: Any, pages: dict[str, list[Any]], expected_slug: str = "",
+    expected_ref: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
+    if kind == "item" and not source_kind.startswith("systems"):
+        return None, "exact Systems item link missing"
     if source_kind.startswith("systems"):
         entry = _current_systems_entry(campaign_slug, source_kind, source_key, systems_service)
         if entry is None:
             return None, "source unavailable"
         if expected_slug and _text(getattr(entry, "slug", "")) != expected_slug:
             return None, "source identity changed"
+        if kind == "item":
+            ref = dict(expected_ref or {})
+            for field in ("entry_key", "slug", "source_id", "entry_type"):
+                if _text(ref.get(field)) and _text(ref.get(field)) != _text(getattr(entry, field, "")):
+                    return None, "source identity changed"
+            if _text(ref.get("title")) and _text(ref.get("title")).casefold() != _text(getattr(entry, "title", "")).casefold():
+                return None, "source identity changed"
         entry_type = _text(getattr(entry, "entry_type", ""))
         if kind == "item" and entry_type != "item":
             return None, "source kind changed"
@@ -308,8 +318,26 @@ def numeric_target_values(
         for value in list(rows or []):
             if _text(value):
                 values[("proficiency", f"proficiencies.{kind}.{_text(value).casefold()}", "grant")] = value
+    withheld_resources = set(dict(definition.source or {}).get(
+        "item_transition_withheld_resources") or [])
+    resource_state = list(state.get("resources") or [])
     for row in list(definition.resource_templates or []):
         if isinstance(row, dict) and _text(row.get("id")):
+            resource_id = _text(row["id"])
+            if resource_id in withheld_resources:
+                matches = [current for current in resource_state
+                           if isinstance(current, dict)
+                           and _text(current.get("id")) == resource_id]
+                if (len(matches) == 1 and row.get("max") is None
+                        and row.get("initial_current") is None
+                        and row.get("authority_status") == NEEDS_REPAIR
+                        and matches[0].get("max") is None
+                        and matches[0].get("current") is None
+                        and _text(matches[0].get("authority_status")).casefold()
+                        == NEEDS_REPAIR.casefold()):
+                    # Exact publication retirement keeps the row for repair,
+                    # but it is no longer a current numeric proof target.
+                    continue
             values[("resource", f"resource:{_text(row['id'])}", "owner_reset")] = deepcopy(row)
     for row in list(state.get("spell_slots") or []):
         if isinstance(row, dict) and type(row.get("level")) is int and row["level"] > 0:
@@ -544,7 +572,8 @@ class SourceAuthority:
             for value in matches if isinstance(value, str)
         )
 
-    def bind_projected_numbers(self, definition: CharacterDefinition) -> SourceAuthority:
+    def bind_projected_numbers(self, definition: CharacterDefinition, *,
+                               item_catalog: dict[str, Any] | None = None) -> SourceAuthority:
         """Bind formula results only after every required input has an owner."""
         stats = dict(definition.stats or {})
         abilities = dict(stats.get("ability_scores") or {})
@@ -582,6 +611,39 @@ class SourceAuthority:
                         save_path, VERIFIED, field_rows[save_path].raw,
                         save, "derived_from_authorized_inputs",
                     )
+        ac_path = "stats.armor_class"
+        ac_status = field_rows.get(ac_path)
+        if (ac_status is not None and not ac_status.is_effective
+                and self.verified_class_rows
+                and all(self.status_for("feature", _text(row.get("id"))) == VERIFIED
+                        for row in definition.features if isinstance(row, dict))
+                and all(self.status_for("item", _text(row.get("id"))) == VERIFIED
+                        for row in definition.equipment_catalog
+                        if isinstance(row, dict) and row.get("is_equipped"))
+                and all(field_rows.get(f"stats.ability_scores.{key}.score") is not None
+                        and field_rows[f"stats.ability_scores.{key}.score"].is_effective
+                        for key in ("dex", "con", "wis"))):
+            from .character_builder_derivation import (
+                _character_profile_class_names, _character_profile_subclass_names,
+                _derive_armor_class_from_character_inputs,
+            )
+            from .character_ability_inputs import effective_scores
+            ac = _derive_armor_class_from_character_inputs(
+                ability_scores=effective_scores(stats),
+                equipment_catalog=list(definition.equipment_catalog or []),
+                features=list(definition.features or []),
+                class_names=_character_profile_class_names(definition),
+                subclass_names=_character_profile_subclass_names(definition),
+                item_catalog=item_catalog or {},
+                allow_plain_unarmored_base=(
+                    _text(dict(definition.source or {}).get("source_type"))
+                    == "native_character_builder"
+                ),
+            )
+            if ac is not None and type(stats.get("armor_class")) is int and stats["armor_class"] == ac:
+                field_rows[ac_path] = EffectiveStatus(
+                    ac_path, VERIFIED, ac_status.raw, ac, "derived_from_authorized_inputs",
+                )
         return replace(self, field_statuses=tuple(field_rows.values()))
 
     def require_authoring_inputs(self) -> None:
@@ -809,30 +871,15 @@ class SourceAuthority:
                 approved_rows.append(row)
             payload[field] = approved_rows
         spellcasting = dict(payload.get("spellcasting") or {})
-        for row in [spellcasting, *list(spellcasting.get("class_rows") or []),
-                    *list(spellcasting.get("source_rows") or [])]:
-            if not isinstance(row, dict):
-                continue
-            row_id = _text(row.get("source_row_id") or row.get("class_row_id"))
-            if row is spellcasting and not row_id:
-                class_rows = list(spellcasting.get("class_rows") or [])
-                if len(class_rows) == 1 and isinstance(class_rows[0], dict):
-                    row_id = _text(class_rows[0].get("class_row_id"))
-            family = "source" if row.get("source_row_id") else "class"
-            raw_provenance = row.get("spell_metric_provenance")
-            provenance = dict(raw_provenance) if isinstance(raw_provenance, dict) else {}
-            for metric in ("spell_attack_bonus", "spell_save_dc"):
-                record = provenance.get(metric)
-                if (isinstance(record, dict) and record.get("kind") == "formula"
-                        and not self.formula_metric_verified(family, row_id, metric)):
-                    provenance[metric] = {"kind": "manual_total"}
-            if provenance:
-                row["spell_metric_provenance"] = provenance
+        # Keep saved formula provenance through derivation. A failed current
+        # witness must remain a formula so suppress_unknown_numbers can withhold
+        # its numeric result; only a distinct manual total is manual.
         clean_spells: list[dict[str, Any]] = []
         for raw in list(spellcasting.get("spells") or []):
             if not isinstance(raw, dict):
                 continue
             spell = dict(raw)
+            spell.pop("historical_mark", None)
             status = self.spell_status(spell, definition=definition)
             spell["authority_status"] = status
             spell["authority_note"] = (
@@ -851,6 +898,8 @@ class SourceAuthority:
             for access_field in ("spell_access_type", "spell_access_uses", "spell_access_reset_on"):
                 spell.pop(access_field, None)
             if status != VERIFIED:
+                if status != MANUAL:
+                    spell["mark"] = ""
                 original_row_id = _text(spell.pop("spell_source_row_id", None))
                 if original_row_id:
                     spell["authority_original_source_row_id"] = original_row_id
@@ -888,6 +937,8 @@ class SourceAuthority:
         )
 
     def spell_status(self, spell: dict[str, Any], *, definition: CharacterDefinition) -> str:
+        if spell.get("item_spell_review_only") or spell.get("spell_source_review_only"):
+            return NEEDS_ATTENTION
         spell_id = _text(spell.get("id"))
         original_row_id = _text(spell.get("authority_original_source_row_id"))
         row_id = original_row_id or _text(spell.get("spell_source_row_id"))
@@ -919,11 +970,30 @@ class SourceAuthority:
         """Expose effective spell ownership without mutating historical rows."""
         projected = deepcopy(dict(spellcasting or {}))
         projected.pop(MISSING_OVERRIDE_AUTHORITY_KEY, None)
+        saved_spells_by_id: dict[str, list[dict[str, Any]]] = {}
+        for saved in list(dict(definition.spellcasting or {}).get("spells") or []):
+            if isinstance(saved, dict) and _text(saved.get("id")):
+                saved_spells_by_id.setdefault(_text(saved.get("id")), []).append(saved)
+        projected_spell_id_counts: dict[str, int] = {}
+        for raw in list(projected.get("spells") or []):
+            if isinstance(raw, dict) and _text(raw.get("id")):
+                spell_id = _text(raw.get("id"))
+                projected_spell_id_counts[spell_id] = projected_spell_id_counts.get(spell_id, 0) + 1
+        saved_class_row_counts: dict[str, int] = {}
+        for row in list(dict(definition.spellcasting or {}).get("class_rows") or []):
+            if isinstance(row, dict) and _text(row.get("class_row_id")):
+                row_id = _text(row.get("class_row_id"))
+                saved_class_row_counts[row_id] = saved_class_row_counts.get(row_id, 0) + 1
+        saved_source_rows: dict[str, list[dict[str, Any]]] = {}
+        for row in list(dict(definition.spellcasting or {}).get("source_rows") or []):
+            if isinstance(row, dict) and _text(row.get("source_row_id")):
+                saved_source_rows.setdefault(_text(row.get("source_row_id")), []).append(row)
         spells: list[dict[str, Any]] = []
         for raw in list(projected.get("spells") or []):
             if not isinstance(raw, dict):
                 continue
             spell = dict(raw)
+            spell.pop("historical_mark", None)
             status = self.spell_status(spell, definition=definition)
             spell["authority_status"] = status
             spell["authority_note"] = (
@@ -934,6 +1004,42 @@ class SourceAuthority:
                 "Manager-authorized manual spell." if status == MANUAL else ""
             )
             if status != VERIFIED:
+                if status != MANUAL:
+                    spell["mark"] = ""
+                # A saved mark is historical read context, never an effective
+                # spell choice. Match both unique spell identity and source row
+                # before exposing it; item and disputed rows stay review-only.
+                spell_id = _text(spell.get("id"))
+                saved_matches = saved_spells_by_id.get(spell_id, [])
+                if (status in {NEEDS_REPAIR, NEEDS_ATTENTION} and spell_id
+                        and len(saved_matches) == 1
+                        and projected_spell_id_counts.get(spell_id) == 1
+                        and not spell.get("item_spell_review_only")
+                        and not spell.get("spell_source_review_only")):
+                    saved = saved_matches[0]
+                    saved_mark = _text(saved.get("mark"))
+                    saved_source_id = _text(saved.get("spell_source_row_id"))
+                    projected_source_id = _text(spell.get("authority_original_source_row_id")
+                                                or spell.get("spell_source_row_id"))
+                    saved_class_id = _text(saved.get("class_row_id"))
+                    projected_class_id = _text(spell.get("authority_original_class_row_id")
+                                               or spell.get("class_row_id"))
+                    source_rows = saved_source_rows.get(saved_source_id, [])
+                    class_or_feature = bool(
+                        (not saved_source_id and saved_class_id
+                         and saved_class_row_counts.get(saved_class_id) == 1)
+                        or (saved_source_id and len(source_rows) == 1
+                            and _text(source_rows[0].get("source_row_kind")).casefold()
+                            in {"source", "feature", "feat"})
+                    )
+                    if (saved_mark.casefold() in {
+                            "prepared", "known", "spellbook", "prepared + spellbook",
+                    }
+                            and _text(saved.get("spell_source_row_kind")).casefold() != "item"
+                            and saved_source_id == projected_source_id
+                            and saved_class_id == projected_class_id
+                            and class_or_feature):
+                        spell["historical_mark"] = saved_mark
                 original_row_id = _text(spell.pop("authority_original_source_row_id", None))
                 if original_row_id:
                     spell["spell_source_row_id"] = original_row_id
@@ -999,6 +1105,11 @@ def _source_row_ids(value: Any) -> set[str]:
         for key, child in value.items():
             if key in {"spell_source_row_id", "source_row_id"} and isinstance(child, str) and child.strip():
                 ids.add(child.strip())
+            elif (key in {"source", "spell_source"} and isinstance(child, dict)
+                  and _text(child.get("kind") or child.get("row_kind")) in {"item", "source"}
+                  and _text(child.get("id"))):
+                ids.add(_text(child["id"]))
+                ids.update(_source_row_ids(child))
             else:
                 ids.update(_source_row_ids(child))
     elif isinstance(value, list):
@@ -1009,18 +1120,37 @@ def _source_row_ids(value: Any) -> set[str]:
 
 def _current_spell_grant_membership(
     grants: tuple[AuthorityGrant, ...], definition: CharacterDefinition,
+    spell_entries: list[Any],
 ) -> frozenset[tuple[str, str]]:
     """Exact fixed/explicit-option spell membership from current approved owners."""
     from .character_builder_spells import (
         _extract_spell_support_grants, _extract_spell_support_choice_specs_from_value,
         _spell_support_support_kwargs, _iter_unlocked_additional_spell_values,
+        _resolve_item_spell_selector,
     )
     from .character_campaign_options import collect_campaign_option_spell_grants
+    from .item_spell_support import parse_item_spell_support
 
     level = sum(int(row.get("level") or 0) for row in profile_class_rows(definition.profile))
     owners = {"feature": {str(row.get("id") or ""): row for row in definition.features if isinstance(row, dict)},
               "item": {str(row.get("id") or ""): row for row in definition.equipment_catalog if isinstance(row, dict)}}
     found: set[tuple[str, str]] = set()
+    invalid_item_sources: set[str] = set()
+    item_claims: dict[tuple[str, str], list[Any]] = {}
+    item_source_behaviors: dict[str, set[tuple[str, ...]]] = {}
+    item_spell_catalog = {"entries": spell_entries}
+    item_blocks: dict[str, list[Any]] = {}
+    for grant in grants:
+        if grant.kind != "item":
+            continue
+        payload = json.loads(grant.payload_json)
+        if "spell_support" in payload:
+            item_blocks.setdefault(grant.instance_id, []).append(payload["spell_support"])
+    invalid_item_owners = {
+        instance_id for instance_id, blocks in item_blocks.items()
+        if (parsed := parse_item_spell_support(blocks)).diagnostics
+        or any(record.invalid for record in parsed.records)
+    }
     for grant in grants:
         payload = json.loads(grant.payload_json)
         owner = owners.get(grant.kind, {}).get(grant.instance_id) or {}
@@ -1033,16 +1163,53 @@ def _current_spell_grant_membership(
         for field, effect in payload.items():
             if field == "spell_support" and isinstance(effect, dict):
                 try:
-                    fixed = _extract_spell_support_grants([effect], target_level=max(level, 1))
-                    raw_choices = _iter_unlocked_additional_spell_values(
-                        effect.get("choices", effect.get("select")), target_level=max(level, 1))
+                    if grant.kind == "item":
+                        parsed = parse_item_spell_support([effect])
+                        if parsed.diagnostics or grant.instance_id in invalid_item_owners:
+                            invalid_item_sources.update(
+                                source_id for _, source_id, _, _ in parsed.source_declarations if source_id
+                            )
+                            invalid_item_sources.update(
+                                record.source_row_id for record in parsed.records if record.source_row_id
+                            )
+                        for record in parsed.records:
+                            if record.source_row_id:
+                                item_source_behaviors.setdefault(record.source_row_id, set()).add((
+                                    record.source_row_kind, record.source_row_title,
+                                    record.source_ability_key, record.source_mode,
+                                    record.spell_list_class_name,
+                                ))
+                        fixed = [] if parsed.diagnostics or grant.instance_id in invalid_item_owners else [
+                            {"value": record.spell_selector, "spell_source_row_id": record.source_row_id,
+                             "record": record}
+                            for record in parsed.records
+                            if not record.invalid and (
+                                record.availability is None or record.availability <= max(level, 1)
+                            )
+                        ]
+                    else:
+                        fixed = _extract_spell_support_grants([effect], target_level=max(level, 1))
+                    raw_choices = (
+                        [] if grant.kind == "item" and grant.instance_id in invalid_item_owners else
+                        _iter_unlocked_additional_spell_values(
+                            effect.get("choices", effect.get("select")), target_level=max(level, 1)
+                        )
+                    )
                 except (TypeError, ValueError):
                     continue
                 for spell in fixed:
                     row_id = _text(spell.get("spell_source_row_id") or effect.get("spell_source_row_id"))
                     value = _text(spell.get("value")).casefold()
                     if row_id and value:
-                        found.add((row_id, value))
+                        if grant.kind == "item":
+                            entry = _resolve_item_spell_selector(value, item_spell_catalog)
+                            if entry is not None:
+                                identity = f"systems:{_text(getattr(entry, 'entry_key', '')) or _text(getattr(entry, 'slug', ''))}"
+                                found.add((row_id, identity))
+                                record = spell["record"]
+                                item_claims.setdefault((row_id, identity), []).append(record)
+                        else:
+                            found.add((row_id, value))
                 inherited = _spell_support_support_kwargs(effect)
                 for choice in raw_choices:
                     try:
@@ -1056,7 +1223,13 @@ def _current_spell_grant_membership(
                         options = {_text(value).casefold() for value in list(spec.get("options") or [])}
                         chosen = [value for value in selections if value in options]
                         if row_id and options and len(chosen) <= int(spec.get("count") or 1):
-                            found.update((row_id, value) for value in chosen)
+                            if grant.kind == "item":
+                                for value in chosen:
+                                    entry = _resolve_item_spell_selector(value, item_spell_catalog)
+                                    if entry is not None:
+                                        found.add((row_id, f"systems:{_text(getattr(entry, 'entry_key', '')) or _text(getattr(entry, 'slug', ''))}"))
+                            else:
+                                found.update((row_id, value) for value in chosen)
             elif field == "campaign_option" and isinstance(effect, dict):
                 row_id = _text(effect.get("spell_source_row_id") or effect.get("source_row_id"))
                 if row_id:
@@ -1068,7 +1241,27 @@ def _current_spell_grant_membership(
                         value = _text(spell.get("value")).casefold()
                         if value:
                             found.add((row_id, value))
-    return frozenset(found)
+    conflicting_item_claims: set[tuple[str, str]] = set()
+    for claim_key, records in item_claims.items():
+        selected_level = max(-1 if record.availability is None else record.availability for record in records)
+        selected = [
+            record for record in records
+            if (-1 if record.availability is None else record.availability) == selected_level
+        ]
+        if len({
+            (record.access_type, record.access_uses, record.access_reset_on,
+             record.mark, record.always_prepared, record.bonus_known, record.ritual)
+            for record in selected
+        }) > 1:
+            conflicting_item_claims.add(claim_key)
+    invalid_item_sources.update(
+        row_id for row_id, behaviors in item_source_behaviors.items() if len(behaviors) > 1
+    )
+    return frozenset(
+        (row_id, value) for row_id, value in found
+        if row_id not in invalid_item_sources
+        and (row_id, value) not in conflicting_item_claims
+    )
 
 
 def _unambiguous_current_spell_keys(
@@ -1546,7 +1739,27 @@ def _source_derived_formula_bases(
                 "score": abilities[ability_key]["score"], "pb": pb,
                 "metric": metric, "expected": expected,
             })
+    from .item_spell_support import parse_item_spell_support
+    from .character_builder_spells import _resolve_item_spell_selector
+
     source_proofs: dict[str, list[tuple[str, AuthorityGrant]]] = {}
+    item_proofs: dict[str, list[tuple[Any, AuthorityGrant]]] = {}
+    item_behaviors: dict[str, set[tuple[str, ...]]] = {}
+    current_spell_entries = getattr(systems_service, "list_enabled_entries_for_campaign", None)
+    spell_catalog = {"entries": current_spell_entries(
+        definition.campaign_slug, entry_type="spell",
+    ) if callable(current_spell_entries) else []}
+    item_blocks: dict[str, list[Any]] = {}
+    for grant in grants:
+        if grant.kind == "item":
+            payload = json.loads(grant.payload_json)
+            if "spell_support" in payload:
+                item_blocks.setdefault(grant.instance_id, []).append(payload["spell_support"])
+    invalid_item_owners = {
+        owner for owner, blocks in item_blocks.items()
+        if (parsed := parse_item_spell_support(blocks)).diagnostics
+        or any(record.invalid for record in parsed.records)
+    }
     def visit(value: Any, grant: AuthorityGrant) -> None:
         if isinstance(value, list):
             for child in value:
@@ -1560,7 +1773,24 @@ def _source_derived_formula_bases(
             for child in value.values():
                 visit(child, grant)
     for grant in grants:
-        visit(json.loads(grant.payload_json), grant)
+        payload = json.loads(grant.payload_json)
+        if grant.kind == "item" and isinstance(payload.get("spell_support"), dict):
+            if grant.instance_id in invalid_item_owners:
+                continue
+            parsed = parse_item_spell_support([payload["spell_support"]])
+            if parsed.diagnostics or any(record.invalid for record in parsed.records):
+                continue
+            for record in parsed.records:
+                if record.source_row_id and record.source_ability_key and record.source_row_kind in {"item", "source"}:
+                    item_behaviors.setdefault(record.source_row_id, set()).add((
+                        record.source_row_kind, record.source_row_title,
+                        record.source_ability_key, record.source_mode,
+                        record.spell_list_class_name, grant.source_key,
+                    ))
+                    if _resolve_item_spell_selector(record.spell_selector, spell_catalog) is not None:
+                        item_proofs.setdefault(record.source_row_id, []).append((record, grant))
+        else:
+            visit(payload, grant)
     source_rows = list(dict(definition.spellcasting or {}).get("source_rows") or [])
     source_ids = [_text(row.get("source_row_id")) for row in source_rows if isinstance(row, dict)]
     if len(source_rows) != len(source_ids) or len(source_ids) != len(set(source_ids)):
@@ -1569,9 +1799,62 @@ def _source_derived_formula_bases(
         row_id = _text(spell_row.get("source_row_id"))
         proofs = list({(ability, grant.grant_id): (ability, grant)
                        for ability, grant in source_proofs.get(row_id) or []}.values())
-        if row_id not in verified_source_rows or len(proofs) != 1:
+        item_rows = item_proofs.get(row_id) or []
+        if row_id not in verified_source_rows:
             continue
-        ability_key, grant = proofs[0]
+        item_basis: Any = None
+        if item_rows:
+            # All declarations must describe one exact row behavior. A
+            # different spell may share that formula; a disagreeing same-spell
+            # access declaration cannot.
+            behaviors = {
+                (record.source_row_kind, record.source_row_title,
+                 record.source_ability_key, record.source_mode,
+                 record.spell_list_class_name, grant.source_key)
+                for record, grant in item_rows
+            }
+            claims: dict[str, set[tuple[Any, ...]]] = {}
+            for record, _ in item_rows:
+                spell_entry = _resolve_item_spell_selector(record.spell_selector, spell_catalog)
+                if spell_entry is None:
+                    continue
+                spell_identity = _text(getattr(spell_entry, "entry_key", "")) or _text(getattr(spell_entry, "slug", ""))
+                claims.setdefault(spell_identity, set()).add((
+                    record.access_type, record.access_uses, record.access_reset_on,
+                    record.mark, record.always_prepared, record.bonus_known, record.ritual,
+                ))
+            if (len(behaviors) != 1 or len(item_behaviors.get(row_id, set())) != 1
+                    or any(len(values) != 1 for values in claims.values()) or proofs):
+                continue
+            ability_key = item_rows[0][0].source_ability_key
+            item_basis = tuple(sorted((record.spell_key, record.access_type,
+                                       record.access_uses, record.access_reset_on,
+                                       grant.grant_id)
+                                      for record, grant in item_rows))
+            grant = item_rows[0][1]
+            physical_copies = [item for item in definition.equipment_catalog
+                               if isinstance(item, dict)
+                               and _source_identity(item) == (grant.source_kind, grant.source_key)]
+            if len(physical_copies) > 1:
+                # A formula belongs to the one approved item source. Physical
+                # copies share its rule, so equip/attune changes must not
+                # change the basis merely by changing the number of grants.
+                item_basis = ("identical_physical_copies_v2", tuple(sorted({
+                    (record.spell_key, record.access_type, record.access_uses,
+                     record.access_reset_on, source.source_kind, source.source_key,
+                     source.effect_id, source.payload_json)
+                    for record, source in item_rows
+                })))
+            elif len(item_rows) == 1:
+                raw_effect = json.loads(grant.payload_json).get("spell_support") or {}
+                if (isinstance(raw_effect, dict)
+                        and raw_effect.get("spell_source_row_id") == row_id
+                        and raw_effect.get("spell_source_ability_key") == ability_key):
+                    item_basis = None
+        elif len(proofs) == 1:
+            ability_key, grant = proofs[0]
+        else:
+            continue
         expected_ability = next((label for label, key in labels.items() if key == ability_key), "")
         score = dict(abilities.get(ability_key) or {}).get("score")
         if _text(spell_row.get("spellcasting_ability")) != expected_ability or type(score) is not int:
@@ -1587,12 +1870,18 @@ def _source_derived_formula_bases(
                     or not isinstance(record, dict) or record.get("kind") != "formula"):
                 continue
             target_id = f"spell_metric:source:{row_id}:{metric}"
-            bases[target_id] = numeric_value_digest({
+            basis_payload = {
                 "source_snapshot": source_snapshot_digest,
-                "grant": (grant.grant_id, grant.payload_json),
                 "ability": ability_key, "score": score, "pb": pb,
                 "metric": metric, "expected": expected,
-            })
+            }
+            # Keep the historic singleton digest byte-for-byte for flat
+            # declarations. Multi-block item proof uses all exact grants.
+            basis_payload["grant"] = (
+                item_basis if item_basis is not None else
+                (grant.grant_id, grant.payload_json)
+            )
+            bases[target_id] = numeric_value_digest(basis_payload)
     return bases
 
 
@@ -1870,7 +2159,7 @@ def _transition_matches(witness: dict[str, Any], kind: str, target_id: str,
         return True
     if not isinstance(proof, dict):
         return False
-    return (proof.get("schema_version") == 1
+    return (proof.get("schema_version") in {1, 2}
             and (proof.get("target_kind"), proof.get("target_id"), proof.get("metric"))
                 == (kind, target_id, metric)
             and proof.get("authorization") == witness.get("authorization")
@@ -1949,11 +2238,14 @@ def build_source_authority(
                 continue
             seen_instances.add(instance_id)
             source_kind, source_key = _source_identity(raw)
+            if kind == "item" and source_kind == "page":
+                source_kind, source_key = "", ""
             current, reason = _current_payload(
                 campaign_slug=definition.campaign_slug, kind=kind,
                 source_kind=source_kind, source_key=source_key,
                 systems_service=systems_service, pages=pages,
                 expected_slug=_text(dict(raw.get("systems_ref") or {}).get("slug")),
+                expected_ref=dict(raw.get("systems_ref") or {}) if kind == "item" else None,
             )
             active = kind != "item" or (bool(raw.get("is_equipped")) and not raw.get("mechanics_suppressed"))
             if current is not None and kind == "item":
@@ -2026,6 +2318,8 @@ def build_source_authority(
                 owner = f"page:{source_key}"
             spell_key_candidates.update((spell_id, _text(name).casefold(), owner)
                                         for name in names if _text(name) and owner)
+            if owner and source_kind.startswith("systems"):
+                current_spell_keys.add((spell_id, owner))
         statuses.append(AuthorityStatus("spell", spell_id, VERIFIED if current is not None and not reason else NEEDS_REPAIR,
                                         reason or ""))
     by_id: dict[tuple[str, str, str, str, str], AuthorityGrant] = {}
@@ -2040,21 +2334,42 @@ def build_source_authority(
         warnings.append(("source_collision", "Conflicting current source effects need manager attention."))
         statuses.append(AuthorityStatus(grant_id[0], grant_id[3], NEEDS_ATTENTION, "conflicting current effect"))
     clean_grants = tuple(grant for grant_id, grant in by_id.items() if grant_id not in disputed)
-    verified_spell_grants = _current_spell_grant_membership(clean_grants, definition)
-    # Grant values may be display names. Resolve them against the current
-    # catalog and reject a title/slug alias shared by two eligible spells.
     list_spells = getattr(systems_service, "list_enabled_entries_for_campaign", None)
     entries = list_spells(definition.campaign_slug, entry_type="spell") if callable(list_spells) else []
+    verified_spell_grants = _current_spell_grant_membership(clean_grants, definition, entries)
+    # Grant values may be display names. Resolve them against the current
+    # catalog and reject a title/slug alias shared by two eligible spells.
     current_spell_keys.update(_unambiguous_current_spell_keys(spell_key_candidates, entries, pages))
     source_owners: dict[str, set[tuple[str, str, str]]] = {}
+    item_source_ids: set[str] = set()
     for grant in clean_grants:
-        for row_id in _source_row_ids(json.loads(grant.payload_json)):
+        payload = json.loads(grant.payload_json)
+        row_ids = _source_row_ids(payload)
+        if grant.kind == "item" and isinstance(payload.get("spell_support"), dict):
+            from .item_spell_support import parse_item_spell_support
+            parsed = parse_item_spell_support([payload["spell_support"]])
+            row_ids.update(record.source_row_id for record in parsed.records if record.source_row_id)
+            row_ids.update(source_id for _, source_id, _, _ in parsed.source_declarations if source_id)
+        for row_id in row_ids:
             source_owners.setdefault(row_id, set()).add((grant.kind, grant.source_key, grant.instance_id))
-    disputed_rows = frozenset(row_id for row_id, owners in source_owners.items() if len(owners) > 1)
+            if grant.kind == "item":
+                item_source_ids.add(row_id)
+    # Physical copies may share a current exact Systems source and its spell
+    # row. A distinct source, including a non-item owner, still disputes it.
+    disputed_rows = frozenset(
+        row_id for row_id, owners in source_owners.items()
+        if len(owners) > 1 and not (
+            all(kind == "item" for kind, _, _ in owners)
+            and len({source_key for _, source_key, _ in owners}) == 1
+        )
+    )
     for row_id in disputed_rows:
         statuses.append(AuthorityStatus("source_row", row_id, NEEDS_ATTENTION, "conflicting current owners"))
         warnings.append(("source_row_collision", "Conflicting spell source rows need manager attention."))
-    verified_source_rows = frozenset(source_owners.keys() - disputed_rows)
+    verified_item_spell_rows = {row_id for row_id, _ in verified_spell_grants}
+    verified_source_rows = frozenset(
+        source_owners.keys() - disputed_rows - (item_source_ids - verified_item_spell_rows)
+    )
     witnesses = tuple(_canonical(witness) for witness in verified_manual_actions if isinstance(witness, dict))
     preliminary_fields, _ = _numeric_statuses(
         definition, state, verified_numeric_actions,

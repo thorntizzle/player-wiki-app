@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Sequence
 
+from flask import has_request_context, request
+
 from .sqlite_safety import (
     SQLiteMigrationStorageEvidence,
     SQLiteSnapshotEvidence,
@@ -2746,8 +2748,24 @@ def inspect_migration_ledger(
 ) -> MigrationLedgerInspection:
     """Inspect registry and ledger state without creating locks, tables, or files."""
 
+    built_in_request = (
+        registry is MIGRATIONS
+        and schema_sql is CURRENT_SCHEMA_SQL
+        and has_request_context()
+    )
     migrations = tuple(registry)
-    validate_migration_registry(migrations, schema_sql=schema_sql)
+    if built_in_request:
+        current_request = request._get_current_object()
+        validated = getattr(current_request, "_cpw_validated_migration_registry", None)
+        if (
+            validated is None
+            or validated[0] is not registry
+            or validated[1] is not schema_sql
+        ):
+            validate_migration_registry(migrations, schema_sql=schema_sql)
+            current_request._cpw_validated_migration_registry = (registry, schema_sql)
+    else:
+        validate_migration_registry(migrations, schema_sql=schema_sql)
     ledger_exists = _migration_ledger_exists(connection)
     ledger_rows = _read_and_validate_ledger(connection, migrations)
     applied_version = int(ledger_rows[-1][0]) if ledger_rows else 0

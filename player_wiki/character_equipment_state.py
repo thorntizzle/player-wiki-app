@@ -55,29 +55,35 @@ def build_reserved_equipment_state_update_result(record: Any, item_id: str,
     pages, entries = set(), set()
     identities: dict[str, set[tuple[str, str]]] = {}
     page_titles: dict[str, list[str]] = {}
+    context_refs: set[str] = set()
     try:
         for index, (ref, row) in enumerate(relevant_rows):
             owner = f"equipment[{index}]"
             page_value, systems_value = row.get("page_ref"), row.get("systems_ref")
             page_claim = "page_ref" in row and page_value not in (None, "", {})
             systems_claim = "systems_ref" in row and systems_value not in (None, "", {})
-            if page_claim and systems_claim:
+            is_definition = index < len(definition_relevant)
+            if page_claim and systems_claim and not is_definition:
                 raise CommittedSourceConflict("Equipment has conflicting source links.")
             if page_claim:
-                link = _exact_page_link(page_value, owner, "item")
+                link = _exact_page_link(page_value, owner,
+                                        "item_context" if systems_claim else "item")
                 pages.add(link)
-                identities.setdefault(ref, set()).add(("page", link.identity))
+                if systems_claim:
+                    context_refs.add(link.identity)
+                else:
+                    identities.setdefault(ref, set()).add(("page", link.identity))
                 if isinstance(page_value, dict) and "title" in page_value:
                     title = page_value["title"]
                     if not isinstance(title, str):
                         raise CommittedSourceConflict("Equipment page title is malformed.")
                     if title.strip():
                         page_titles.setdefault(link.identity, []).append(title.strip())
-            elif systems_claim:
+            if systems_claim:
                 link = _exact_systems_link(systems_value, owner, "item")
                 entries.add(link)
                 identities.setdefault(ref, set()).add((link.source_kind, link.identity))
-            elif str(row.get("source_kind") or "").strip().lower() in {
+            elif not page_claim and str(row.get("source_kind") or "").strip().lower() in {
                 "page", "campaign_page", "systems", "system"
             }:
                 raise CommittedSourceConflict("Equipment source identity is missing.")
@@ -134,6 +140,8 @@ def build_reserved_equipment_state_update_result(record: Any, item_id: str,
                     raise CommittedSourceConflict("Equipment Items page is unavailable.")
                 if any(title != row["title"] for title in page_titles.get(link.identity, [])):
                     raise CommittedSourceConflict("Equipment Items page identity changed.")
+                if link.field_kind == "item_context":
+                    continue
                 metadata = json.loads(row["metadata_json"] or "{}")
                 page_support[link.identity] = {
                     "page_ref": link.identity, "title": row["title"],
@@ -142,6 +150,7 @@ def build_reserved_equipment_state_update_result(record: Any, item_id: str,
                                  if key in metadata and metadata[key] not in (None, "", [], {})},
                 }
         catalog["campaign_item_support_by_page_ref"] = page_support
+        catalog["inert_item_context_refs"] = context_refs
         # A row's title is never a source identity in this mutation path.
         catalog["campaign_item_support_by_title"] = {}
     except (CommittedSourceConflict, TypeError, ValueError, KeyError) as exc:

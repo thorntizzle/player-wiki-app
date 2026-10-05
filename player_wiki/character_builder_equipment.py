@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .campaign_item_mechanics import (
+    campaign_item_mechanics_is_approved,
     campaign_item_character_metadata,
     is_campaign_item_mechanics_metadata,
 )
@@ -991,12 +992,6 @@ def _resolve_item_entry(
 ) -> SystemsEntryRecord | None:
     if isinstance(item, dict) and item.get("mechanics_suppressed"):
         return None
-    if isinstance(item, dict):
-        from .committed_publication import active
-
-        activated = active()
-    else:
-        activated = False
     if not item_catalog:
         return None
     by_entry_key = item_catalog.get("by_entry_key") or {}
@@ -1006,28 +1001,27 @@ def _resolve_item_entry(
     if isinstance(item, dict):
         systems_ref = dict(item.get("systems_ref") or {})
         entry_key = str(systems_ref.get("entry_key") or "").strip()
+        slug = str(systems_ref.get("slug") or "").strip()
+        if not entry_key and not slug:
+            return None
         if entry_key:
             entry = by_entry_key.get(entry_key)
-            if isinstance(entry, SystemsEntryRecord):
-                return entry
-            if activated:
+            if not isinstance(entry, SystemsEntryRecord):
                 return None
-        slug = str(systems_ref.get("slug") or "").strip()
-        if slug:
+        else:
             entry = by_slug.get(slug)
-            if isinstance(entry, SystemsEntryRecord):
-                return entry
-            if activated:
+            if not isinstance(entry, SystemsEntryRecord):
                 return None
-        if activated:
-            # A saved title is a discovery hint, never current source authority.
+        if entry.entry_type != "item" or any(
+            str(systems_ref.get(field) or "").strip()
+            and str(systems_ref.get(field) or "").strip() != str(getattr(entry, field) or "").strip()
+            for field in ("entry_key", "slug", "source_id", "entry_type")
+        ) or (
+            str(systems_ref.get("title") or "").strip()
+            and str(systems_ref.get("title") or "").strip().casefold() != str(entry.title or "").strip().casefold()
+        ):
             return None
-        candidate_titles.extend(
-            [
-                str(systems_ref.get("title") or "").strip(),
-                str(item.get("name") or "").strip(),
-            ]
-        )
+        return entry
     else:
         raw_reference = str(item or "").strip()
         if raw_reference:
@@ -1160,7 +1154,7 @@ def describe_equipment_state_support(
 
     resolved_catalog = dict(item_catalog or {})
     resolved_entry = entry if isinstance(entry, SystemsEntryRecord) else _resolve_item_entry(item, resolved_catalog)
-    campaign_item_support = _resolve_campaign_item_page_support(item, resolved_catalog)
+    campaign_item_support = None
     trusted_kind = ""
     if trusted_source is not None:
         trusted_kind, trusted_identity = trusted_source
@@ -1168,17 +1162,10 @@ def describe_equipment_state_support(
         page_ref = _extract_campaign_page_ref(item.get("page_ref"))
         source_kind = str(item.get("source_kind") or "").strip()
         source_is_valid = False
-        if trusted_kind == "page":
-            source_is_valid = bool(
-                page_ref == trusted_identity and not systems_ref
-                and isinstance(campaign_item_support, dict)
-                and str(campaign_item_support.get("page_ref") or "").strip() == trusted_identity
-            )
-            resolved_entry = None
-        elif trusted_kind in {"systems_key", "systems_slug"}:
+        if trusted_kind in {"systems_key", "systems_slug"}:
             reference_key = "entry_key" if trusted_kind == "systems_key" else "slug"
             source_is_valid = bool(
-                not page_ref and systems_ref.get(reference_key) == trusted_identity
+                systems_ref.get(reference_key) == trusted_identity
                 and isinstance(resolved_entry, SystemsEntryRecord)
                 and getattr(resolved_entry, reference_key, None) == trusted_identity
             )
@@ -2089,7 +2076,9 @@ def _build_weapon_attack_payload(
         "damage_type": DAMAGE_TYPE_LABELS.get(str(profile.get("damage_type") or "").strip().upper(), ""),
         "notes": notes,
         "systems_ref": dict(dict(context.get("item") or {}).get("systems_ref") or {}) or None,
-        "page_ref": dict(raw_page_ref) if isinstance(raw_page_ref, dict) else raw_page_ref or None,
+        "page_ref": (None if dict(dict(context.get("item") or {}).get("systems_ref") or {})
+                     and dict(context.get("item") or {}).get("page_ref")
+                     else dict(raw_page_ref) if isinstance(raw_page_ref, dict) else raw_page_ref or None),
         "equipment_refs": [equipment_ref] if equipment_ref else [],
         "authority_ability_dependencies": list(context.get("ability_dependencies") or []),
         "authority_requires_proficiency_bonus": bool(context.get("is_proficient")),
@@ -2201,6 +2190,13 @@ def _resolve_weapon_profile(
         if entry is _UNRESOLVED_ITEM_ENTRY
         else entry
     )
+    if not isinstance(resolved_entry, SystemsEntryRecord) or (
+        isinstance(item, dict) and _resolve_item_entry(item, item_catalog or {}) != resolved_entry
+    ):
+        return None
+    entry_metadata = dict(resolved_entry.metadata or {})
+    if is_campaign_item_mechanics_metadata(entry_metadata) and not campaign_item_mechanics_is_approved(entry_metadata):
+        return None
     resolved_metadata = (
         dict(metadata)
         if metadata is not None
@@ -2254,35 +2250,14 @@ def _resolve_campaign_item_page_support(
     item: Any,
     item_catalog: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    if isinstance(item, dict) and item.get("mechanics_suppressed"):
-        return None
     if isinstance(item, dict):
-        from .committed_publication import active
-
-        activated = active()
-    else:
-        activated = False
+        # Equipment page links are navigation context, never mechanics owners.
+        return None
     if not item_catalog:
         return None
-    by_page_ref = item_catalog.get("campaign_item_support_by_page_ref") or {}
     by_title = item_catalog.get("campaign_item_support_by_title") or {}
-    if isinstance(item, dict):
-        page_ref = _extract_campaign_page_ref(dict(item).get("page_ref"))
-        if page_ref:
-            support = by_page_ref.get(page_ref)
-            if isinstance(support, dict):
-                return dict(support)
-            if activated:
-                return None
-        if activated:
-            return None
-        candidate_titles = [
-            str(dict(item).get("name") or "").strip(),
-            str(dict(dict(item).get("systems_ref") or {}).get("title") or "").strip(),
-        ]
-    else:
-        raw_reference = str(item or "").strip()
-        candidate_titles = [raw_reference, _humanize_item_reference(raw_reference)] if raw_reference else []
+    raw_reference = str(item or "").strip()
+    candidate_titles = [raw_reference, _humanize_item_reference(raw_reference)] if raw_reference else []
     for title in candidate_titles:
         for candidate_key in _merge_name_candidates(title):
             support = by_title.get(candidate_key)
@@ -2300,22 +2275,16 @@ def _resolve_item_support_metadata(
 ) -> dict[str, Any]:
     if isinstance(item, dict) and item.get("mechanics_suppressed"):
         return {}
-    resolved_entry = (
-        _resolve_item_entry(item, item_catalog)
-        if entry is _UNRESOLVED_ITEM_ENTRY
-        else entry
-    )
+    exact_entry = _resolve_item_entry(item, item_catalog)
+    resolved_entry = exact_entry if entry is _UNRESOLVED_ITEM_ENTRY else entry
+    if isinstance(item, dict) and (exact_entry is None or resolved_entry != exact_entry):
+        return {}
     if isinstance(resolved_entry, SystemsEntryRecord):
         entry_metadata = dict(resolved_entry.metadata or {})
         if is_campaign_item_mechanics_metadata(entry_metadata):
             return campaign_item_character_metadata(entry_metadata)
         return entry_metadata
-    resolved_campaign_item_support = (
-        dict(campaign_item_support or {})
-        if isinstance(campaign_item_support, dict)
-        else _resolve_campaign_item_page_support(item, item_catalog)
-    )
-    return dict(dict(resolved_campaign_item_support or {}).get("metadata") or {})
+    return {}
 
 
 def _item_effect_metadata(
@@ -2569,6 +2538,13 @@ def _resolve_armor_profile(
         if entry is _UNRESOLVED_ITEM_ENTRY
         else entry
     )
+    if not isinstance(resolved_entry, SystemsEntryRecord) or (
+        isinstance(item, dict) and _resolve_item_entry(item, item_catalog or {}) != resolved_entry
+    ):
+        return None
+    entry_metadata = dict(resolved_entry.metadata or {})
+    if is_campaign_item_mechanics_metadata(entry_metadata) and not campaign_item_mechanics_is_approved(entry_metadata):
+        return None
     entry_profile = _armor_profile_from_entry(resolved_entry)
     if entry_profile is not None:
         resolved_entry_profile = dict(entry_profile)
@@ -3411,7 +3387,7 @@ def _merge_recalculated_attack_overrides(
             existing_index, existing_payload = matched_existing
             matched_existing_indexes.add(existing_index)
             existing_page_ref = _normalize_page_ref_payload(existing_payload.get("page_ref"))
-            if existing_page_ref and not payload.get("page_ref"):
+            if existing_page_ref and not payload.get("page_ref") and not payload.get("systems_ref"):
                 payload["page_ref"] = existing_page_ref
             if dict(existing_payload.get("systems_ref") or {}) and not payload.get("systems_ref") and not payload.get("page_ref"):
                 payload["systems_ref"] = dict(existing_payload.get("systems_ref") or {})
@@ -3500,20 +3476,24 @@ def _normalize_equipment_payloads(
         explicit_identity = _normalize_explicit_link_identity(
             systems_ref=systems_ref,
             page_ref=normalized_page_ref,
+            allow_page=False,
         )
         merge_key_tail = (
-            _extract_campaign_page_ref(normalized_page_ref),
+            "" if explicit_identity else _extract_campaign_page_ref(normalized_page_ref),
             _normalize_merge_text(payload.get("notes")),
             _normalize_merge_text(payload.get("weight")),
             is_currency_only,
         )
         candidate_keys = []
-        if explicit_identity:
+        # An equipment ID is a physical Character instance. Shared Systems
+        # identity cannot collapse two inventories or their activation state.
+        if explicit_identity and is_currency_only:
             candidate_keys.append((explicit_identity, *merge_key_tail))
-        candidate_keys.extend(
-            (f"name:{candidate}", *merge_key_tail)
-            for candidate in _merge_name_candidates(name)
-        )
+        if is_currency_only:
+            candidate_keys.extend(
+                (f"name:{candidate}", *merge_key_tail)
+                for candidate in _merge_name_candidates(name)
+            )
         existing_index = None
         for candidate_key in candidate_keys:
             candidate_index = index_by_key.get(candidate_key)
@@ -3524,6 +3504,7 @@ def _normalize_equipment_payloads(
                 existing_explicit_identity = _normalize_explicit_link_identity(
                     systems_ref=dict(existing_payload.get("systems_ref") or {}),
                     page_ref=existing_payload.get("page_ref"),
+                    allow_page=False,
                 )
                 if existing_explicit_identity and existing_explicit_identity != explicit_identity:
                     continue
@@ -3573,14 +3554,16 @@ def _normalize_equipment_payloads(
         updated_explicit_identity = _normalize_explicit_link_identity(
             systems_ref=dict(existing_payload.get("systems_ref") or {}),
             page_ref=existing_payload.get("page_ref"),
+            allow_page=False,
         )
         updated_keys = []
         if updated_explicit_identity:
             updated_keys.append((updated_explicit_identity, *merge_key_tail))
-        updated_keys.extend(
-            (f"name:{candidate}", *merge_key_tail)
-            for candidate in _merge_name_candidates(str(existing_payload.get("name") or "").strip())
-        )
+        if is_currency_only:
+            updated_keys.extend(
+                (f"name:{candidate}", *merge_key_tail)
+                for candidate in _merge_name_candidates(str(existing_payload.get("name") or "").strip())
+            )
         for candidate_key in updated_keys:
             index_by_key[candidate_key] = existing_index
     return normalized_equipment
@@ -3611,29 +3594,7 @@ def _recover_equipment_link_payloads(
     *,
     item_catalog: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], Any]:
-    systems_ref = dict(payload.get("systems_ref") or {})
-    normalized_page_ref = _normalize_page_ref_payload(payload.get("page_ref"))
-    resolved_page_ref = _extract_campaign_page_ref(normalized_page_ref)
-    campaign_item_support = _resolve_campaign_item_page_support(payload, item_catalog)
-    if isinstance(campaign_item_support, dict):
-        support_page_ref = str(campaign_item_support.get("page_ref") or "").strip()
-        support_title = str(campaign_item_support.get("title") or payload.get("name") or "").strip()
-        if support_page_ref and (not resolved_page_ref or resolved_page_ref == support_page_ref):
-            normalized_page_ref = (
-                {
-                    "slug": support_page_ref,
-                    "title": support_title,
-                }
-                if support_title
-                else support_page_ref
-            )
-            resolved_page_ref = support_page_ref
-    if not systems_ref and not resolved_page_ref:
-        recovered_entry = _resolve_item_entry(payload, item_catalog)
-        recovered_systems_ref = _systems_ref_from_entry(recovered_entry)
-        if recovered_systems_ref:
-            systems_ref = recovered_systems_ref
-    return systems_ref, normalized_page_ref
+    return dict(payload.get("systems_ref") or {}), _normalize_page_ref_payload(payload.get("page_ref"))
 
 
 def _normalize_page_ref_payload(page_ref: Any) -> Any:
@@ -3645,22 +3606,27 @@ def _normalize_page_ref_payload(page_ref: Any) -> Any:
     return None
 
 
-def _normalize_explicit_link_identity(*, systems_ref: dict[str, Any] | None, page_ref: Any) -> str:
-    page_identity = _extract_campaign_page_ref(page_ref)
-    if page_identity:
-        return f"page:{normalize_lookup(page_identity)}"
+def _normalize_explicit_link_identity(*, systems_ref: dict[str, Any] | None, page_ref: Any,
+                                      allow_page: bool = True) -> str:
     systems_payload = dict(systems_ref or {})
+    systems_key = str(systems_payload.get("entry_key") or "").strip()
+    qualifiers = [
+        systems_key,
+        str(systems_payload.get("slug") or "").strip(),
+        str(systems_payload.get("source_id") or "").strip(),
+        str(systems_payload.get("entry_type") or "").strip(),
+        str(systems_payload.get("title") or "").strip().casefold(),
+    ]
+    if systems_key:
+        return "systems-key:" + json.dumps(qualifiers, separators=(",", ":"))
     systems_slug = str(systems_payload.get("slug") or "").strip()
     if systems_slug:
-        return f"systems:{normalize_lookup(systems_slug)}"
-    systems_entry_type = normalize_lookup(str(systems_payload.get("entry_type") or "").strip())
-    systems_source_id = normalize_lookup(str(systems_payload.get("source_id") or "").strip())
-    systems_title = str(systems_payload.get("title") or "").strip()
-    if systems_title:
-        qualifier = ":".join(part for part in (systems_entry_type, systems_source_id) if part)
-        if qualifier:
-            return f"systems-title:{qualifier}:{normalize_lookup(systems_title)}"
-        return f"systems-title:{normalize_lookup(systems_title)}"
+        return "systems-slug:" + json.dumps(qualifiers[1:], separators=(",", ":"))
+    if systems_payload:
+        return ""
+    page_identity = _extract_campaign_page_ref(page_ref)
+    if allow_page and page_identity:
+        return f"page:{normalize_lookup(page_identity)}"
     return ""
 
 

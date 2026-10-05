@@ -84,6 +84,7 @@ def repair_definition(
     definition: Mapping[str, Any], *, family: str, target_id: str,
     source_kind: str, source_value: str, source_record: object,
     campaign_option: Mapping[str, Any] | None = None,
+    connection: Any | None = None,
 ) -> dict[str, Any]:
     """Change only one exact link; retain row, selection, and ownership identity."""
     if family not in REPAIR_FAMILIES or source_kind not in SOURCE_KINDS:
@@ -108,6 +109,8 @@ def repair_definition(
         slug = str(getattr(source_record, "slug", "") or "").strip()
         if not entry_type or not slug:
             raise SourceRepairError("The Systems entry is incomplete.")
+        prior_systems = bool(row.get("systems_ref"))
+        prior_page = deepcopy(row.get("page_ref"))
         row["systems_ref"] = {
             "entry_key": source_value,
             "entry_type": entry_type,
@@ -116,6 +119,24 @@ def repair_definition(
             "source_id": str(getattr(source_record, "source_id", "") or "").strip(),
         }
         row.pop("page_ref", None)
+        if family == "item" and prior_systems and prior_page and connection is not None:
+            from .committed_character_publication import (
+                _create_source_proof, _exact_page_link, _exact_systems_link,
+            )
+            from .committed_publication import CommittedSourceConflict
+
+            owner = f"definition.equipment_catalog[{matches[0]}]"
+            try:
+                page_link = _exact_page_link(prior_page, owner + ".page_ref", "item_context")
+                systems_link = _exact_systems_link(row["systems_ref"], owner + ".systems_ref", "item")
+                _create_source_proof(
+                    str(definition.get("campaign_slug") or ""), (page_link,), (systems_link,),
+                    connection=connection,
+                )
+            except (CommittedSourceConflict, TypeError, ValueError):
+                pass
+            else:
+                row["page_ref"] = prior_page
         # Preserve historical choices; SourceAuthority discards copied effects
         # and rehydrates only approved current mechanics during projection.
     rows[matches[0]] = row
@@ -467,67 +488,128 @@ def load_verified_numeric_actions(campaign_slug: str, character_slug: str, *,
 
 def _load_transition_actions(connection: sqlite3.Connection, campaign_slug: str,
                              character_slug: str, *, strict: bool = False) -> tuple[dict[str, Any], ...]:
-    """Accept only activation-transaction proofs linked to one original audit row."""
+    """Load current-generation proofs only after validating their entire audit chain."""
     try:
-        from .committed_publication import active
-        if not active(connection):
-            return ()
-        marker = connection.execute("SELECT activated_at FROM committed_source_activation WHERE singleton=1").fetchone()
-        rows = connection.execute(
-            """SELECT actor_user_id,metadata_json FROM auth_audit_log
-               WHERE campaign_slug=? AND character_slug=?
-                 AND event_type='character_source_transition_confirmed' ORDER BY id""",
-            (campaign_slug, character_slug),
-        ).fetchall()
-        if not rows:
-            return ()
-        originals = load_verified_numeric_actions(campaign_slug, character_slug,
-                    connection=connection, strict=True, include_origin=True)
-        current_identity = _current_transition_identity(connection, campaign_slug,
-                                                        character_slug)
-        candidates: list[dict[str, Any]] = []
-        counts: dict[tuple[str, str, str, str], int] = {}
-        proof_fields = {"schema_version", "campaign_slug", "character_slug",
-            "target_kind", "target_id", "metric", "authorization",
-            "origin_audit_id", "origin_actor_user_id", "origin_event_type",
-            "origin_metadata_sha256", "old_basis", "new_basis",
-            "old_snapshot", "new_snapshot", "value_digest", "owner_digest",
-            "identity", "activated_at"}
-        for row in rows:
-            try:
-                proof = json.loads(row["metadata_json"])
-                if not isinstance(proof, dict):
-                    continue
-                key = (str(proof.get("target_kind")), str(proof.get("target_id")),
-                       str(proof.get("metric")), str(proof.get("new_basis")))
+        return tuple({"authorization": row["proof"]["authorization"],
+                      "source_basis_digest": row["proof"]["new_basis"],
+                      "transition_proof": row["proof"]}
+                     for row in _current_transition_proof_rows(
+                         connection, campaign_slug, character_slug))
+    except Exception:
+        if strict:
+            raise SourceRepairError("Transition audit proof is unavailable.") from None
+        return ()
+
+
+_TRANSITION_V1_FIELDS = frozenset({
+    "schema_version", "campaign_slug", "character_slug", "target_kind", "target_id",
+    "metric", "authorization", "origin_audit_id", "origin_actor_user_id",
+    "origin_event_type", "origin_metadata_sha256", "old_basis", "new_basis",
+    "old_snapshot", "new_snapshot", "value_digest", "owner_digest", "identity",
+    "activated_at",
+})
+_TRANSITION_V2_FIELDS = _TRANSITION_V1_FIELDS | frozenset({
+    "prior_generation", "prior_transition_audit_id", "prior_transition_metadata_sha256",
+})
+_TRANSITION_IDENTITY_FIELDS = frozenset({
+    "generation", "state", "config", "systems", "pages", "page_current", "audit",
+})
+
+
+def _current_transition_proof_rows(connection: sqlite3.Connection, campaign_slug: str,
+                                   character_slug: str) -> tuple[dict[str, Any], ...]:
+    """Return unique current proofs; older rows are validated links, never claims."""
+    from .committed_publication import active
+    if not active(connection):
+        return ()
+    marker = connection.execute(
+        "SELECT activated_at FROM committed_source_activation WHERE singleton=1"
+    ).fetchone()
+    identity = _current_transition_identity(connection, campaign_slug, character_slug)
+    if marker is None or not identity:
+        return ()
+    rows = connection.execute(
+        """SELECT id,actor_user_id,metadata_json FROM auth_audit_log
+           WHERE campaign_slug=? AND character_slug=?
+             AND event_type='character_source_transition_confirmed' ORDER BY id""",
+        (campaign_slug, character_slug),
+    ).fetchall()
+    if not rows:
+        return ()
+    prefix_digests = _transition_audit_prefix_digests(
+        connection, campaign_slug, character_slug, {row["id"] for row in rows},
+    )
+    activation_audit_digest = prefix_digests[rows[0]["id"]]
+    originals = load_verified_numeric_actions(campaign_slug, character_slug,
+        connection=connection, strict=True, include_origin=True)
+    by_id: dict[int, dict[str, Any]] = {}
+    current: list[dict[str, Any]] = []
+    counts: dict[tuple[str, str, str, str], int] = {}
+    current_claim_ids: set[int] = set()
+    valid_claim_ids: set[int] = set()
+    for row in rows:
+        try:
+            proof = json.loads(row["metadata_json"])
+            if not isinstance(proof, dict):
+                continue
+            if (isinstance(proof.get("identity"), dict)
+                    and proof["identity"].get("generation") == identity["generation"]):
+                current_claim_ids.add(row["id"])
+            version = proof.get("schema_version")
+            fields = _TRANSITION_V1_FIELDS if version == 1 else _TRANSITION_V2_FIELDS
+            if (version not in {1, 2} or set(proof) != fields
+                    or row["actor_user_id"] is not None
+                    or proof.get("campaign_slug") != campaign_slug
+                    or proof.get("character_slug") != character_slug
+                    or proof.get("activated_at") != marker[0]
+                    or proof.get("target_kind") not in {"resource", "spell_metric", "spell_choice"}
+                    or not isinstance(proof.get("target_id"), str) or not proof["target_id"]
+                    or not isinstance(proof.get("metric"), str) or not proof["metric"]
+                    or not all(_sha256_hex(proof.get(name)) for name in (
+                        "old_basis", "new_basis", "old_snapshot", "new_snapshot",
+                        "value_digest", "owner_digest", "origin_metadata_sha256"))
+                    or type(proof.get("origin_audit_id")) is not int
+                    or type(proof.get("origin_actor_user_id")) is not int
+                    or not isinstance(proof.get("authorization"), dict)
+                    or not isinstance(proof.get("identity"), dict)
+                    or set(proof["identity"]) != _TRANSITION_IDENTITY_FIELDS
+                    or not _sha256_hex(proof["identity"].get("audit"))
+                    or not _valid_transition_generation(proof["identity"].get("generation"))):
+                continue
+            generation = proof["identity"]["generation"]
+            committed = connection.execute(
+                """SELECT primary_sha256 FROM committed_source_generations
+                   WHERE campaign_slug=? AND object_kind='character' AND object_ref=?
+                     AND revision=? AND tombstone=0""",
+                (campaign_slug, character_slug, generation[0]),
+            ).fetchone()
+            if committed is None or committed[0] != generation[1]:
+                continue
+            config_generation = proof["identity"].get("config")
+            if not _valid_transition_generation(config_generation):
+                continue
+            committed_config = connection.execute(
+                """SELECT primary_sha256 FROM committed_source_generations
+                   WHERE campaign_slug=? AND object_kind='config' AND object_ref=''
+                     AND revision=? AND tombstone=0""",
+                (campaign_slug, config_generation[0]),
+            ).fetchone()
+            if committed_config is None or committed_config[0] != config_generation[1]:
+                continue
+            key = (proof["target_kind"], proof["target_id"], proof["metric"],
+                   proof["new_basis"])
+            is_current = proof["identity"]["generation"] == identity["generation"]
+            if is_current:
                 counts[key] = counts.get(key, 0) + 1
-                if (row["actor_user_id"] is not None or set(proof) != proof_fields
-                        or proof.get("schema_version") != 1
-                        or proof.get("campaign_slug") != campaign_slug
-                        or proof.get("character_slug") != character_slug
-                        or marker is None or proof.get("activated_at") != marker[0]
-                        or proof.get("target_kind") not in {"resource", "spell_metric", "spell_choice"}
-                        or not all(_sha256_hex(proof.get(name)) for name in (
-                            "old_basis", "new_basis", "old_snapshot", "new_snapshot",
-                            "value_digest", "owner_digest", "origin_metadata_sha256"))
-                        or type(proof.get("origin_audit_id")) is not int
-                        or type(proof.get("origin_actor_user_id")) is not int
-                        or not isinstance(proof.get("authorization"), dict)
-                        or not isinstance(proof.get("identity"), dict)
-                        or not current_identity
-                        or set(proof["identity"]) != {
-                            "generation", "state", "config", "systems", "pages",
-                            "page_current", "audit"}
-                        or not _sha256_hex(proof["identity"].get("audit"))
-                        or any(proof["identity"].get(name) != value for name, value
-                               in current_identity.items() if name != "state")):
-                    continue
-                authorization = proof["authorization"]
-                if ((authorization.get("target_kind"), authorization.get("target_id"),
-                     authorization.get("metric")) != key[:3]
-                        or authorization.get("value_digest") != proof["value_digest"]
-                        or (authorization.get("owner_digest") is not None
-                            and authorization["owner_digest"] != proof["owner_digest"])):
+            authorization = proof["authorization"]
+            if ((authorization.get("target_kind"), authorization.get("target_id"),
+                 authorization.get("metric")) != key[:3]
+                    or authorization.get("value_digest") != proof["value_digest"]
+                    or (authorization.get("owner_digest") is not None
+                        and authorization["owner_digest"] != proof["owner_digest"])):
+                continue
+            if version == 1:
+                if proof["identity"]["audit"] != activation_audit_digest:
                     continue
                 matching = [original for original in originals
                     if original["audit_id"] == proof["origin_audit_id"]
@@ -542,19 +624,73 @@ def _load_transition_actions(connection: sqlite3.Connection, campaign_slug: str,
                     and original["witness"].get("source_basis_digest") == proof["old_basis"]]
                 if len(matching) != 1:
                     continue
-                candidates.append({"authorization": authorization,
-                    "source_basis_digest": proof["new_basis"], "transition_proof": proof})
-            except (TypeError, ValueError, KeyError):
-                continue
-        return tuple(candidate for candidate in candidates
-                     if counts[(candidate["authorization"]["target_kind"],
-                                candidate["authorization"]["target_id"],
-                                candidate["authorization"]["metric"],
-                                candidate["source_basis_digest"])] == 1)
-    except Exception:
-        if strict:
-            raise SourceRepairError("Transition audit proof is unavailable.") from None
-        return ()
+            else:
+                prior_id = proof.get("prior_transition_audit_id")
+                prior = by_id.get(prior_id) if type(prior_id) is int else None
+                prior_proof = prior["proof"] if prior else None
+                if (prior is None or prior_id >= row["id"]
+                        or proof.get("prior_transition_metadata_sha256") != prior["metadata_sha256"]
+                        or proof.get("prior_generation") != prior_proof["identity"]["generation"]
+                        or proof["identity"]["generation"][0] != proof["prior_generation"][0] + 1
+                        or (proof["target_kind"], proof["target_id"], proof["metric"])
+                            != (prior_proof["target_kind"], prior_proof["target_id"], prior_proof["metric"])
+                        or any(proof[name] != prior_proof[name] for name in (
+                            "authorization", "origin_audit_id", "origin_actor_user_id",
+                            "origin_event_type", "origin_metadata_sha256", "activated_at",
+                            "value_digest", "owner_digest"))
+                        or proof["old_basis"] != prior_proof["new_basis"]
+                        or proof["old_snapshot"] != prior_proof["new_snapshot"]):
+                    continue
+                if proof["identity"]["audit"] != prefix_digests[row["id"]]:
+                    continue
+            record = {"audit_id": row["id"], "metadata_sha256": hashlib.sha256(
+                row["metadata_json"].encode("utf-8")).hexdigest(), "proof": proof}
+            by_id[row["id"]] = record
+            if is_current:
+                valid_claim_ids.add(row["id"])
+            if is_current and all(proof["identity"].get(name) == value
+                                  for name, value in identity.items() if name != "state"):
+                current.append(record)
+        except (TypeError, ValueError, KeyError):
+            continue
+    if current_claim_ids != valid_claim_ids:
+        raise SourceRepairError("Current Character transition proof is malformed.")
+    if any(count != 1 for count in counts.values()):
+        raise SourceRepairError("Current Character transition target is duplicated.")
+    return tuple(row for row in current if counts[(row["proof"]["target_kind"],
+        row["proof"]["target_id"], row["proof"]["metric"],
+        row["proof"]["new_basis"])] == 1)
+
+
+def _valid_transition_generation(value: Any) -> bool:
+    return (isinstance(value, list) and len(value) == 2
+            and type(value[0]) is int and value[0] >= 1 and _sha256_hex(value[1]))
+
+
+def _transition_audit_prefix_digests(connection: sqlite3.Connection,
+                                     campaign_slug: str, character_slug: str,
+                                     target_ids: set[int]) -> dict[int, str]:
+    """Hash canonical audit prefixes once in ID order, including nonproof rows."""
+    digest = hashlib.sha256(b"[")
+    first = True
+    result: dict[int, str] = {}
+    for row in connection.execute(
+        """SELECT id,actor_user_id,event_type,metadata_json FROM auth_audit_log
+           WHERE campaign_slug=? AND character_slug=? ORDER BY id""",
+        (campaign_slug, character_slug),
+    ).fetchall():
+        if row["id"] in target_ids:
+            ending = digest.copy()
+            ending.update(b"]")
+            result[row["id"]] = ending.hexdigest()
+        if not first:
+            digest.update(b",")
+        digest.update(json.dumps(tuple(row), sort_keys=True, default=str,
+                                 separators=(",", ":")).encode())
+        first = False
+    if len(result) != len(target_ids):
+        raise SourceRepairError("Transition audit prefix is incomplete.")
+    return result
 
 
 def _current_transition_identity(connection: sqlite3.Connection, campaign_slug: str,

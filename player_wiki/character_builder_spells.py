@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from typing import Any, Callable
 
 from .character_campaign_options import collect_campaign_option_spell_grants
@@ -15,6 +16,7 @@ from .character_builder_foundation import (
 )
 from .character_models import CharacterDefinition
 from .character_source_matrix import PHB_SOURCE_ID
+from .item_spell_support import parse_item_spell_support
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
 
@@ -131,6 +133,7 @@ __all__ = [
     "_spell_support_choice_field_name",
     "_spell_support_replacement_field_name",
     "_automatic_spell_support_grants",
+    "_selected_item_spell_support_grants",
     "_automatic_spell_support_lookup_keys",
     "_extract_spell_support_grants",
     "_extract_spell_support_grants_from_value",
@@ -270,12 +273,27 @@ def _derive_spell_source_rows(
 ) -> list[dict[str, Any]]:
     source_rows: list[dict[str, Any]] = []
     index_by_id: dict[str, int] = {}
+    review_source_ids = {
+        _spell_payload_source_row_id(payload)
+        for payload in spell_payloads
+        if (payload.get("item_spell_review_only") or payload.get("spell_source_review_only"))
+        and _spell_payload_source_row_id(payload)
+    }
+    review_source_ids -= {
+        _spell_payload_source_row_id(payload)
+        for payload in spell_payloads
+        if not (payload.get("item_spell_review_only") or payload.get("spell_source_review_only"))
+        and _spell_payload_source_row_id(payload)
+    }
     for spell_payload in list(spell_payloads or []):
         payload = dict(spell_payload or {})
         source_row_id = _spell_payload_source_row_id(payload)
         if not source_row_id:
             continue
-        ability_key = _prepared_spell_formula_ability_key(str(payload.get("spell_source_ability_key") or "").strip())
+        ability_key = (
+            "" if source_row_id in review_source_ids else
+            _prepared_spell_formula_ability_key(str(payload.get("spell_source_ability_key") or "").strip())
+        )
         modifier = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) if ability_key else 0
         row_payload = {
             "source_row_id": source_row_id,
@@ -1970,6 +1988,8 @@ def _spell_payload_key(spell_payload: dict[str, Any]) -> str:
 
 def _spell_payload_identity_key(spell_payload: dict[str, Any]) -> str:
     """Return durable stored identity without changing slug-based form values."""
+    if spell_payload.get("item_spell_review_placeholder"):
+        return f"item-review:{spell_payload['item_spell_review_placeholder']}"
     systems_ref = dict(spell_payload.get("systems_ref") or {})
     entry_key = str(systems_ref.get("entry_key") or "").strip()
     if entry_key:
@@ -2029,6 +2049,8 @@ def _spell_payload_management_scope_key(spell_payload: dict[str, Any]) -> str:
 
 def _spell_access_payload(raw_value: Any) -> dict[str, Any]:
     payload = dict(raw_value or {}) if isinstance(raw_value, dict) else {}
+    if payload.get("spell_access_needs_review"):
+        return {}
     access_type = str(payload.get("spell_access_type") or payload.get("access_type") or "").strip()
     if access_type not in {SPELL_ACCESS_TYPE_AT_WILL, SPELL_ACCESS_TYPE_FREE_CAST}:
         return {}
@@ -2047,6 +2069,8 @@ def _spell_access_payload(raw_value: Any) -> dict[str, Any]:
 
 
 def _spell_access_badge_label(raw_value: Any) -> str:
+    if isinstance(raw_value, dict) and raw_value.get("spell_access_needs_review"):
+        return "Spell access needs review"
     access_payload = _spell_access_payload(raw_value)
     access_type = str(access_payload.get("spell_access_type") or "").strip()
     if access_type == SPELL_ACCESS_TYPE_AT_WILL:
@@ -2179,6 +2203,8 @@ def _spell_payload_support_kwargs(raw_value: Any) -> dict[str, Any]:
     if grant_source_label:
         support_kwargs["grant_source_label"] = grant_source_label
     support_kwargs.update(_spell_access_payload(payload))
+    if payload.get("spell_access_needs_review"):
+        support_kwargs["spell_access_needs_review"] = True
     return support_kwargs
 
 
@@ -2212,9 +2238,90 @@ def _apply_spell_payload_support_metadata(
     grant_source_label = str(support_payload.get("grant_source_label") or "").strip()
     if grant_source_label:
         spell_payload["grant_source_label"] = grant_source_label
+    if support_payload.get("spell_access_needs_review"):
+        _quarantine_spell_access(spell_payload)
+        return
+    if spell_payload.get("spell_access_needs_review"):
+        return
     access_payload = _spell_access_payload(support_payload)
     if access_payload:
         spell_payload.update(access_payload)
+
+
+def _quarantine_spell_access(payload: dict[str, Any]) -> None:
+    for key in (
+        "spell_access_type", "spell_access_uses", "spell_access_reset_on",
+        "access_type", "access_uses", "access_reset_on",
+    ):
+        payload.pop(key, None)
+    payload["spell_access_needs_review"] = True
+
+
+def _quarantine_item_spell_entitlement(payload: dict[str, Any]) -> None:
+    """Keep item review rows visible without grant-derived entitlement."""
+    payload["item_spell_review_only"] = True
+    _quarantine_reviewed_spell_entitlement(payload)
+
+
+def _quarantine_conflicting_source_spell_entitlement(payload: dict[str, Any]) -> None:
+    """Withhold a non-item claim sharing an ambiguous effective source ID."""
+    if "spell_source_collision_original" not in payload:
+        payload["spell_source_collision_original"] = {
+            key: payload[key] for key in _SPELL_SOURCE_COLLISION_CLAIM_KEYS if key in payload
+        }
+    payload["spell_source_review_only"] = True
+    _quarantine_reviewed_spell_entitlement(payload)
+
+
+_SPELL_SOURCE_COLLISION_CLAIM_KEYS = (
+    "mark", "is_always_prepared", "is_bonus_known", "is_ritual", "catalog_is_ritual",
+    "spell_access_type", "spell_access_uses", "spell_access_reset_on",
+    "access_type", "access_uses", "access_reset_on", "spell_access_needs_review",
+    "base_mark", "base_is_always_prepared", "base_is_bonus_known", "base_is_ritual",
+)
+
+
+def _restore_conflicting_source_spell_entitlement(payload: dict[str, Any]) -> None:
+    """Restore the owner's original choice/claim before current item inventory runs."""
+    original = payload.get("spell_source_collision_original")
+    if not payload.get("spell_source_review_only") or not isinstance(original, dict):
+        return
+    payload.pop("spell_source_collision_original", None)
+    payload.pop("spell_source_review_only", None)
+    for key in _SPELL_SOURCE_COLLISION_CLAIM_KEYS:
+        payload.pop(key, None)
+    payload.update({key: value for key, value in original.items() if key in _SPELL_SOURCE_COLLISION_CLAIM_KEYS})
+
+
+def _quarantine_reviewed_spell_entitlement(payload: dict[str, Any]) -> None:
+    _quarantine_spell_access(payload)
+    payload["mark"] = ""
+    payload["is_always_prepared"] = False
+    payload["is_bonus_known"] = False
+    # The editor resets campaign choices from these durable base fields.
+    for key, empty in (
+        ("base_mark", ""),
+        ("base_is_always_prepared", False),
+        ("base_is_bonus_known", False),
+        ("base_is_ritual", False),
+    ):
+        if key in payload:
+            payload[key] = empty
+    # Retain the catalog fact separately from grant-derived action eligibility.
+    if payload.get("is_ritual"):
+        payload["catalog_is_ritual"] = True
+    payload["is_ritual"] = False
+
+
+def _spell_access_claim(payload: dict[str, Any]) -> tuple[str, int, str] | None:
+    access = _spell_access_payload(payload)
+    if not access:
+        return None
+    return (
+        str(access.get("spell_access_type") or ""),
+        int(access.get("spell_access_uses") or 0),
+        str(access.get("spell_access_reset_on") or ""),
+    )
 
 
 def _spell_payload_map_key(spell_payload: dict[str, Any]) -> str:
@@ -2820,7 +2927,7 @@ def _apply_spell_support_grants_to_payloads(
     spell_catalog: dict[str, Any],
     class_row_id: str = "",
 ) -> None:
-    for grant in list(grants or []):
+    for grant in _quarantine_conflicting_spell_support_grants(list(grants or [])):
         selected_value = str(grant.get("value") or "").strip()
         if not selected_value:
             continue
@@ -3961,6 +4068,8 @@ def _spell_payload_has_legacy_always_prepared_source_label(spell_payload: dict[s
 
 
 def _spell_payload_is_always_prepared(spell_payload: dict[str, Any]) -> bool:
+    if spell_payload.get("item_spell_review_only") or spell_payload.get("spell_source_review_only"):
+        return False
     if str(spell_payload.get("authority_status") or "") in {"NEEDS REPAIR", "NEEDS ATTENTION", "MANUAL"}:
         return False
     return bool(spell_payload.get("is_always_prepared")) or _spell_payload_has_legacy_always_prepared_source_label(
@@ -4066,6 +4175,8 @@ def _canonicalize_legacy_spell_payload_marks(
     canonicalized_payloads: list[dict[str, Any]] = []
     for raw_payload in list(spell_payloads or []):
         spell_payload = dict(raw_payload or {})
+        if spell_payload.get("item_spell_review_only") or spell_payload.get("spell_source_review_only"):
+            _quarantine_reviewed_spell_entitlement(spell_payload)
         class_row_id = _spell_payload_class_row_id(spell_payload)
         spell_mode = str(
             spell_payload.get("spell_source_mode")
@@ -4079,6 +4190,8 @@ def _canonicalize_legacy_spell_payload_marks(
         )
         if canonical_mark or "mark" in spell_payload:
             spell_payload["mark"] = canonical_mark
+        if spell_payload.get("item_spell_review_only") or spell_payload.get("spell_source_review_only"):
+            _quarantine_reviewed_spell_entitlement(spell_payload)
         canonicalized_payloads.append(spell_payload)
     return _normalize_spell_payloads(canonicalized_payloads)
 
@@ -4319,7 +4432,167 @@ def _automatic_spell_support_grants(
                 exact_level=exact_level,
             )
         )
-    return _dedupe_spell_support_grants(grants)
+    return _quarantine_conflicting_spell_support_grants(_dedupe_spell_support_grants(grants))
+
+
+def _selected_item_spell_support_grants(
+    item_effect_entries: list[dict[str, Any]] | None,
+    *,
+    target_level: int,
+) -> list[dict[str, Any]]:
+    """Choose one current rule per effective item source and spell."""
+    records_by_key: dict[tuple[str, str, str], list[Any]] = {}
+    owners_by_key: dict[tuple[str, str, str], set[str]] = {}
+    behavior_by_source: dict[str, set[tuple[str, str, str, str, str]]] = {}
+    review_placeholders: list[dict[str, Any]] = []
+    for entry_index, entry in enumerate(list(item_effect_entries or [])):
+        blocks = entry.get("spell_support") if isinstance(entry, dict) else None
+        parsed = parse_item_spell_support(blocks, origin=f"active_item_{entry_index}")
+        # Saved historical syntax is item-wide: a good sibling block cannot
+        # regain automation through the same malformed exact item definition.
+        item_invalid = bool(parsed.diagnostics) or any(record.invalid for record in parsed.records)
+        for original_record in parsed.records:
+            record = replace(original_record, invalid=True) if item_invalid else original_record
+            key = (record.source_row_kind, record.source_row_id, record.spell_key)
+            records_by_key.setdefault(key, []).append(record)
+            owner_id = str(entry.get("item_id") or "").strip()
+            if owner_id:
+                owners_by_key.setdefault(key, set()).add(owner_id)
+            if record.source_row_id:
+                behavior_by_source.setdefault(record.source_row_id, set()).add((
+                    record.source_row_kind, record.source_row_title,
+                    record.source_ability_key, record.source_mode,
+                    record.spell_list_class_name,
+                ))
+        # A broken historical block with no recognizable leaf still needs a
+        # visible review indication. It cannot imply any spell entitlement.
+        if parsed.diagnostics and not parsed.records:
+            declarations = {
+                source_id: (source_kind, source_title)
+                for _, source_id, source_kind, source_title in parsed.source_declarations
+            } or {"": ("item", "")}
+            for source_index, (source_id, (source_kind, source_title)) in enumerate(declarations.items()):
+                review_placeholders.append({
+                    "value": "Spell access needs review",
+                    "mark": "",
+                    "spell_source_row_id": source_id or f"spell-source:item:review:{entry_index}",
+                    "spell_source_row_kind": source_kind or "item",
+                    "spell_source_row_title": source_title or str(entry.get("item_name") or "Item spells").strip(),
+                    "item_spell_review_placeholder": f"{entry_index}:{source_index}",
+                    "spell_access_needs_review": True,
+                })
+
+    grants: list[dict[str, Any]] = []
+    for key, records in records_by_key.items():
+        eligible = [
+            record for record in records
+            if not record.invalid
+            and (record.availability is None or 0 <= record.availability <= max(int(target_level or 0), 0))
+        ]
+        if not eligible and not any(record.invalid for record in records):
+            continue
+        numeric_levels = [record.availability for record in eligible if record.availability is not None]
+        selected_level = max(numeric_levels) if numeric_levels else None
+        selected = [record for record in eligible if record.availability == selected_level]
+        representative = sorted(selected or records, key=lambda record: (record.field_path, record.origin))[0]
+        semantic_claims = {
+            (
+                record.source_row_title, record.source_ability_key, record.source_mode,
+                record.spell_list_class_name, record.grant_source_label,
+                record.access_type, record.access_uses, record.access_reset_on, record.mark,
+                record.always_prepared, record.ritual, record.bonus_known, record.details,
+            )
+            for record in selected
+        }
+        review = (
+            any(record.invalid for record in records)
+            or len(semantic_claims) > 1
+            or len(behavior_by_source.get(representative.source_row_id, set())) > 1
+        )
+        grant: dict[str, Any] = {
+            "value": representative.spell_selector,
+            "mark": representative.mark if not review else "",
+            "always_prepared": representative.always_prepared and not review,
+            "ritual": representative.ritual and not review,
+            "bonus_known": representative.bonus_known and not review,
+            "spell_source_row_id": representative.source_row_id,
+            "spell_source_row_kind": representative.source_row_kind,
+            "spell_source_row_title": representative.source_row_title,
+            "spell_source_ability_key": representative.source_ability_key,
+            "spell_source_mode": representative.source_mode,
+            "spell_source_spell_list_class_name": representative.spell_list_class_name,
+            "grant_source_label": representative.grant_source_label,
+            "item_owner_ids": sorted(owners_by_key.get(key, set())),
+        }
+        if review or not representative.source_row_id:
+            grant["spell_access_needs_review"] = True
+        else:
+            grant.update({
+                "spell_access_type": representative.access_type,
+                "spell_access_uses": representative.access_uses,
+                "spell_access_reset_on": representative.access_reset_on,
+            })
+        grants.append(grant)
+    return grants + review_placeholders
+
+
+def _resolve_item_spell_selector(
+    selector: str, spell_catalog: dict[str, Any],
+) -> SystemsEntryRecord | None:
+    """An item claim may select only one current title/source pair."""
+    raw = str(selector or "").strip()
+    if not raw:
+        return None
+    if "|" in raw:
+        title, source_id = (part.strip() for part in raw.split("|", 1))
+        source_id = source_id.split("|", 1)[0].strip()
+    elif "#" in raw:
+        title, source_id = (part.strip() for part in raw.split("#", 1))
+    else:
+        title, source_id = raw, ""
+    if not title or (any(mark in raw for mark in "|#") and not source_id):
+        return None
+    matches = [
+        entry for entry in list(spell_catalog.get("entries") or [])
+        if (
+            normalize_lookup(entry.title) == normalize_lookup(title)
+            if source_id else (
+                normalize_lookup(entry.title) == normalize_lookup(title)
+                or str(entry.slug or "").strip() == title
+                or str(entry.entry_key or "").strip() == title
+            )
+        )
+        and (not source_id or str(entry.source_id or "").strip().casefold() == source_id.casefold())
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _quarantine_conflicting_spell_support_grants(grants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove ambiguous access before any spell map can overwrite a claim."""
+    claims: dict[tuple[str, str, str], set[tuple[str, int, str] | None]] = {}
+    for grant in grants:
+        source_id = str(grant.get("spell_source_row_id") or "").strip()
+        if not source_id:
+            continue
+        key = (
+            str(grant.get("spell_source_row_kind") or "source").strip() or "source",
+            source_id,
+            normalize_lookup(str(grant.get("value") or "")),
+        )
+        claims.setdefault(key, set()).add(_spell_access_claim(grant))
+    result: list[dict[str, Any]] = []
+    for grant in grants:
+        payload = dict(grant)
+        source_id = str(payload.get("spell_source_row_id") or "").strip()
+        key = (
+            str(payload.get("spell_source_row_kind") or "source").strip() or "source",
+            source_id,
+            normalize_lookup(str(payload.get("value") or "")),
+        )
+        if source_id and len(claims.get(key, set())) > 1:
+            _quarantine_spell_access(payload)
+        result.append(payload)
+    return result
 
 
 def _automatic_spell_support_lookup_keys(
@@ -5076,6 +5349,7 @@ def _add_spell_to_payloads(
     spell_access_type: str = "",
     spell_access_uses: Any = None,
     spell_access_reset_on: str = "",
+    spell_access_needs_review: bool = False,
 ) -> None:
     spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
     spell_payload = _build_spell_payload(selected_value, spell_entry)
@@ -5091,6 +5365,7 @@ def _add_spell_to_payloads(
             "spell_access_type": spell_access_type,
             "spell_access_uses": spell_access_uses,
             "spell_access_reset_on": spell_access_reset_on,
+            "spell_access_needs_review": spell_access_needs_review,
         }
     )
     if support_payload:
@@ -5123,6 +5398,15 @@ def _add_spell_to_payloads(
         spells_by_key[payload_key] = spell_payload
         return
 
+    if (
+        _spell_payload_management_scope_key(existing_payload)
+        == _spell_payload_management_scope_key(spell_payload)
+        and _spell_access_claim(existing_payload) != _spell_access_claim(spell_payload)
+        and (_spell_access_claim(existing_payload) is not None or _spell_access_claim(spell_payload) is not None)
+    ):
+        _quarantine_spell_access(existing_payload)
+        _quarantine_spell_access(spell_payload)
+        support_payload = _spell_payload_support_kwargs(spell_payload)
     existing_payload["mark"] = _merge_spell_mark(
         str(existing_payload.get("mark") or "").strip(),
         mark,
@@ -5154,6 +5438,7 @@ def _add_bonus_known_spell_to_payloads(
     spell_access_type: str = "",
     spell_access_uses: Any = None,
     spell_access_reset_on: str = "",
+    spell_access_needs_review: bool = False,
 ) -> None:
     spell_entry = _resolve_spell_entry(selected_value, spell_catalog)
     mark = (
@@ -5178,6 +5463,7 @@ def _add_bonus_known_spell_to_payloads(
         spell_access_type=spell_access_type,
         spell_access_uses=spell_access_uses,
         spell_access_reset_on=spell_access_reset_on,
+        spell_access_needs_review=spell_access_needs_review,
     )
 
 
@@ -5301,6 +5587,8 @@ def _normalize_spell_payloads(
     index_by_key: dict[str, int] = {}
     for spell_payload in list(spell_payloads or []):
         payload = dict(spell_payload or {})
+        if payload.get("item_spell_review_only") or payload.get("spell_source_review_only"):
+            _quarantine_reviewed_spell_entitlement(payload)
         name = str(payload.get("name") or "").strip()
         payload_key = _spell_payload_key(payload) or name
         if not payload_key:
@@ -5361,6 +5649,8 @@ def _normalize_spell_payloads(
             payload.pop("spell_access_type", None)
             payload.pop("spell_access_uses", None)
             payload.pop("spell_access_reset_on", None)
+        if payload.get("spell_access_needs_review"):
+            _quarantine_spell_access(payload)
         systems_ref = dict(payload.get("systems_ref") or {})
         if systems_ref:
             payload["systems_ref"] = systems_ref
@@ -5407,6 +5697,20 @@ def _normalize_spell_payloads(
             for candidate_key in candidate_keys:
                 index_by_key[candidate_key] = existing_index
             continue
+        if (
+            _spell_payload_management_scope_key(existing_payload)
+            == _spell_payload_management_scope_key(payload)
+            and (
+                payload.get("spell_access_needs_review")
+                or existing_payload.get("spell_access_needs_review")
+                or (
+                    _spell_access_claim(existing_payload) != _spell_access_claim(payload)
+                    and (_spell_access_claim(existing_payload) is not None or _spell_access_claim(payload) is not None)
+                )
+            )
+        ):
+            _quarantine_spell_access(existing_payload)
+            _quarantine_spell_access(payload)
         existing_payload["mark"] = _merge_spell_mark(
             str(existing_payload.get("mark") or "").strip(),
             str(payload.get("mark") or "").strip(),
@@ -5428,6 +5732,12 @@ def _normalize_spell_payloads(
             )
         if payload.get("spell_source_row_id") or payload.get("grant_source_label") or payload.get("spell_access_type"):
             _apply_spell_payload_support_metadata(existing_payload, payload)
+        if payload.get("item_spell_review_only"):
+            existing_payload["item_spell_review_only"] = True
+        if payload.get("spell_source_review_only"):
+            existing_payload["spell_source_review_only"] = True
+        if existing_payload.get("item_spell_review_only") or existing_payload.get("spell_source_review_only"):
+            _quarantine_reviewed_spell_entitlement(existing_payload)
         updated_explicit_identity = _spell_payload_normalization_identity(
             existing_payload
         )

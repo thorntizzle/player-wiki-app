@@ -28,6 +28,7 @@ from .character_update_apply import canonical_digest
 from .csrf import CSRF_FIELD_NAME
 from .committed_publication import CommittedSourceConflict, active
 from .db import get_db
+from .item_spell_support import parse_item_spell_support
 
 
 _SALT = "character-source-repair-review-v1"
@@ -35,6 +36,160 @@ _TTL = 600
 _SYSTEMS_TYPES = ("item", "spell", "classfeature", "subclassfeature", "feat", "optionalfeature", "feature")
 _FORM_FIELDS = frozenset({CSRF_FIELD_NAME, "intent", "action", "family", "target_id", "source", "metric", "target_kind", "confirm_value", "confirmed_score", "confirmed_fixed_bonus"})
 _APPLY_FIELDS = frozenset({CSRF_FIELD_NAME, "intent", "review_token"})
+
+
+def _malformed_item_spell_target(choice: Mapping[str, Any]) -> bool:
+    if choice.get("family") != "item" or choice.get("kind") != "systems_entry":
+        return False
+    record = choice.get("record")
+    metadata = dict(getattr(record, "metadata", {}) or {})
+    body = dict(getattr(record, "body", {}) or {})
+    for blocks in (metadata.get("spell_support"), body.get("spell_support")):
+        if blocks in (None, "", [], {}):
+            continue
+        parsed = parse_item_spell_support(blocks)
+        if parsed.diagnostics or any(row.invalid for row in parsed.records):
+            return True
+    return False
+
+
+def _require_repairable_item_target(choice: Mapping[str, Any]) -> None:
+    if _malformed_item_spell_target(choice):
+        raise SourceRepairError("That item spell rule needs repair before relinking a Character.")
+
+
+def _retire_relinked_item_claims(before: Mapping[str, Any], after: dict[str, Any],
+                                target_id: str) -> dict[str, Any]:
+    """Drop claims owned by the old exact item source before review and apply."""
+    old_rows = [row for row in before.get("equipment_catalog") or []
+                if isinstance(row, dict) and row.get("id") == target_id]
+    new_rows = [row for row in after.get("equipment_catalog") or []
+                if isinstance(row, dict) and row.get("id") == target_id]
+    if len(old_rows) != 1 or len(new_rows) != 1:
+        raise SourceRepairError("The item owner identity needs manager repair.")
+    old_ref = old_rows[0].get("systems_ref")
+    if old_ref == new_rows[0].get("systems_ref"):
+        return after
+    if not isinstance(old_ref, dict) or not old_ref:
+        return after
+    from .character_builder_equipment import _resolve_item_support_metadata
+    catalog = current_app.extensions["systems_service"]
+    from .character_assets import build_character_item_catalog
+    item_catalog = build_character_item_catalog(
+        catalog, current_app.extensions["campaign_page_store"],
+        str(before.get("campaign_slug") or ""),
+    )
+    metadata = _resolve_item_support_metadata(old_rows[0], item_catalog)
+    parsed = parse_item_spell_support(metadata.get("spell_support"))
+    if parsed.diagnostics or any(row.invalid for row in parsed.records):
+        raise SourceRepairError("The old item spell source needs manager repair.")
+    source_ids = {row.source_row_id for row in parsed.records if row.source_row_id}
+    source_ids.update(source_id for _, source_id, _, _ in parsed.source_declarations
+                      if source_id)
+    compatible = set()
+    for row in after.get("equipment_catalog") or []:
+        if isinstance(row, dict) and row.get("id") != target_id \
+                and row.get("systems_ref") == old_ref:
+            compatible.add(str(row.get("id") or ""))
+    if "" in compatible:
+        raise SourceRepairError("The surviving item owner identity needs manager repair.")
+    result = deepcopy(after)
+    for item in result.get("equipment_catalog") or []:
+        if isinstance(item, dict) and item.get("id") == target_id:
+            item["is_attuned"] = False
+            item["charges_current"] = None
+            item["charges_max"] = None
+    spellcasting = dict(result.get("spellcasting") or {})
+    kept = []
+    for raw in spellcasting.get("spells") or []:
+        if not isinstance(raw, dict):
+            kept.append(raw)
+            continue
+        row = dict(raw)
+        source_id = str(row.get("spell_source_row_id") or "").strip()
+        item_spell = (row.get("spell_grant_origin") == "item_effect"
+                      or row.get("spell_source_row_kind") == "item")
+        owners = row.get("item_owner_ids")
+        if not item_spell or (source_id not in source_ids
+                              and not (isinstance(owners, list) and target_id in owners)):
+            kept.append(row)
+            continue
+        if not isinstance(owners, list) or not owners:
+            raise SourceRepairError("Legacy item spell ownership needs manager repair.")
+        if any(owner != target_id and owner not in compatible for owner in owners):
+            raise SourceRepairError("Item spell owner identity needs manager repair.")
+        remaining = [owner for owner in owners if owner != target_id]
+        if remaining:
+            row["item_owner_ids"] = remaining
+            kept.append(row)
+    spellcasting["spells"] = kept
+    surviving_sources = {
+        str(row.get("spell_source_row_id") or "").strip()
+        for row in kept if isinstance(row, dict)
+        and isinstance(row.get("item_owner_ids"), list)
+        and set(row["item_owner_ids"]).intersection(compatible)
+    }
+    spellcasting["source_rows"] = [
+        row for row in spellcasting.get("source_rows") or []
+        if not isinstance(row, dict)
+        or str(row.get("source_row_id") or "").strip()
+        not in (source_ids - surviving_sources)
+    ]
+    result["spellcasting"] = spellcasting
+    retired_sources = source_ids - surviving_sources
+    if retired_sources:
+        source = dict(result.get("source") or {})
+        source["source_authorizations"] = [
+            marker for marker in source.get("source_authorizations") or []
+            if not (isinstance(marker, dict) and any(
+                str(marker.get("target_id") or "").startswith(
+                    f"spell_metric:source:{source_id}:")
+                for source_id in retired_sources))
+        ]
+        result["source"] = source
+    attacks = []
+    for raw in result.get("attacks") or []:
+        if not isinstance(raw, dict):
+            attacks.append(raw)
+            continue
+        attack = dict(raw)
+        refs = attack.get("equipment_refs", attack.get("equipment_ref"))
+        refs = list(refs) if isinstance(refs, (list, tuple)) else [refs] if refs else []
+        if target_id in refs:
+            refs = [ref for ref in refs if ref != target_id]
+            if not refs:
+                continue
+            attack["equipment_refs"] = refs
+            attack.pop("equipment_ref", None)
+        attacks.append(attack)
+    result["attacks"] = attacks
+    return result
+
+
+def _relinked_item_state(before: Mapping[str, Any], after: Mapping[str, Any],
+                         state: Mapping[str, Any], target_id: str) -> dict[str, Any]:
+    old_rows = [row for row in before.get("equipment_catalog") or []
+                if isinstance(row, dict) and row.get("id") == target_id]
+    new_rows = [row for row in after.get("equipment_catalog") or []
+                if isinstance(row, dict) and row.get("id") == target_id]
+    if len(old_rows) != 1 or len(new_rows) != 1:
+        raise SourceRepairError("The item owner identity needs manager repair.")
+    if old_rows[0].get("systems_ref") == new_rows[0].get("systems_ref"):
+        return deepcopy(dict(state))
+    result = deepcopy(dict(state))
+    matches = [row for row in result.get("inventory") or []
+               if isinstance(row, dict)
+               and str(row.get("catalog_ref") or row.get("id") or "").strip() == target_id]
+    if len(matches) != 1:
+        raise SourceRepairError("The item inventory identity needs manager repair.")
+    matches[0]["is_attuned"] = False
+    matches[0]["charges_current"] = None
+    matches[0]["charges_max"] = None
+    from .character_service import _normalize_attunement_state
+    result["attunement"] = _normalize_attunement_state(
+        result.get("attunement"), result.get("inventory") or [],
+    )
+    return result
 
 
 def _token_serializer() -> URLSafeTimedSerializer:
@@ -74,7 +229,10 @@ def _sources(dependencies: Any, campaign_slug: str, campaign: object) -> tuple[d
         family = "item" if kind == "item" else "spell" if kind == "spell" else "feature"
         choices.append({
             "family": family, "kind": "systems_entry", "value": key,
-            "label": str(getattr(entry, "title", "") or key)[:160],
+            "label": (str(getattr(entry, "title", "") or key)[:145]
+                      + (" — Needs repair" if kind == "item" and _malformed_item_spell_target({
+                          "family": family, "kind": "systems_entry", "record": entry,
+                      }) else "")),
             "record": entry,
             "visibility": get_effective_campaign_systems_entry_visibility(campaign_slug, slug),
         })
@@ -212,6 +370,84 @@ def _repair_is_verified(authority: object, candidate: Mapping[str, Any], family:
     return authority.spell_status(matching[0], definition=definition) == "VERIFIED"
 
 
+def _repair_link_review(before: Mapping[str, Any], after: Mapping[str, Any],
+                        family: str, target_id: str) -> dict[str, Any]:
+    previous = [row for row in _repair_rows_for_review(before, family)
+                if str(row.get("id") or "").strip() == target_id]
+    current = [row for row in _repair_rows_for_review(after, family)
+               if str(row.get("id") or "").strip() == target_id]
+    if len(previous) != 1 or len(current) != 1:
+        raise SourceRepairError("The Character target has no unique instance identity.")
+
+    def roles(row: Mapping[str, Any]) -> dict[str, str]:
+        systems = dict(row.get("systems_ref") or {})
+        page = row.get("page_ref")
+        if isinstance(page, dict):
+            page = page.get("page_ref") or page.get("slug") or page.get("page_slug")
+        return {
+            "systems": str(systems.get("entry_key") or systems.get("slug") or "").strip(),
+            "page": str(page or "").strip(),
+        }
+
+    old, new = roles(previous[0]), roles(current[0])
+    return {
+        "systems": new["systems"],
+        "page": new["page"],
+        "page_role": "Items context" if new["systems"] and new["page"] else "Items mechanics",
+        "changes": [
+            f"{label}: {old[key] or 'none'} → {new[key] or 'none'}"
+            for key, label in (("systems", "Systems mechanics link"), ("page", "Items page link"))
+            if old[key] != new[key]
+        ],
+    }
+
+
+def _repair_rows_for_review(definition: Mapping[str, Any], family: str) -> list[dict[str, Any]]:
+    if family == "item":
+        rows = definition.get("equipment_catalog") or []
+    elif family == "feature":
+        rows = definition.get("features") or []
+    else:
+        rows = dict(definition.get("spellcasting") or {}).get("spells") or []
+    return [dict(row) for row in rows if isinstance(row, Mapping)]
+
+
+def _repair_context_proof_digest(candidate: Mapping[str, Any], family: str,
+                                 target_id: str, *, connection: Any) -> str:
+    if family != "item":
+        return ""
+    rows = _repair_rows_for_review(candidate, family)
+    matching = [(index, row) for index, row in enumerate(rows)
+                if str(row.get("id") or "").strip() == target_id]
+    if len(matching) != 1:
+        raise SourceRepairError("The Character item identity changed.")
+    index, row = matching[0]
+    if not row.get("page_ref") or not row.get("systems_ref"):
+        return ""
+    from .committed_character_publication import (
+        _create_source_proof, _exact_page_link, _exact_systems_link,
+    )
+
+    owner = f"definition.equipment_catalog[{index}]"
+    try:
+        proof = _create_source_proof(
+            str(candidate.get("campaign_slug") or ""),
+            (_exact_page_link(row["page_ref"], owner + ".page_ref", "item_context"),),
+            (_exact_systems_link(row["systems_ref"], owner + ".systems_ref", "item"),),
+            connection=connection,
+        )
+    except CommittedSourceConflict as exc:
+        raise SourceRepairError("The Items context or Systems mechanics changed. Refresh and review again.") from exc
+    return canonical_digest({
+        "config_revision": proof.config_revision,
+        "current_session": proof.current_session,
+        "systems_token": proof.systems_token,
+        "library_slug": proof.library_slug,
+        "pages": proof.pages,
+        "entries": proof.entries,
+    })
+
+
 def _manual_targets(definition: Mapping[str, Any]) -> tuple[dict[str, str], ...]:
     spellcasting = definition.get("spellcasting") or {}
     if not isinstance(spellcasting, Mapping):
@@ -346,21 +582,48 @@ def _numeric_status_delta(before: object, after: object) -> list[dict[str, str]]
     return changed
 
 
-def _audit_seen(review_digest: str, campaign_slug: str, character_slug: str) -> bool:
+def _audit_outcome(review_digest: str, claims: dict[str, Any], record: Any,
+                   source_digest: str) -> tuple[bool, bool]:
+    """Distinguish a historical token from its exact current committed outcome."""
     rows = get_db().execute(
-        """SELECT metadata_json FROM auth_audit_log
+        """SELECT actor_user_id,metadata_json FROM auth_audit_log
            WHERE event_type = 'character_update_applied'
              AND campaign_slug = ? AND character_slug = ?""",
-        (campaign_slug, character_slug),
+        (claims["campaign"], claims["character"]),
     ).fetchall()
-    import json
+    matching = []
     for row in rows:
         try:
-            if json.loads(row["metadata_json"] or "{}").get("review_digest") == review_digest:
-                return True
+            metadata = json.loads(row["metadata_json"] or "{}")
+            if metadata.get("review_digest") == review_digest:
+                matching.append((row["actor_user_id"], metadata))
         except (TypeError, ValueError):
             continue
-    return False
+    if not matching:
+        return False, False
+    if len(matching) != 1:
+        return True, False
+    actor, metadata = matching[0]
+    action = claims.get("action")
+    expected_action = {"relink": "source_relink", "manual_authorize": "manual_authorize",
+                       "numeric_attest": "numeric_attest"}.get(action)
+    current = (
+        actor == claims.get("actor")
+        and metadata.get("source") == "character_source_repair"
+        and metadata.get("manager_action") == expected_action
+        and metadata.get("candidate_digest") == claims.get("candidate_digest")
+        and metadata.get("review_action") == action
+        and metadata.get("review_family") == claims.get("family")
+        and metadata.get("review_target_id") == claims.get("target_id")
+        and metadata.get("review_source") == claims.get("source")
+        and metadata.get("review_source_digest") == claims.get("source_digest")
+        and source_digest == claims.get("source_digest")
+        and metadata.get("published_revision") == record.committed_revision
+        and metadata.get("published_state_revision") == record.state_record.revision
+        and metadata.get("published_definition_digest") == canonical_digest(
+            record.definition.to_dict())
+    )
+    return True, current
 
 
 def register_character_source_repair_route(app: Any, *, dependencies: Any) -> None:
@@ -483,8 +746,9 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                     if not isinstance(claims, dict) or claims.get("v") != 1 or claims.get("actor") != actor_id or claims.get("campaign") != campaign_slug or claims.get("character") != character_slug:
                         raise SourceRepairError("Review is for a different manager or Character.")
                     digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
-                    if _audit_seen(digest, campaign_slug, character_slug):
-                        if canonical_digest(definition) != claims.get("candidate_digest"):
+                    applied, current = _audit_outcome(digest, claims, record, source_digest)
+                    if applied:
+                        if not current:
                             raise SourceRepairError("This reviewed action was applied, but the Character changed again. Refresh before another action.")
                         display_choices = tuple({"family": choice["family"], "value": _source_option(choice),
                                                  "label": choice["label"], "identity": choice["value"]} for choice in choices)
@@ -506,18 +770,26 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             or claims.get("source_digest") != source_digest):
                         raise SourceRepairError("Character or source changed. Refresh and review again.")
                     action = claims.get("action")
+                    transition_state = state
                     if action == "relink":
                         selected = [choice for choice in choices if _source_option(choice) == claims.get("source") and choice["family"] == claims.get("family")]
                         if len(selected) != 1:
                             raise SourceRepairError("The exact source is no longer eligible.")
                         choice = selected[0]
+                        _require_repairable_item_target(choice)
                         candidate = repair_definition(
                             definition, family=choice["family"], target_id=claims.get("target_id"),
                             source_kind=choice["kind"], source_value=choice["value"],
                             source_record=choice["record"], campaign_option=choice.get("option"),
+                            connection=get_db(),
                         )
+                        if choice["family"] == "item":
+                            candidate = _retire_relinked_item_claims(
+                                definition, candidate, claims["target_id"])
+                            transition_state = _relinked_item_state(
+                                definition, candidate, state, claims["target_id"])
                         before_authority = _authority(definition, state, dependencies, campaign_slug, campaign, witnesses, numeric_witnesses, state_revision=record.state_record.revision)
-                        after_authority = _authority(candidate, state, dependencies, campaign_slug, campaign, witnesses, numeric_witnesses, state_revision=record.state_record.revision)
+                        after_authority = _authority(candidate, transition_state, dependencies, campaign_slug, campaign, witnesses, numeric_witnesses, state_revision=record.state_record.revision)
                         if not _repair_is_verified(after_authority, candidate, choice["family"], claims["target_id"]):
                             raise SourceRepairError("The selected source needs attention and cannot be applied.")
                         expected_delta = _effect_delta(before_authority, after_authority)
@@ -559,6 +831,10 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                         raise SourceRepairError("Unsupported manager action.")
                     if canonical_digest(candidate) != claims.get("candidate_digest") or expected_delta != claims.get("effect_delta"):
                         raise SourceRepairError("The reviewed effects changed. Refresh and review again.")
+                    if action == "relink" and _repair_context_proof_digest(
+                            candidate, choice["family"], claims["target_id"],
+                            connection=get_db()) != claims.get("context_proof_digest", ""):
+                        raise SourceRepairError("The Items context changed. Refresh and review again.")
                     if _source_digest(_sources(dependencies, campaign_slug, campaign)) != source_digest:
                         raise SourceRepairError("Current source policy changed before apply. Refresh and review again.")
                     desired = CharacterDefinition.from_dict(candidate)
@@ -566,7 +842,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                     authority_provider = coordinator.numeric_authority_provider
                     if not callable(authority_provider):
                         raise SourceRepairError("Current Character source authority is unavailable.")
-                    reviewed_authority = authority_provider(record, desired)
+                    reviewed_authority = authority_provider(record, desired, transition_state)
                     if reviewed_authority is None:
                         raise SourceRepairError("Current Character source authority is unavailable.")
 
@@ -580,6 +856,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             if len(current_selected) != 1:
                                 raise SourceRepairError("The exact source is no longer eligible.")
                             current_choice = current_selected[0]
+                            _require_repairable_item_target(current_choice)
                             current_candidate = repair_definition(
                                 definition, family=current_choice["family"],
                                 target_id=claims["target_id"],
@@ -587,14 +864,22 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                 source_value=current_choice["value"],
                                 source_record=current_choice["record"],
                                 campaign_option=current_choice.get("option"),
+                                connection=get_db(),
                             )
+                            if current_choice["family"] == "item":
+                                current_candidate = _retire_relinked_item_claims(
+                                    definition, current_candidate, claims["target_id"])
+                                current_transition_state = _relinked_item_state(
+                                    definition, current_candidate, state, claims["target_id"])
+                            else:
+                                current_transition_state = state
                             current_before = _authority(
                                 definition, state, dependencies, campaign_slug, campaign,
                                 witnesses, numeric_witnesses,
                                 state_revision=record.state_record.revision,
                             )
                             current_after = _authority(
-                                current_candidate, state, dependencies, campaign_slug,
+                                current_candidate, current_transition_state, dependencies, campaign_slug,
                                 campaign, witnesses, numeric_witnesses,
                                 state_revision=record.state_record.revision,
                             )
@@ -602,6 +887,10 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                                        current_choice["family"], claims["target_id"]):
                                 raise SourceRepairError("The selected source is no longer verified.")
                             current_delta = _effect_delta(current_before, current_after)
+                            current_context_digest = _repair_context_proof_digest(
+                                current_candidate, current_choice["family"],
+                                claims["target_id"], connection=get_db(),
+                            )
                         elif action == "manual_authorize":
                             current_candidate = add_manual_authorization(definition, authorization)
                             current_delta = expected_delta
@@ -632,18 +921,20 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                              "statuses": _numeric_status_delta(current_before, current_after)}
                         return current_source_digest, canonical_digest({
                             "candidate": current_candidate, "effect_delta": current_delta,
+                            "context_proof_digest": current_context_digest if action == "relink" else "",
                         })
 
                     reviewed_basis = canonical_digest({
                         "candidate": candidate, "effect_delta": expected_delta,
+                        "context_proof_digest": claims.get("context_proof_digest", "") if action == "relink" else "",
                     })
                     reviewed_source_proof = PendingReviewedSourceProof.capture(
-                        record, desired, state, reviewed_authority,
+                        record, desired, transition_state, reviewed_authority,
                         source_digest=source_digest, policy_digest=reviewed_basis,
                         refresh_review_basis=refresh_review_basis,
                     )
                     result = dependencies.character_update_apply_engine.coordinator.update(
-                        record, desired, record.import_metadata, state,
+                        record, desired, record.import_metadata, transition_state,
                         expected_revision=record.state_record.revision,
                         updated_by_user_id=actor_id,
                         operation_kind="character_update_apply",
@@ -664,11 +955,29 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             "manual_actor_id": actor_id if audit_record else None,
                             "manual_authorized_at": claims.get("authorized_at") if audit_record else None,
                             "candidate_digest": claims["candidate_digest"],
+                            "review_action": action,
+                            "review_family": claims.get("family"),
+                            "review_target_id": claims.get("target_id"),
+                            "review_source": claims.get("source"),
+                            "review_source_digest": claims["source_digest"],
                         },
                         reviewed_source_proof=reviewed_source_proof,
                     )
-                    if (canonical_digest(result.definition.to_dict()) != claims["candidate_digest"]
-                            or not _audit_seen(digest, campaign_slug, character_slug)):
+                    published_candidate = result.definition.to_dict()
+                    if action == "relink" and claims.get("family") == "item":
+                        candidate_rows = [row for row in candidate.get("equipment_catalog") or []
+                                          if isinstance(row, dict) and row.get("id") == claims["target_id"]]
+                        published_rows = [row for row in published_candidate.get("equipment_catalog") or []
+                                          if isinstance(row, dict) and row.get("id") == claims["target_id"]]
+                        confirmed_candidate = (len(candidate_rows) == len(published_rows) == 1
+                                               and candidate_rows[0] == published_rows[0])
+                    else:
+                        confirmed_candidate = (canonical_digest(published_candidate)
+                                               == claims["candidate_digest"])
+                    _, confirmed_audit = _audit_outcome(
+                        digest, claims, result, source_digest,
+                    )
+                    if not confirmed_candidate or not confirmed_audit:
                         outcome = "The update outcome needs inspection before another action."
                         status_code = 503
                     else:
@@ -688,13 +997,22 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                         if len(selected) != 1:
                             raise SourceRepairError("Choose one exact current source.")
                         choice = selected[0]
+                        _require_repairable_item_target(choice)
                         candidate = repair_definition(
                             definition, family=family, target_id=target_id,
                             source_kind=choice["kind"], source_value=choice["value"],
                             source_record=choice["record"], campaign_option=choice.get("option"),
+                            connection=get_db(),
                         )
+                        if family == "item":
+                            candidate = _retire_relinked_item_claims(
+                                definition, candidate, target_id)
+                            reviewed_transition_state = _relinked_item_state(
+                                definition, candidate, state, target_id)
+                        else:
+                            reviewed_transition_state = state
                         before_authority = _authority(definition, state, dependencies, campaign_slug, campaign, witnesses, numeric_witnesses, state_revision=record.state_record.revision)
-                        after_authority = _authority(candidate, state, dependencies, campaign_slug, campaign, witnesses, numeric_witnesses, state_revision=record.state_record.revision)
+                        after_authority = _authority(candidate, reviewed_transition_state, dependencies, campaign_slug, campaign, witnesses, numeric_witnesses, state_revision=record.state_record.revision)
                         if not _repair_is_verified(after_authority, candidate, family, target_id):
                             raise SourceRepairError("The selected source has a conflict or remains unverified. Choose another exact source.")
                         delta = _effect_delta(before_authority, after_authority)
@@ -749,6 +1067,10 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                         raise SourceRepairError("Unsupported manager action.")
                     if canonical_digest(candidate) == canonical_digest(definition):
                         raise SourceRepairError("The selected action does not change the Character.")
+                    context_proof_digest = (
+                        _repair_context_proof_digest(candidate, family, target_id, connection=get_db())
+                        if action == "relink" else ""
+                    )
                     claims = {
                         "v": 1, "actor": actor_id, "campaign": campaign_slug, "character": character_slug,
                         "action": action, **extra,
@@ -759,11 +1081,14 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                         "source_digest": source_digest,
                         "candidate_digest": canonical_digest(candidate),
                         "effect_delta": delta,
+                        "context_proof_digest": context_proof_digest,
                     }
                     token = _token_serializer().dumps(claims)
                     if len(token.encode("utf-8")) > 8192:
                         raise SourceRepairError("Review is too large.")
                     review = {"summary": summary, "effects": delta, "token": token}
+                    if action == "relink" and family == "item":
+                        review["links"] = _repair_link_review(definition, candidate, family, target_id)
                 else:
                     abort(400)
             except HTTPException:

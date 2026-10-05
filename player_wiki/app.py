@@ -3062,10 +3062,10 @@ def create_app() -> Flask:
 
     character_state_service.authority_provider = current_character_numeric_authority
     character_publication_coordinator.numeric_authority_provider = (
-        lambda prior_record, candidate_definition: prospective_character_numeric_authority(
+        lambda prior_record, candidate_definition, prospective_state=None: prospective_character_numeric_authority(
             repository_store.get().get_campaign(candidate_definition.campaign_slug),
             candidate_definition,
-            prior_record.state_record.state,
+            prior_record.state_record.state if prospective_state is None else prospective_state,
             prior_record.state_record.revision,
         )
     )
@@ -5396,11 +5396,17 @@ def create_app() -> Flask:
                         campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
                     )
                 )
+            from .character_service import prospective_inventory_projection_state
+            prospective_state = prospective_inventory_projection_state(
+                record.definition, definition, record.state_record.state,
+                explicit_removed_item_id=dnd_removed_item_id,
+                inventory_quantity_overrides=inventory_quantity_overrides,
+            ) if is_dnd_5e_system(definition.system) else record.state_record.state
             merged_state = merge_state_with_definition(
                 definition,
                 record.state_record.state,
                 source_authority=prospective_character_numeric_authority(
-                    campaign, definition, record.state_record.state,
+                    campaign, definition, prospective_state,
                     record.state_record.revision,
                 ),
                 inventory_quantity_overrides=inventory_quantity_overrides,
@@ -5417,6 +5423,7 @@ def create_app() -> Flask:
                 updated_by_user_id=user.id,
                 operation_kind="interactive_update",
                 trusted_spell_choice_authoring=committed_mode and anchor == "character-spell-manager",
+                explicit_removed_item_id=dnd_removed_item_id,
             )
             if spell_choice_markers:
                 from .character_source_authority import build_reconciled_source_authority

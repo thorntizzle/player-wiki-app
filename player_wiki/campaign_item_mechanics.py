@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import json
 import re
 from functools import lru_cache
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .repository import normalize_lookup, slugify
+from .item_spell_support import SpellSupportRecord, parse_item_spell_support
 
 CAMPAIGN_ITEM_MECHANICS_VERSION = "2026-06-25"
 
@@ -208,14 +210,32 @@ def build_campaign_item_mechanics_metadata(
     page_metadata = _extract_supported_page_metadata(source_page_metadata)
     explicit_metadata = normalize_explicit_campaign_item_mechanics(explicit_mechanics)
 
+    normalized_review = normalize_campaign_item_review_status(review_status)
+    if normalized_review == CAMPAIGN_ITEM_REVIEW_APPROVED:
+        for label, contribution in (
+            ("body", interpreted_metadata),
+            ("published_page_metadata", page_metadata),
+            ("manual_review", explicit_metadata),
+        ):
+            if "spell_support" in contribution:
+                _strict_spell_records(contribution["spell_support"], origin=label)
     mechanics_metadata = _merge_item_metadata(interpreted_metadata, page_metadata)
     mechanics_metadata = _merge_item_metadata(mechanics_metadata, explicit_metadata)
+    if normalized_review == CAMPAIGN_ITEM_REVIEW_APPROVED:
+        _validate_inferred_reviewed_spell_claims(
+            interpreted_metadata.get("spell_support"),
+            page_metadata.get("spell_support"),
+            explicit_metadata.get("spell_support"),
+        )
+        if "spell_support" in mechanics_metadata:
+            mechanics_metadata["spell_support"] = _merge_fixed_spell_grants(
+                mechanics_metadata["spell_support"]
+            )
     for key in page_metadata:
         provenance.setdefault(key, {"source": "published_page_metadata"})
     for key in explicit_metadata:
         provenance[key] = {"source": "manual_review"}
 
-    normalized_review = normalize_campaign_item_review_status(review_status)
     support_state = _support_state_for_review(normalized_review, mechanics_metadata, flags)
     modeled_fields = [
         key
@@ -571,13 +591,21 @@ def _merge_item_metadata(base: dict[str, Any], extra: dict[str, Any] | None) -> 
             "attack_reminder_rules",
             "item_use_actions",
         }:
-            merged[key] = [
+            if key == "spell_support":
+                existing = merged.get(key)
+                combined = (existing if isinstance(existing, list) else [existing] if existing is not None else []) + (
+                    value if isinstance(value, list) else [value]
+                )
+                merged[key] = deepcopy(combined)
+                continue
+            combined = [
                 dict(item or {}) if isinstance(item, dict) else item
                 for item in list(merged.get(key) or [])
             ] + [
                 dict(item or {}) if isinstance(item, dict) else item
                 for item in list(value or [])
             ]
+            merged[key] = combined
             continue
         if key == "ability_score_minimums":
             merged[key] = {
@@ -587,6 +615,202 @@ def _merge_item_metadata(base: dict[str, Any], extra: dict[str, Any] | None) -> 
             continue
         merged[key] = deepcopy(value)
     return merged
+
+
+def _raise_spell_support_conflict(message: str) -> None:
+    from .systems_service import SystemsPolicyValidationError
+
+    raise SystemsPolicyValidationError(message)
+
+
+def _strict_spell_records(blocks: Any, *, origin: str) -> tuple[SpellSupportRecord, ...]:
+    parsed = parse_item_spell_support(blocks, strict=True, origin=origin)
+    if parsed.diagnostics or any(record.invalid for record in parsed.records):
+        _raise_spell_support_conflict("Item spell support needs review before approval.")
+    return parsed.records
+
+
+def _effective_spell_claim(
+    records: list[SpellSupportRecord], level: int
+) -> SpellSupportRecord | None:
+    eligible = [
+        record for record in records
+        if record.availability is None or record.availability <= level
+    ]
+    if not eligible:
+        return None
+    return max(eligible, key=lambda record: (-1 if record.availability is None else record.availability))
+
+
+def _independent_spell_claims_disagree(
+    inferred: SpellSupportRecord, reviewed: SpellSupportRecord
+) -> bool:
+    if (
+        inferred.access_type, inferred.access_uses, inferred.access_reset_on,
+        inferred.mark.casefold(), inferred.always_prepared, inferred.ritual,
+        inferred.bonus_known,
+    ) != (
+        reviewed.access_type, reviewed.access_uses, reviewed.access_reset_on,
+        reviewed.mark.casefold(), reviewed.always_prepared, reviewed.ritual,
+        reviewed.bonus_known,
+    ):
+        return True
+    for left, right in (
+        (inferred.source_ability_key, reviewed.source_ability_key),
+        (inferred.source_mode, reviewed.source_mode),
+        (inferred.spell_list_class_name, reviewed.spell_list_class_name),
+    ):
+        if left and right and left != right:
+            return True
+    inferred_details = dict(inferred.details)
+    reviewed_details = dict(reviewed.details)
+    return any(
+        inferred_details[key] != reviewed_details[key]
+        for key in inferred_details.keys() & reviewed_details.keys()
+    )
+
+
+def _validate_inferred_reviewed_spell_claims(
+    inferred: Any, page: Any, explicit: Any
+) -> None:
+    inferred_records = _strict_spell_records(inferred or [], origin="body")
+    for reviewed_records in (
+        _strict_spell_records(page or [], origin="published_page_metadata"),
+        _strict_spell_records(explicit or [], origin="manual_review"),
+    ):
+        for spell_key in {record.spell_key for record in inferred_records} & {
+            record.spell_key for record in reviewed_records
+        }:
+            body_claims = [record for record in inferred_records if record.spell_key == spell_key]
+            reviewed_claims = [record for record in reviewed_records if record.spell_key == spell_key]
+            levels = {0} | {
+                record.availability for record in (*body_claims, *reviewed_claims)
+                if record.availability is not None
+            }
+            for level in sorted(levels):
+                body = _effective_spell_claim(body_claims, level)
+                reviewed = _effective_spell_claim(reviewed_claims, level)
+                if body and reviewed and _independent_spell_claims_disagree(body, reviewed):
+                    _raise_spell_support_conflict(
+                        "Inferred and reviewed item spell claims disagree; reconcile before approval."
+                    )
+
+
+def _canonical_spell_block(record: SpellSupportRecord) -> dict[str, Any]:
+    source: dict[str, Any] = {}
+    for key, value in (
+        ("id", record.source_row_id),
+        ("kind", record.source_row_kind),
+        ("title", record.source_row_title),
+        ("ability_key", record.source_ability_key),
+        ("mode", record.source_mode),
+        ("spell_list_class_name", record.spell_list_class_name),
+        (
+            "grant_source_label",
+            record.grant_source_label
+            if record.grant_source_label != record.source_row_title else "",
+        ),
+    ):
+        if value:
+            source[key] = value
+    grant: dict[str, Any] = {"spell": record.spell_selector}
+    if record.mark:
+        grant["mark"] = record.mark
+    if record.always_prepared:
+        grant["always_prepared"] = True
+    if record.ritual:
+        grant["ritual"] = True
+    if record.bonus_known:
+        grant["bonus_known"] = True
+    if record.access_type:
+        grant["access_type"] = record.access_type
+        if record.access_type == "free_cast":
+            if record.access_uses:
+                grant["access_uses"] = record.access_uses
+            if record.access_reset_on:
+                grant["access_reset_on"] = record.access_reset_on
+    for key, encoded in record.details:
+        grant[key] = json.loads(encoded)
+    block: dict[str, Any] = {"grants": {"_" if record.availability is None else str(record.availability): [grant]}}
+    if source:
+        block["source"] = source
+    return block
+
+
+def _merge_fixed_spell_grants(blocks: list[Any]) -> list[Any]:
+    """Admit final assembled claims and collapse equivalent same-level leaves."""
+    records = _strict_spell_records(blocks, origin="assembled")
+    row_kinds: dict[str, str] = {}
+    row_behavior: dict[str, tuple[str, ...]] = {}
+    claims: dict[tuple[str, str, str, int | None], SpellSupportRecord] = {}
+    duplicates = False
+    for record in records:
+        if record.source_row_id:
+            prior_kind = row_kinds.setdefault(record.source_row_id, record.source_row_kind)
+            if prior_kind != record.source_row_kind:
+                _raise_spell_support_conflict("Conflicting item spell source kinds.")
+            behavior = (
+                record.source_row_title,
+                record.source_ability_key,
+                record.source_mode,
+                record.spell_list_class_name,
+                record.grant_source_label,
+            )
+            prior_behavior = row_behavior.setdefault(record.source_row_id, behavior)
+            if any(left and right and left != right for left, right in zip(prior_behavior, behavior)):
+                _raise_spell_support_conflict("Conflicting item spell source behavior.")
+            row_behavior[record.source_row_id] = tuple(
+                left or right for left, right in zip(prior_behavior, behavior)
+            )
+        key = (
+            record.source_row_kind,
+            record.source_row_id,
+            record.spell_key,
+            record.availability,
+        )
+        previous = claims.get(key)
+        if previous is None:
+            claims[key] = record
+            continue
+        if _independent_spell_claims_disagree(previous, record) or any(
+            left and right and left != right
+            for left, right in (
+                (previous.source_row_title, record.source_row_title),
+                (previous.grant_source_label, record.grant_source_label),
+            )
+        ):
+            _raise_spell_support_conflict("Conflicting item spell grants at one unlock level.")
+        duplicates = True
+        claims[key] = replace(
+            previous,
+            source_row_title=previous.source_row_title or record.source_row_title,
+            source_ability_key=previous.source_ability_key or record.source_ability_key,
+            source_mode=previous.source_mode or record.source_mode,
+            spell_list_class_name=previous.spell_list_class_name or record.spell_list_class_name,
+            grant_source_label=previous.grant_source_label or record.grant_source_label,
+            spell=min((previous.spell, record.spell), key=lambda value: (value.casefold(), value)),
+            spell_selector=min((previous.spell_selector, record.spell_selector), key=lambda value: (value.casefold(), value)),
+            details=tuple(sorted({**dict(previous.details), **dict(record.details)}.items())),
+        )
+    if not duplicates:
+        return blocks
+    preserved: list[Any] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        other = deepcopy(block)
+        other.pop("grants", None)
+        other.pop("fixed", None)
+        if set(other) - {"source", "spell_source", "spell_source_row_id", "spell_source_row_kind", "spell_source_row_title"}:
+            preserved.append(other)
+    ordered = sorted(
+        claims.values(),
+        key=lambda record: (
+            record.source_row_kind, record.source_row_id, record.spell_key,
+            -1 if record.availability is None else record.availability,
+        ),
+    )
+    return preserved + [_canonical_spell_block(record) for record in ordered]
 
 
 def _normalize_explicit_value(key: str, value: Any) -> Any:

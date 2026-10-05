@@ -31,6 +31,11 @@
       <section class="card" aria-labelledby="repair-review-heading">
         <h2 id="repair-review-heading">Review exact manager action</h2>
         <p>{{ review.summary }}</p>
+        {% if review.links is defined %}
+          <p>Systems mechanics: {{ review.links.systems or 'none' }}. {{ review.links.page_role }}: {{ review.links.page or 'none' }}.</p>
+          <h3>Exact link changes</h3>
+          {% if review.links.changes %}<ul>{% for change in review.links.changes %}<li>{{ change }}</li>{% endfor %}</ul>{% else %}<p>No source link changes.</p>{% endif %}
+        {% endif %}
         {% if review.effects.gained is defined %}
           <h3>Effective effects gained</h3>
           {% if review.effects.gained %}<ul>{% for effect in review.effects.gained %}<li>{{ effect }}</li>{% endfor %}</ul>{% else %}<p>None.</p>{% endif %}

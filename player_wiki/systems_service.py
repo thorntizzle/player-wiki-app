@@ -19,7 +19,12 @@ from .campaign_item_mechanics import (
     build_campaign_item_mechanics_metadata,
     campaign_item_character_metadata,
     campaign_item_review_for_metadata,
+    interpret_campaign_item_mechanics,
+    normalize_explicit_campaign_item_mechanics,
+    normalize_campaign_item_review_status,
+    _extract_supported_page_metadata,
 )
+from .item_spell_support import parse_item_spell_support
 from .combat_npc_resources import build_npc_resource_seeds_from_systems_entry
 from .mechanics_impact import (
     MechanicsImpactIdentity,
@@ -1237,6 +1242,16 @@ class SystemsService:
         if not body_markdown:
             raise SystemsPolicyValidationError("Published item pages need a body before they can be imported.")
 
+        previous = self._custom_campaign_item_entries_by_linked_page(campaign_slug).get(
+            str(getattr(page_record, "page_ref", "") or page_ref or "").strip()
+        )
+        self._validate_new_item_spell_support(
+            title=title, body_markdown=sanitize_rich_markdown(body_markdown).strip(),
+            explicit_mechanics=item_mechanics,
+            source_page_metadata=dict(getattr(page_record, "metadata", {}) or {}), previous=previous,
+            review_status=item_mechanics_review_status,
+        )
+
         source = self.ensure_campaign_custom_source(
             campaign_slug,
             actor_user_id=actor_user_id,
@@ -1312,6 +1327,17 @@ class SystemsService:
         actor_user_id: int,
         can_set_private: bool,
     ) -> SystemsEntryRecord:
+        if re.sub(r"[^a-z0-9_]+", "", str(entry_type or "").strip().lower()) == "item":
+            page = self._get_campaign_item_page_record(campaign_slug, source_page_ref) if source_page_ref else None
+            preflight_body = str(body_markdown or "").strip()
+            if not preflight_body and page is not None:
+                preflight_body = str(getattr(page, "body_markdown", "") or "").strip()
+            self._validate_new_item_spell_support(
+                title=title, body_markdown=sanitize_rich_markdown(preflight_body).strip(),
+                explicit_mechanics=item_mechanics,
+                source_page_metadata=dict(getattr(page, "metadata", {}) or {}) if page else {},
+                review_status=item_mechanics_review_status,
+            )
         source = self.ensure_campaign_custom_source(
             campaign_slug,
             actor_user_id=actor_user_id,
@@ -1593,6 +1619,17 @@ class SystemsService:
             raise SystemsPolicyValidationError("The shared/core Systems source is no longer available.")
         if self.is_campaign_custom_entry(campaign_slug, existing, source_state=source_state):
             raise SystemsPolicyValidationError("Campaign custom entries must use the custom entry editor.")
+        if str(existing.entry_type or "").strip().casefold() == "item":
+            self._validate_saved_item_spell_support(
+                dict(metadata or {}).get("spell_support"),
+                previous=dict(existing.metadata or {}).get("spell_support"),
+                origin="shared_metadata",
+            )
+            self._validate_saved_item_spell_support(
+                dict(body or {}).get("spell_support"),
+                previous=dict(existing.body or {}).get("spell_support"),
+                origin="shared_body",
+            )
 
         normalized_title = str(title or "").strip()
         if not normalized_title:
@@ -1738,14 +1775,48 @@ class SystemsService:
                 if linked_item_page is not None
                 else {}
             )
-            item_mechanics_metadata = build_campaign_item_mechanics_metadata(
-                title=normalized_title,
-                body_markdown=normalized_body_markdown,
-                explicit_mechanics=item_mechanics,
-                source_page_ref=normalized_source_page_ref,
-                source_page_metadata=source_page_metadata,
-                review_status=item_mechanics_review_status,
+            previous = self.store.get_entry(library.library_slug, entry_key)
+            self._validate_new_item_spell_support(
+                title=normalized_title, body_markdown=normalized_body_markdown,
+                explicit_mechanics=item_mechanics, source_page_metadata=source_page_metadata,
+                previous=previous, review_status=item_mechanics_review_status,
+            )
+            old_metadata = dict(getattr(previous, "metadata", {}) or {})
+            old_rule = old_metadata.get("spell_support")
+            draft_metadata = build_campaign_item_mechanics_metadata(
+                title=normalized_title, body_markdown=normalized_body_markdown,
+                explicit_mechanics=item_mechanics, source_page_ref=normalized_source_page_ref,
+                source_page_metadata=source_page_metadata, review_status="draft",
                 intake_mode="published_page" if normalized_source_page_ref else "direct",
+            )
+            old_invalid = bool(old_rule not in (None, "", [], {}) and
+                               parse_item_spell_support(old_rule).diagnostics)
+            if old_invalid and draft_metadata.get("spell_support") == old_rule:
+                item_mechanics_metadata = draft_metadata
+                item_mechanics_metadata["campaign_item_mechanics_review_status"] = (
+                    normalize_campaign_item_review_status(item_mechanics_review_status)
+                )
+                for key in ("campaign_item_mechanics_review_status",
+                            "campaign_item_mechanics_support_state"):
+                    if key in old_metadata:
+                        item_mechanics_metadata[key] = old_metadata[key]
+                review = dict(item_mechanics_metadata.get("campaign_item_mechanics") or {})
+                review["review_status"] = normalize_campaign_item_review_status(item_mechanics_review_status)
+                review["support_state"] = item_mechanics_metadata.get(
+                    "campaign_item_mechanics_support_state", review.get("support_state")
+                )
+                item_mechanics_metadata["campaign_item_mechanics"] = review
+            else:
+                item_mechanics_metadata = build_campaign_item_mechanics_metadata(
+                    title=normalized_title, body_markdown=normalized_body_markdown,
+                    explicit_mechanics=item_mechanics, source_page_ref=normalized_source_page_ref,
+                    source_page_metadata=source_page_metadata,
+                    review_status=item_mechanics_review_status,
+                    intake_mode="published_page" if normalized_source_page_ref else "direct",
+                )
+            self._validate_saved_item_spell_support(
+                item_mechanics_metadata.get("spell_support"),
+                previous=old_rule, origin="saved",
             )
             metadata.update(item_mechanics_metadata)
             body["item_mechanics"] = dict(item_mechanics_metadata.get("campaign_item_mechanics") or {})
@@ -1788,6 +1859,71 @@ class SystemsService:
         if refreshed_entry is None:
             raise RuntimeError("Failed to reload custom Systems entry.")
         return refreshed_entry
+
+    @staticmethod
+    def _validate_saved_item_spell_support(rule: object, *, previous: object = None,
+                                           origin: str) -> None:
+        if rule in (None, "", [], {}) or rule == previous:
+            return
+        parsed = parse_item_spell_support(rule, strict=True, origin=origin)
+        if parsed.diagnostics or any(record.invalid for record in parsed.records):
+            first = parsed.diagnostics[0] if parsed.diagnostics else None
+            location = f"{first.origin}.{first.field_path}" if first else origin
+            raise SystemsPolicyValidationError(
+                f"Item spell support needs repair at {location[:180]}."
+            )
+
+    @classmethod
+    def _validate_new_item_spell_support(
+        cls, *, title: str, body_markdown: str,
+        explicit_mechanics: dict[str, object] | None,
+        source_page_metadata: dict[str, object] | None,
+        previous: SystemsEntryRecord | None = None,
+        final_rule: object = None,
+        review_status: object = "draft",
+    ) -> None:
+        old = dict(getattr(previous, "metadata", {}) or {}).get("spell_support")
+        inferred, _, _ = interpret_campaign_item_mechanics(title=title, body_markdown=body_markdown)
+        page = _extract_supported_page_metadata(source_page_metadata)
+        manual = normalize_explicit_campaign_item_mechanics(explicit_mechanics)
+        for origin, contribution in (("body", inferred), ("published_page_metadata", page),
+                                     ("manual_review", manual)):
+            if "spell_support" in contribution:
+                cls._validate_saved_item_spell_support(
+                    contribution["spell_support"], previous=old, origin=origin,
+                )
+        preview = build_campaign_item_mechanics_metadata(
+            title=title, body_markdown=body_markdown,
+            explicit_mechanics=explicit_mechanics,
+            source_page_metadata=source_page_metadata, review_status="draft",
+        )
+        preview_rule = preview.get("spell_support")
+        old_invalid = bool(old not in (None, "", [], {}) and
+                           parse_item_spell_support(old).diagnostics)
+        old_status = str(dict(getattr(previous, "metadata", {}) or {}).get(
+            "campaign_item_mechanics_review_status") or "").strip()
+        if (old_invalid and preview_rule == old and old_status
+                and normalize_campaign_item_review_status(review_status) != old_status):
+            raise SystemsPolicyValidationError(
+                "Repair the saved item spell rule before changing its review status."
+            )
+        if not (old_invalid and preview_rule == old):
+            # The approved build checks cross-contribution behavior and
+            # duplicate claims even when the entry is being saved as draft.
+            final_preview = build_campaign_item_mechanics_metadata(
+                title=title, body_markdown=body_markdown,
+                explicit_mechanics=explicit_mechanics,
+                source_page_metadata=source_page_metadata, review_status="approved",
+            )
+            cls._validate_saved_item_spell_support(
+                final_preview.get("spell_support"), previous=old,
+                origin="assembled_preview",
+            )
+        cls._validate_saved_item_spell_support(
+            preview_rule, previous=old, origin="saved_preview",
+        )
+        if final_rule is not None:
+            cls._validate_saved_item_spell_support(final_rule, previous=old, origin="saved")
 
     def _stamp_xianxia_custom_entry_metadata(
         self,

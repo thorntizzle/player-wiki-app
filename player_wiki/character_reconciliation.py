@@ -537,6 +537,7 @@ class CharacterPublicationCoordinator:
         pending_numeric_authority: Any | None = None,
         reviewed_source_proof: PendingReviewedSourceProof | None = None,
         trusted_spell_choice_authoring: bool = False,
+        explicit_removed_item_id: str | None = None,
         reconcile_reimport_state: bool = False,
         reimport_source_authority: Any | None = None,
     ) -> CharacterRecord:
@@ -665,6 +666,7 @@ class CharacterPublicationCoordinator:
                 pending_numeric_authority=pending_numeric_authority,
                 reviewed_source_proof=reviewed_source_proof,
                 trusted_spell_choice_authoring=trusted_spell_choice_authoring,
+                explicit_removed_item_id=explicit_removed_item_id,
                 reconcile_reimport_state=reconcile_reimport_state,
                 reimport_source_authority=reimport_source_authority,
             )

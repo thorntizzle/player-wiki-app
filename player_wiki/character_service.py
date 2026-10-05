@@ -176,6 +176,84 @@ def _build_xianxia_initial_state(definition: CharacterDefinition) -> dict[str, A
     }
 
 
+def prospective_exact_item_removal_state(
+    prior_definition: CharacterDefinition,
+    definition: CharacterDefinition,
+    state: dict[str, Any],
+    item_id: str,
+) -> dict[str, Any]:
+    """Bind a structural removal to one old definition row and one state row."""
+    from .character_equipment_activation import analyze_activation
+
+    item_id = str(item_id or "").strip()
+    if not item_id or (
+        prior_definition.campaign_slug != definition.campaign_slug
+        or prior_definition.character_slug != definition.character_slug
+    ):
+        raise CharacterStateValidationError("Explicit equipment removal needs the prior Character identity.")
+    prior_analysis = analyze_activation(prior_definition, state)
+    if prior_analysis["blocked"]:
+        raise CharacterStateValidationError("Equipment identity needs manager repair before removal.")
+    prior_matches = [item for item in prior_definition.equipment_catalog
+                     if isinstance(item, dict) and not item.get("is_currency_only")
+                     and str(item.get("id") or "").strip() == item_id]
+    new_matches = [item for item in definition.equipment_catalog
+                   if isinstance(item, dict) and not item.get("is_currency_only")
+                   and str(item.get("id") or "").strip() == item_id]
+    exact_rows = [row for row in prior_analysis["rows"]
+                  if row["source"] == "sqlite" and row["status"] == "exact"
+                  and row["id"] == item_id]
+    if len(prior_matches) != 1 or new_matches or len(exact_rows) != 1:
+        raise CharacterStateValidationError(
+            "Removal requires one prior exact inventory ID that is absent from the new definition."
+        )
+    prospective = deepcopy(state)
+    del prospective["inventory"][exact_rows[0]["index"]]
+    return prospective
+
+
+def prospective_inventory_projection_state(
+    prior_definition: CharacterDefinition,
+    definition: CharacterDefinition,
+    state: dict[str, Any],
+    *,
+    explicit_removed_item_id: str | None = None,
+    inventory_quantity_overrides: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Give source projection the same physical inventory as the candidate."""
+    from .character_equipment_activation import activation_marker, analyze_activation
+
+    prospective = (
+        prospective_exact_item_removal_state(
+            prior_definition, definition, state, explicit_removed_item_id,
+        ) if explicit_removed_item_id else deepcopy(state)
+    )
+    analysis = analyze_activation(prior_definition, state)
+    if analysis["blocked"]:
+        raise CharacterStateValidationError("Equipment identity needs manager repair before publication.")
+    present_ids = {
+        _inventory_item_ref(row) for row in list(prospective.get("inventory") or [])
+        if isinstance(row, dict)
+    }
+    candidate_items = [row for row in list(definition.equipment_catalog or [])
+                       if isinstance(row, dict) and not row.get("is_currency_only")]
+    candidate_ids = [str(row.get("id") or "").strip() for row in candidate_items]
+    if not all(candidate_ids) or len(candidate_ids) != len(set(candidate_ids)):
+        raise CharacterStateValidationError("Equipment identity needs manager repair before publication.")
+    for item in candidate_items:
+        item_id = str(item["id"]).strip()
+        if item_id not in present_ids:
+            quantity = (inventory_quantity_overrides or {}).get(item_id)
+            prospective.setdefault("inventory", []).append(
+                build_inventory_state(item, quantity=quantity)
+            )
+    prospective["equipment_activation"] = activation_marker(definition)
+    prospective["attunement"] = _normalize_attunement_state(
+        prospective.get("attunement"), list(prospective.get("inventory") or []),
+    )
+    return prospective
+
+
 def merge_state_with_definition(
     definition: CharacterDefinition,
     state: dict[str, Any],
@@ -204,30 +282,11 @@ def merge_state_with_definition(
 
     from .character_equipment_activation import activation_marker, analyze_activation
     if explicit_removed_item_id:
-        item_id = str(explicit_removed_item_id).strip()
-        if not item_id or prior_definition is None or (
-            prior_definition.campaign_slug != definition.campaign_slug
-            or prior_definition.character_slug != definition.character_slug
-        ):
+        if prior_definition is None:
             raise CharacterStateValidationError("Explicit equipment removal needs the prior Character identity.")
-        prior_analysis = analyze_activation(prior_definition, state)
-        if prior_analysis["blocked"]:
-            raise CharacterStateValidationError("Equipment identity needs manager repair before removal.")
-        prior_matches = [item for item in prior_definition.equipment_catalog
-                         if isinstance(item, dict) and not item.get("is_currency_only")
-                         and str(item.get("id") or "").strip() == item_id]
-        new_matches = [item for item in definition.equipment_catalog
-                       if isinstance(item, dict) and not item.get("is_currency_only")
-                       and str(item.get("id") or "").strip() == item_id]
-        exact_rows = [row for row in prior_analysis["rows"]
-                      if row["source"] == "sqlite" and row["status"] == "exact"
-                      and row["id"] == item_id]
-        if len(prior_matches) != 1 or new_matches or len(exact_rows) != 1:
-            raise CharacterStateValidationError(
-                "Removal requires one prior exact inventory ID that is absent from the new definition."
-            )
-        state = deepcopy(state)
-        del state["inventory"][exact_rows[0]["index"]]
+        state = prospective_exact_item_removal_state(
+            prior_definition, definition, state, explicit_removed_item_id,
+        )
 
     activation_analysis = analyze_activation(definition, state)
     activation_issues = [row for row in activation_analysis["rows"]
@@ -255,6 +314,8 @@ def merge_state_with_definition(
         }
         payload = normalize_verified_hit_dice_state_payload(definition, payload, verified_faces)
     existing_resources = list(payload.get("resources") or [])
+    withheld_resources = set(dict(definition.source or {}).get(
+        "item_transition_withheld_resources") or [])
     removed_managed_resources = {
         str(resource_id).strip()
         for resource_id in set(removed_resource_ids or set())
@@ -271,6 +332,16 @@ def merge_state_with_definition(
     for template in definition.resource_templates:
         template_resource = build_resource_state(template)
         resource_id = str(template_resource.get("id") or "").strip()
+        if resource_id in withheld_resources:
+            existing_resource = existing_by_id.get(resource_id)
+            if existing_resource is not None:
+                withheld_row = deepcopy(existing_resource)
+                withheld_row["current"] = None
+                withheld_row["max"] = None
+                withheld_row["authority_status"] = "Needs repair"
+                merged_resources.append(withheld_row)
+            template_resource_ids.add(resource_id)
+            continue
         if source_authority is not None and not source_authority.resource_status("resource", resource_id).is_effective:
             merged_resources.extend(
                 deepcopy(row) for row in existing_resources
@@ -299,6 +370,13 @@ def merge_state_with_definition(
     for resource in existing_resources:
         resource_id = str(resource.get("id") or "").strip()
         if resource_id and resource_id in template_resource_ids:
+            continue
+        if resource_id in withheld_resources:
+            withheld_row = deepcopy(resource)
+            withheld_row["current"] = None
+            withheld_row["max"] = None
+            withheld_row["authority_status"] = "Needs repair"
+            merged_resources.append(withheld_row)
             continue
         if source_authority is not None and not source_authority.resource_status("resource", resource_id).is_effective:
             merged_resources.append(deepcopy(resource))
@@ -604,6 +682,8 @@ def validate_state(
     if source_authority is not None and not is_xianxia:
         if previous_state is None:
             raise CharacterStateValidationError("Previous state is required for guarded Character writes.")
+        withheld_ids = set(dict(definition.source or {}).get(
+            "item_transition_withheld_resources") or [])
         for family in ("resources", "spell_slots"):
             kind = "resource" if family == "resources" else "spell_slot"
             def unknown_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -611,15 +691,34 @@ def validate_state(
                 for row in rows:
                     stable_id = (str(row.get("id") or "").strip() if family == "resources"
                                  else f"{normalize_spell_slot_lane_id(row.get('slot_lane_id'))}:{int(row.get('level') or 0)}")
+                    if family == "resources" and stable_id in withheld_ids:
+                        continue
                     if not source_authority.resource_status(kind, stable_id).is_effective:
                         selected.append(row)
                 return selected
-            if unknown_rows(list(payload.get(family) or [])) != unknown_rows(list(previous_state.get(family) or [])):
+            prior_rows = list(previous_state.get(family) or [])
+            next_rows = list(payload.get(family) or [])
+            for resource_id in withheld_ids if family == "resources" else ():
+                prior_matches = [row for row in prior_rows if isinstance(row, dict)
+                                 and str(row.get("id") or "").strip() == resource_id]
+                next_matches = [row for row in next_rows if isinstance(row, dict)
+                                and str(row.get("id") or "").strip() == resource_id]
+                if len(prior_matches) != 1 or len(next_matches) != 1:
+                    raise CharacterStateValidationError("Withheld resource identity changed.")
+                expected = dict(prior_matches[0])
+                expected.update(current=None, max=None, authority_status="Needs repair")
+                if next_matches[0] != expected:
+                    raise CharacterStateValidationError("Withheld resource state changed.")
+            if unknown_rows(next_rows) != unknown_rows(prior_rows):
                 raise CharacterStateValidationError("An unverified Character pool changed during this write.")
 
     normalized_resources = []
     for resource in payload.get("resources") or []:
         resource_id = str(resource.get("id") or "").strip()
+        if resource_id in set(dict(definition.source or {}).get(
+                "item_transition_withheld_resources") or []):
+            normalized_resources.append(deepcopy(resource))
+            continue
         status = source_authority.resource_status("resource", resource_id) if source_authority is not None and not is_xianxia else None
         if status is not None and not status.is_effective:
             normalized_resources.append(deepcopy(resource))
@@ -689,6 +788,8 @@ def validate_state(
 
     normalized_inventory = []
     if source_authority is not None and not is_xianxia:
+        cleared_charges = set(dict(definition.source or {}).get(
+            "item_transition_cleared_charges") or [])
         prior_charges = {
             str(item.get("id") or "").strip(): (item.get("charges_current"), item.get("charges_max"))
             for item in list((previous_state or {}).get("inventory") or []) if isinstance(item, dict)
@@ -697,6 +798,12 @@ def validate_state(
             if not isinstance(item, dict):
                 continue
             item_id = str(item.get("id") or "").strip()
+            if item_id in cleared_charges:
+                if (sum(1 for row in payload.get("inventory") or []
+                        if isinstance(row, dict) and str(row.get("id") or "").strip() == item_id) != 1
+                        or (item.get("charges_current"), item.get("charges_max")) != (None, None)):
+                    raise CharacterStateValidationError("Relinked item charges changed.")
+                continue
             if source_authority.resource_status("item_charge", item_id).is_effective:
                 continue
             if (item.get("charges_current"), item.get("charges_max")) != prior_charges.get(item_id, (None, None)):

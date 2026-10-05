@@ -530,11 +530,14 @@ def build_effective_character_values(
         projected_definition.spellcasting = source_authority.annotate_spellcasting(
             dict(projected_definition.spellcasting or {}), definition=definition,
         )
+        if not source_authority.field_status("stats.armor_class").is_effective:
+            _ensure_scoped_catalogs()
     return {
         "definition": projected_definition,
         "state": projected_state,
         "projection_warnings": projection_warnings,
         "source_authority": source_authority,
+        "item_catalog": scoped_item_catalog,
     }
 
 
@@ -721,7 +724,9 @@ def build_character_mechanics_projection(
     )
 
     if source_authority is not None:
-        source_authority = source_authority.bind_projected_numbers(projected_definition)
+        source_authority = source_authority.bind_projected_numbers(
+            projected_definition, item_catalog=effective_values.get("item_catalog"),
+        )
         projected_definition = source_authority.suppress_unknown_numbers(projected_definition)
         suppressed_attacks = []
         for projected_attack in attack_visibility:
@@ -1012,7 +1017,13 @@ def project_attack_visibility(
             equipment_catalog_lookup=equipment_catalog_lookup,
         )
         hidden_reason = ""
-        if (
+        explicit_item_refs = normalize_attack_equipment_refs(attack_payload)
+        if explicit_item_refs and not any(
+            item_ref in inventory_lookup and item_ref in equipment_catalog_lookup
+            for item_ref in explicit_item_refs
+        ):
+            hidden_reason = "linked_item_missing"
+        elif (
             bool(arcane_armor_state.get("available"))
             and is_guardian_thunder_gauntlets_name(attack_name)
             and not bool(arcane_armor_state.get("thunder_gauntlets_available"))
