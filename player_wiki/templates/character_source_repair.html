@@ -23,14 +23,75 @@
     </header>
 
     {% if not blocked %}
+    <p><a href="{{ url_for('character_feature_class_association_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Repair a missing feature class association</a></p>
+    <p><a href="{{ url_for('character_managed_resource_restoration_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Restore a missing managed resource tracker</a></p>
     {% if outcome %}
-      <section class="callout" role="status"><p>{{ outcome }}</p></section>
+      <section class="callout" role="status">
+        <p>{{ outcome }}</p>
+        {% if activation_repair_required %}<a href="{{ url_for('character_equipment_activation_repair_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Review equipment activation repair</a>{% endif %}
+      </section>
     {% endif %}
 
     {% if review %}
       <section class="card" aria-labelledby="repair-review-heading">
         <h2 id="repair-review-heading">Review exact manager action</h2>
         <p>{{ review.summary }}</p>
+        {% if review.native is defined %}
+          <p>Complete prospective audit: {{ review.native.audit_bytes }} of 65,536 UTF-8 bytes. Apply rechecks the full sanitized payload and current publication revisions before writing.</p>
+          <h3>Retained native inputs and choices</h3>
+          <ul>{% for input in review.native.inputs %}<li>{{ input.target }}: {{ input.value }} (confirmed action {{ input.audit }}, generation {{ input.generation }}).</li>{% endfor %}</ul>
+          {% if review.native.background_tools %}<p>Current background instrument choices: {{ review.native.background_tools | join(', ') }}.</p>{% endif %}
+          {% if review.native.spell_origins is defined %}
+            {% if review.native.current_spells is defined %}
+              <h3>Confirmed current spell roles</h3>
+              {% if review.native.current_spell_mode == 'wizard' %}
+              <p>This checkpoint confirms current chosen cantrips and every ordinary leveled spell in the spellbook. Book membership is independent of preparation; copying has no progression maximum.</p>
+              {% else %}
+              <p>This checkpoint confirms current chosen cantrips and ordinary prepared or known selections. Other eligible prepared-class spells are class-list availability.</p>
+              {% endif %}
+              <p>It records no original learning dates or past spell selections. Automatic feature grants and item casting retain their separate origins.</p>
+              {% for role, label in [('cantrip', 'Chosen cantrips'), ('book', 'Ordinary spellbook spells'), ('known', 'Ordinary known spells'), ('prepared', 'Ordinary prepared spells'), ('available', 'Other observed class-list spells, currently unprepared'), ('automatic', 'Retained observations mapped to automatic feature grants'), ('item', 'Separate item spell access')] %}
+                {% set spells = review.native.current_spells | selectattr('role', 'equalto', role) | list %}
+                <h4>{{ label }} ({{ spells | length }})</h4>
+                <ul>{% for spell in spells %}<li>{{ spell.name }} ({{ spell.spell_id }}){% if role == 'book' %}: {% if spell.prepared %}prepared{% else %}unprepared{% endif %}{% endif %}</li>{% endfor %}</ul>
+              {% endfor %}
+              <p>Chosen cantrip, known, prepared and spellbook rows receive current active-choice metadata. Existing preparation marks and the entire play state remain unchanged.</p>
+            {% endif %}
+            <h3>Feature-grant migration and exact correction</h3>
+            <p>Proposed source-feature facts are separate from historical observations. Raw spell flags, preparation marks, base facts and unknown fields remain preserved. An automatic grant does not assert a historical player selection.</p>
+            <ul>{% for origin in review.native.spell_origins.automatic %}
+                {% if review.native.spell_origins.schema_version in [2, 3, 4] %}
+              <li><strong>{{ origin.spell_id }}</strong> ({{ origin.class_row_id }}): {% if origin.correction_target %}selected correction target; {% endif %}proposed mapping to {{ origin.grant_ids | join(', ') }}. Historical origin remains UNKNOWN; the exact raw observation is retained ({{ origin.unresolved_observation_digest }}).</li>
+              {% else %}
+              <li><strong>{{ origin.spell_id }}</strong> ({{ origin.class_row_id }}): always prepared {{ origin.before_flags.is_always_prepared }} to {{ origin.after_flags.is_always_prepared }}; bonus known {{ origin.before_flags.is_bonus_known }} to {{ origin.after_flags.is_bonus_known }}. Current owners: {{ origin.owners | join(', ') }}.</li>
+              {% endif %}
+            {% endfor %}{% for removal in review.native.spell_origins.removed %}
+                {% if removal.reason == 'player_confirmed_item_only_book_observation' %}
+                  <li>Correct the erroneous book observation <strong>{{ removal.spell_id }}</strong> ({{ removal.class_row_id }}). The player confirmed this spell belongs only to item grant <strong>{{ removal.item_spell_id }}</strong>, which stays preserved. Evidence: {{ removal.evidence_note }}. The original book observation stays recoverable in generation {{ review.native.spell_origins.prior_generation }}.</li>
+                {% else %}
+                  <li>Remove <strong>{{ removal.spell_id }}</strong> ({{ removal.class_row_id }}), separately confirmed as unsupported and unlinked. Its original row remains recoverable in generation {{ review.native.spell_origins.prior_generation }}.</li>
+                {% endif %}
+            {% endfor %}</ul>
+            {% if review.native.feature_grants is defined %}
+              <h3>Proposed source-supported grant occurrences ({{ review.native.feature_grants | length }})</h3>
+              <ul>{% for grant in review.native.feature_grants %}
+                <li>{{ grant.spell }}: owner {{ grant.owner_id }}, rule {{ grant.rule_id }}, leaf {{ grant.leaf_id }} ({{ grant.id }}). {% if grant.status == 'DRAFT' %}Source-supported proposal.{% else %}UNKNOWN: {{ grant.reason }}.{% endif %}
+                  {% for metric in ['always_prepared', 'bonus_known', 'ritual', 'counts_against_prepared', 'counts_against_known'] %}
+                    {{ metric | replace('_', ' ') }}: {% if metric in grant.contributions %}{{ grant.contributions[metric] }} for this grant{% else %}UNKNOWN{% endif %}{% if not loop.last %}; {% endif %}
+                  {% endfor %}
+                </li>
+              {% endfor %}</ul>
+              <p>A positive grant can be adopted while another historical origin remains UNKNOWN. A false contribution belongs only to that grant. Existing class slot pools and spent counts are unchanged; no usage pool is copied or split.</p>
+              <p>Proposed grants become effective only after the saved result is independently confirmed. Unresolved source or choice facts remain UNKNOWN.</p>
+            {% endif %}
+          {% endif %}
+          <h3>Resource capacities and preserved counts</h3>
+          <ul>{% for resource in review.native.capacities %}<li>{{ resource.label }}: maximum {{ resource.before }} → {{ resource.after }}; current {{ resource.current }} remains unchanged.</li>{% endfor %}</ul>
+          <details><summary>Current source ownership</summary>
+            <p>Prior native source proof: {{ review.native.prior_source }}. Current source proof: {{ review.native.current_source }}. Current source changes are revalidated; prior approval is retained as history.</p>
+            <ul>{% for source in review.native.sources %}<li>{{ source }}</li>{% endfor %}</ul>
+          </details>
+        {% endif %}
         {% if review.links is defined %}
           <p>Systems mechanics: {{ review.links.systems or 'none' }}. {{ review.links.page_role }}: {{ review.links.page or 'none' }}.</p>
           <h3>Exact link changes</h3>
@@ -52,7 +113,7 @@
         {% else %}
           <p>This action will mark only the selected spell or source-row metric as manager-authorized MANUAL. It does not add automatic source effects.</p>
         {% endif %}
-        <p>Character state remains at its current revision. Applying requires this exact definition, state, and source catalog.</p>
+        <p>{% if review.native is defined %}Current resource counts stay preserved; reviewed capacities may change.{% else %}Character state remains at its current revision.{% endif %} Applying requires this exact definition, state, and source catalog.</p>
         <form method="post">
           {{ csrf_input() }}
           <input type="hidden" name="review_token" value="{{ review.token }}">
@@ -100,6 +161,50 @@
           <div class="field"><label for="manual-target">Target</label><select id="manual-target" name="target_id" required><option value="">Choose a target</option>{% for target in manual_targets %}<option value="{{ target.id }}">{{ target.kind }}: {{ target.label }} ({{ target.id }})</option>{% endfor %}</select></div>
           <div class="field"><label for="manual-metric">Metric</label><select id="manual-metric" name="metric">{% for metric in metrics %}<option value="{{ metric }}">{{ metric | replace('_', ' ') }}</option>{% endfor %}</select></div>
           <button type="submit" name="intent" value="review">Preview manual authorization</button>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="skill-correction-heading">
+        <h2 id="skill-correction-heading">Correct one skill choice</h2>
+        <p>Confirm the intended proficiency level for one existing skill. Review recalculates its bonus from current qualified abilities, proficiency bonus, and source effects. Investigation, Insight, and Perception also update their dependent passive score. Other choices and play state are preserved.</p>
+        <form method="post">
+          {{ csrf_input() }}
+          <input type="hidden" name="action" value="numeric_attest">
+          <input type="hidden" name="target_kind" value="proficiency">
+          <input type="hidden" name="metric" value="grant">
+          <div class="field"><label for="skill-correction-target">Existing skill</label><select id="skill-correction-target" name="target_id" required><option value="">Choose a skill</option>{% for target in numeric_targets %}{% if target.kind == 'proficiency' and target.id.startswith('skills.') %}<option value="{{ target.id }}">{{ target.id }}</option>{% endif %}{% endfor %}</select></div>
+          <div class="field"><label for="skill-correction-level">Confirmed proficiency level</label><select id="skill-correction-level" name="confirmed_skill_level" required><option value="">Choose a level</option><option value="none">None</option><option value="half_proficient">Half proficient</option><option value="proficient">Proficient</option><option value="expertise">Expertise</option></select></div>
+          <div class="field"><label><input type="checkbox" name="confirm_value" value="yes" required> I independently checked this skill choice against the Character's intended progression.</label></div>
+          <button type="submit" name="intent" value="review">Review skill correction</button>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="native-currentness-heading">
+        <h2 id="native-currentness-heading">Revalidate native progression</h2>
+        <p>Review confirmed native ability inputs, progression and proficiency choices against the currently available sources. Current values are derived again; spent resources and inventory stay preserved. Missing or disputed history must be repaired separately.</p>
+        <form method="post">
+          {{ csrf_input() }}
+          <input type="hidden" name="action" value="native_requalify">
+          <div class="field"><label><input type="checkbox" name="confirm_value" value="yes" required> Review retained native choices and current source entitlement.</label></div>
+          <details>
+            <summary>Migrate feature spell grants on a reconstructed native Character</summary>
+            <p>Review the complete attained feature-grant definitions while correcting selected existing spell rows. Current grants retain distinct feature owners. Historical flags and unknown origins stay preserved as observations. Enter the correction target IDs separated by commas. An unsupported unlinked row requires separate removal confirmation.</p>
+            <div class="field"><label><input type="checkbox" name="spell_origin_mode" value="yes"> Include an explicit feature-grant migration and correction plan.</label></div>
+            <div class="field"><label><input type="checkbox" name="confirm_current_spells" value="yes"> Confirm current cantrips and ordinary prepared, known or spellbook spells while migrating feature grants.</label></div>
+            <p>For a Wizard, confirm all current spellbook memberships and their separate preparations. For a prepared caster, confirm current preparation and other eligible class-list observations. For a known caster, confirm current known selections. Feature grants and item spells stay separate. Correction and removal IDs may both stay empty when confirming this complete checkpoint. The next screen shows every role before Apply.</p>
+            <div class="field"><label for="automatic-spell-ids">Existing spell IDs in the correction subset</label><input id="automatic-spell-ids" name="automatic_spell_ids" maxlength="2200" placeholder="Exact spell IDs, separated by commas"></div>
+            <details><summary>Existing spell IDs</summary><ul>{% for spell in character.spellcasting.spells %}<li>{{ spell.name }}: {{ spell.id }}</li>{% endfor %}</ul></details>
+            <div class="field"><label for="remove-spell-id">Unsupported unlinked spell to remove</label><select id="remove-spell-id" name="remove_spell_id"><option value="">Keep all rows</option>{% for spell in character.spellcasting.spells %}{% if spell.class_row_id and not spell.systems_ref and not spell.page_ref and not spell.spell_source_row_id %}<option value="{{ spell.id }}">{{ spell.name }} ({{ spell.id }})</option>{% endif %}{% endfor %}</select></div>
+            <details><summary>Correct an erroneous item-only spellbook observation</summary>
+              <p>Use only when the player confirms an unprepared Wizard book entry was an import mistake and the spell comes solely from its separate item grant. This requires complete current-spell confirmation. Keep the unsupported-removal and automatic-correction targets empty. Existing confirmed class choices and feature grants cannot use this correction.</p>
+              <div class="field"><label for="item-only-spell-id">Erroneous ordinary book observation</label><select id="item-only-spell-id" name="item_only_spell_id"><option value="">No item-only correction</option>{% for spell in character.spellcasting.spells %}{% if spell.class_row_id and spell.systems_ref and not spell.spell_source_row_id %}<option value="{{ spell.id }}">{{ spell.name }} ({{ spell.id }})</option>{% endif %}{% endfor %}</select></div>
+              <div class="field"><label for="item-only-grant-id">Separate item spell grant to preserve</label><select id="item-only-grant-id" name="item_only_grant_id"><option value="">Choose the exact item grant</option>{% for spell in character.spellcasting.spells %}{% if spell.spell_source_row_id and spell.spell_source_row_kind == 'item' %}<option value="{{ spell.id }}">{{ spell.name }} ({{ spell.id }})</option>{% endif %}{% endfor %}</select></div>
+              <div class="field"><label for="item-only-evidence">Player clarification supporting the correction</label><textarea id="item-only-evidence" name="item_only_evidence" maxlength="1000"></textarea></div>
+              <div class="field"><label><input type="checkbox" name="confirm_item_only" value="yes"> The player confirmed the selected spell was never in the spellbook and comes only from the separate item grant.</label></div>
+            </details>
+            <div class="field"><label><input type="checkbox" name="confirm_spell_removal" value="yes"> I independently confirmed removal of the selected unsupported row or erroneous item-only book observation.</label></div>
+          </details>
+          <button type="submit" name="intent" value="review">Review native progression</button>
         </form>
       </section>
 

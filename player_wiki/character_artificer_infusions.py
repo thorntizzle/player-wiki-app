@@ -159,7 +159,11 @@ def artificer_infusion_effect_key(infusion_key: Any) -> str:
     return ""
 
 
-def known_artificer_infusions(definition: Any) -> list[dict[str, Any]]:
+def known_artificer_infusions(definition: Any, *, state=None, authority=None, systems_service=None) -> list[dict[str, Any]]:
+    from .character_infusion_recipes import typed_mode, view
+    from .character_feature_history import declared_ids, RECIPES
+    if typed_mode(definition) or declared_ids(definition, relation=RECIPES):
+        return view(definition, state, authority, systems_service)["known"]
     features = [dict(feature or {}) for feature in list(getattr(definition, "features", []) or [])]
     parent_ids = {
         str(feature.get("id") or "").strip()
@@ -200,6 +204,11 @@ def known_artificer_infusions(definition: Any) -> list[dict[str, Any]]:
 
 
 def has_artificer_infusion_feature(definition: Any) -> bool:
+    from .character_infusion_recipes import typed_mode
+    from .character_feature_history import declared_ids, RECIPES
+    if typed_mode(definition) or declared_ids(definition, relation=RECIPES):
+        # Legacy presence is an assignment permission shortcut, not knowledge.
+        return False
     return any(
         not blocks_page_companion_heuristics(dict(feature or {})) and
         normalize_lookup(dict(feature or {}).get("name")) == ARTIFICER_INFUSIONS_FEATURE_KEY

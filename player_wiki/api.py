@@ -2054,6 +2054,7 @@ def register_api(app) -> None:
         }
 
     def serialize_custom_systems_entry(campaign_slug: str, entry) -> dict[str, Any]:
+        from .systems_spell_authoring import spell_profile_for_editor
         systems_service = current_app.extensions["systems_service"]
         override = systems_service.store.get_campaign_entry_override(campaign_slug, entry.entry_key)
         is_archived = bool(override is not None and override.is_enabled_override is False)
@@ -2079,6 +2080,8 @@ def register_api(app) -> None:
             "provenance": str(metadata.get("provenance") or entry.source_path or ""),
             "search_metadata": str(metadata.get("search_metadata") or ""),
             "body_markdown": str(body.get("markdown") or metadata.get("body_markdown") or ""),
+            "spell_profile": spell_profile_for_editor(entry),
+            "spell_higher_level_markdown": str(metadata.get("spell_higher_level_markdown") or ""),
             "linked_published_page_ref": linked_published_page_ref,
             "source_page_ref": linked_published_page_ref,
             "item_mechanics": item_mechanics_review,
@@ -3043,6 +3046,8 @@ def register_api(app) -> None:
         *,
         form_values: dict[str, str] | None = None,
     ) -> tuple[dict[str, Any], list[object], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+        from .character_service import current_inventory_note_values
+
         level_up_readiness = native_level_up_readiness(
             current_app.extensions["systems_service"],
             campaign_slug,
@@ -3079,9 +3084,11 @@ def register_api(app) -> None:
             campaign_page_records=campaign_page_records,
             form_values=form_values,
             state_notes=dict((record.state_record.state or {}).get("notes") or {}),
+            inventory_notes=current_inventory_note_values(record.definition, record.state_record.state or {}),
             optionalfeature_catalog=optionalfeature_catalog,
             spell_catalog=spell_catalog,
             item_catalog=item_catalog,
+            systems_service=current_app.extensions["systems_service"],
             linked_feature_authoring_support=linked_feature_authoring,
         )
         edit_context["state_revision"] = record.state_record.revision
@@ -3270,6 +3277,7 @@ def register_api(app) -> None:
             optionalfeature_catalog=optionalfeature_catalog,
             spell_catalog=spell_catalog,
             item_catalog=item_catalog,
+            systems_service=current_app.extensions["systems_service"],
         )
         retraining_context["state_revision"] = record.state_record.revision
         return retraining_context, campaign_page_records, optionalfeature_catalog, spell_catalog, item_catalog
@@ -3525,6 +3533,7 @@ def register_api(app) -> None:
             "subclass_options",
             "requires_subclass",
             "choice_sections",
+            "restored_resource_fields",
             "limitations",
             "preview",
             "field_live_preview",
@@ -3540,12 +3549,19 @@ def register_api(app) -> None:
         *,
         form_values: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        from .committed_publication import active
+        from .character_source_repair import load_verified_manual_actions, load_verified_numeric_actions
         level_up_context = build_native_level_up_context(
             current_app.extensions["systems_service"],
             campaign_slug,
             record.definition,
             form_values or {},
             campaign_page_records=list_builder_campaign_page_records(campaign_slug, campaign),
+            state=record.state_record.state or {},
+            state_revision=record.state_record.revision,
+            authority_page_records=list_visible_character_page_records(campaign_slug, campaign),
+            verified_manual_actions=(load_verified_manual_actions(campaign_slug, record.definition.character_slug) if active() else ()),
+            verified_numeric_actions=(load_verified_numeric_actions(campaign_slug, record.definition.character_slug) if active() else ()),
         )
         level_up_context["state_revision"] = record.state_record.revision
         return level_up_context
@@ -4306,6 +4322,7 @@ def register_api(app) -> None:
                 "campaign": campaign,
                 "systems_service": current_app.extensions["systems_service"],
                 "campaign_page_records": page_context[1],
+                "use_source_phases": request.method in {"GET", "HEAD"},
             }
         presented = present_character_roster(
             [record], **context,
@@ -4387,11 +4404,20 @@ def register_api(app) -> None:
         *,
         inventory_lookup: dict[str, dict[str, Any]],
         support_lookup: dict[str, dict[str, Any]],
+        recipe_view: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         artificer_level = artificer_level_from_definition(record.definition)
         known_capacity = artificer_infusion_known_capacity(artificer_level)
         active_capacity = artificer_infusion_active_capacity(artificer_level)
         known_infusions = known_artificer_infusions(record.definition)
+        from .character_infusion_recipes import typed_mode
+        typed = typed_mode(record.definition)
+        if typed:
+            recipe_view = recipe_view or {}
+            known_infusions = list(recipe_view.get("known", [])) if recipe_view.get("available") else []
+            artificer_level = recipe_view.get("class_level")
+            known_capacity = recipe_view.get("known_capacity")
+            active_capacity = recipe_view.get("active_capacity")
         known_by_key = {str(entry.get("infusion_key") or "").strip(): dict(entry) for entry in known_infusions}
         has_feature = has_artificer_infusion_feature(record.definition)
         active_rows: list[dict[str, Any]] = []
@@ -4447,17 +4473,20 @@ def register_api(app) -> None:
                         "automated" if infusion_key == ENHANCED_DEFENSE_INFUSION_KEY else "note_only"
                     ),
                     "effect_summary": (
+                        "Known recipe only; active assignments require separate supported reconciliation." if typed else
                         "Adds +1 Armor Class to the targeted armor or shield while equipped."
                         if infusion_key == ENHANCED_DEFENSE_INFUSION_KEY
                         else "Can be tracked as active; no automated effect is applied yet."
                     ),
                     "selected_target_item_ref": active_target_by_key.get(infusion_key, ""),
-                    "target_options": target_options,
+                    "target_options": [] if typed else target_options,
                 }
             )
 
         return {
-            "available": bool((known_payloads or has_feature) and active_capacity),
+            "available": False if typed else bool((known_payloads or has_feature) and active_capacity),
+            "knowledge_status": ("verified" if recipe_view.get("available") else "unavailable") if typed else "legacy_observation",
+            "assignment_status": "historical_observations" if typed else "legacy_tracking",
             "artificer_level": artificer_level,
             "known_capacity": known_capacity,
             "known_count": len(known_payloads),
@@ -4483,6 +4512,8 @@ def register_api(app) -> None:
         *,
         campaign=None,
         campaign_page_records: list[object] | None = None,
+        presented_armor_state: dict[str, Any] | None = None,
+        presented_recipe_view: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         resolved_campaign = campaign or get_repository().get_campaign(campaign_slug)
         resolved_campaign_page_records = (
@@ -4595,16 +4626,25 @@ def register_api(app) -> None:
         max_attuned_items = int((state.get("attunement") or {}).get("max_attuned_items") or 3)
         attuned_count = sum(1 for item in equipment_items if bool(item.get("is_attuned")))
         equipped_count = sum(1 for item in equipment_items if bool(item.get("is_equipped")))
-        arcane_armor_state = present_arcane_armor_state(
-            record.definition,
-            state,
-            inventory_lookup=inventory_lookup,
-            equipment_catalog_lookup=definition_item_lookup,
-        )
+        if presented_armor_state is not None:
+            # Full serialization already projected this exact record below.
+            arcane_armor_state = dict(presented_armor_state)
+        else:
+            armor_projection = build_character_mechanics_projection(
+                campaign=resolved_campaign, definition=record.definition, state=state,
+                state_revision=record.state_record.revision, systems_service=systems_service,
+                campaign_page_records=resolved_campaign_page_records,
+                components=frozenset({"arcane_armor", "divine_avatar", "equipment", "inventory"}),
+                catalog_components=frozenset(),
+                derivation_components=frozenset({"item_ability_minimums"}),
+            ) if resolved_campaign is not None else {}
+            arcane_armor_state = dict(armor_projection.get("arcane_armor_state") or {})
+            presented_recipe_view = dict(armor_projection.get("artificer_recipe_view") or {})
         artificer_infusions_state = build_artificer_infusions_state_payload(
             record,
             inventory_lookup=inventory_lookup,
             support_lookup=support_lookup,
+            recipe_view=presented_recipe_view,
         )
         return {
             "rows": equipment_items,
@@ -4657,6 +4697,8 @@ def register_api(app) -> None:
             record,
             campaign=campaign,
             campaign_page_records=campaign_page_records,
+            presented_armor_state=dict(presented_character.get("arcane_armor_state") or {}),
+            presented_recipe_view=dict(presented_character.get("artificer_recipe_view") or {}),
         )
         return {
             "definition": definition_payload,
@@ -7079,6 +7121,7 @@ def register_api(app) -> None:
     register_character_inventory_api_route(
         api,
         dependencies=CharacterInventoryApiDependencies(
+            can_manage_campaign_content=can_manage_campaign_content,
             api_login_required=api_login_required,
             run_character_mutation=run_character_mutation,
             is_xianxia_system=lambda *args, **kwargs: is_xianxia_system(
@@ -7262,6 +7305,13 @@ def register_api(app) -> None:
             build_shared_equipment_state_update_result=build_api_equipment_state_update,
         ),
     )
+
+    from .character_artificer_assignment_routes import register_assignment_api
+    register_assignment_api(api, login_required=api_login_required,
+        load_character_record=load_character_record, has_session_mode_access=has_session_mode_access,
+        get_character_state_service=get_character_state_service,
+        present_assignment_read=lambda record: current_app.extensions["character_assignment_read_projection"](record),
+        run_character_mutation=run_character_mutation, json_error=json_error)
 
     register_character_artificer_infusions_api_route(
         api,

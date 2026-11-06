@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from .character_source_reads import source_active, phase_of, builder_source_reader
+from .db import SourceReadConnectionFatal
+
 from collections import OrderedDict
 from copy import deepcopy
 import hashlib
@@ -56,12 +59,13 @@ from .character_builder_constants import (
     CHARACTER_BUILDER_VERSION,
 )
 from .character_models import CharacterDefinition
-from .character_service import merge_state_with_definition
+from .character_hp_recipe import HitPointRecipeError
+from .character_service import merge_state_with_definition, project_legacy_read_state
 from .character_equipment_activation import effective_definition, suppress_unresolved_linked_sources
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
 from .models import Campaign
 from .repository import normalize_lookup
-from .system_policy import is_xianxia_system
+from .system_policy import is_dnd_5e_system, is_xianxia_system
 from .xianxia_character_model import (
     XIANXIA_DEFENSE_BASE,
     XIANXIA_EFFORT_KEYS,
@@ -74,6 +78,172 @@ from .xianxia_character_model import (
     derive_xianxia_honor_interaction_reminders,
 )
 from .xianxia_systems_seed import XIANXIA_HOMEBREW_SOURCE_ID
+
+
+_PROJECTION_FAILURE_MODULES = frozenset({
+    "character_mechanics_projection", "character_service",
+    "character_equipment_activation", "character_builder",
+    "character_builder_derivation", "character_builder_progression",
+    "character_builder_catalogs", "character_builder_equipment",
+    "character_builder_features", "character_builder_spells",
+    "character_ability_inputs", "character_source_authority",
+    "character_hit_dice", "character_spell_slots", "character_models",
+    "character_hp_recipe", "systems_service", "systems_store",
+})
+
+
+def _projection_failure_word(value: Any, limit: int) -> bool:
+    return (type(value) is str and 0 < len(value) <= limit
+            and all(c.isascii() and (c.isalnum() or c in "._<>") for c in value))
+
+
+def _snapshot_projection_exception(error: BaseException) -> tuple:
+    """Detach bounded source metadata before suppression; never format errors.
+
+    All objects used during inspection are local. Only immutable strings/ints
+    and tuples escape; no exception, traceback, frame, value or absolute path.
+    """
+    try:
+        package = __file__.replace("\\", "/").rsplit("/", 1)[0]
+        approved = {
+            (package + "/" + module + ".py").casefold(): "player_wiki/" + module + ".py"
+            for module in _PROJECTION_FAILURE_MODULES
+        }
+        rows = []
+        seen = set()
+        current = error
+        relation = 0
+        truncated = 0
+        while current is not None and len(rows) < 4:
+            if id(current) in seen:
+                truncated = 1
+                break
+            seen.add(id(current))
+            cls = type(current)
+            module = type.__dict__["__module__"].__get__(cls, type(cls))
+            name = type.__dict__["__qualname__"].__get__(cls, type(cls))
+            permitted_module = module == "builtins" or module in {
+                "player_wiki." + item for item in _PROJECTION_FAILURE_MODULES
+            }
+            type_available = (permitted_module and _projection_failure_word(module, 160)
+                              and _projection_failure_word(name, 160))
+            identity = module + "." + name if type_available else "withheld_class"
+            omitted = 0 if type_available else 1
+            sites = []
+            traceback = BaseException.__dict__["__traceback__"].__get__(current, type(current))
+            visited = 0
+            while traceback is not None and visited < 64:
+                visited += 1
+                code = traceback.tb_frame.f_code
+                filename = code.co_filename
+                relative = (approved.get(filename.replace("\\", "/").casefold())
+                            if type(filename) is str else None)
+                function = code.co_name
+                line = traceback.tb_lineno
+                if (relative is not None and _projection_failure_word(function, 128)
+                        and type(line) is int and 0 < line <= 10000000):
+                    sites.append((relative, function, line))
+                    if len(sites) > 8:
+                        sites.pop(0)
+                        omitted = 1
+                else:
+                    omitted = 1
+                traceback = traceback.tb_next
+            if traceback is not None:
+                omitted = 1
+            rows.append((identity, relation, tuple(sites), omitted))
+            cause = BaseException.__dict__["__cause__"].__get__(current, type(current))
+            relation = 1
+            if cause is None and not BaseException.__dict__["__suppress_context__"].__get__(current, type(current)):
+                cause = BaseException.__dict__["__context__"].__get__(current, type(current))
+                relation = 2
+            current = cause
+        if current is not None:
+            truncated = 1
+        # Reserve the deepest site of every included exception first, then
+        # allocate remaining capacity to the next deepest sites, round-robin.
+        lengths = [len(row[2]) for row in rows]
+        retained = [0] * len(rows)
+        remaining = 8
+        for depth in range(1, 9):
+            for index, length in enumerate(lengths):
+                if remaining and length >= depth:
+                    retained[index] += 1
+                    remaining -= 1
+        detached = []
+        for index, (identity, relation, sites, omitted) in enumerate(rows):
+            count = retained[index]
+            omitted = int(bool(omitted or count < len(sites)))
+            truncated |= omitted
+            detached.append((identity, relation, sites[-count:] if count else (), omitted))
+        return (1, 1, truncated, tuple(detached))
+    except BaseException:
+        return (1, 2, 0, ())
+
+
+class _CharacterProjectionDiagnostics:
+    """Private per-call catch provenance; never part of a projection payload."""
+
+    __slots__ = ("origins", "failed", "original_failure")
+
+    def __init__(self) -> None:
+        self.origins = 0
+        self.failed = False
+        self.original_failure = None
+
+
+def _note_projection_failure(diagnostics: _CharacterProjectionDiagnostics | None,
+                             origin: int) -> None:
+    try:
+        if type(diagnostics) is _CharacterProjectionDiagnostics:
+            diagnostics.origins |= origin
+    except BaseException:
+        try:
+            if type(diagnostics) is _CharacterProjectionDiagnostics:
+                diagnostics.failed = True
+        except BaseException:
+            pass
+
+
+def _note_original_projection_failure(
+    diagnostics: _CharacterProjectionDiagnostics | None, error: BaseException,
+) -> None:
+    try:
+        if type(diagnostics) is _CharacterProjectionDiagnostics:
+            diagnostics.original_failure = (
+                _snapshot_projection_exception(error)
+                if diagnostics.original_failure is None else (1, 2, 0, ())
+            )
+    except BaseException:
+        # Failure to retain original sites must not replace the domain refusal
+        # or invalidate independently collected source219 warning/origin bits.
+        pass
+
+
+class CharacterNumericProjectionError(ValueError):
+    """The read projection could not supply a current numeric authority."""
+
+    def _attach_projection_diagnostic(
+        self, warnings: int, diagnostics: _CharacterProjectionDiagnostics | None,
+    ) -> None:
+        """Attach only immutable finite metadata, without changing the refusal."""
+        try:
+            if (type(warnings) is not int or not 1 <= warnings <= 3
+                    or type(diagnostics) is not _CharacterProjectionDiagnostics
+                    or diagnostics.failed is not False):
+                return
+            origins = diagnostics.origins
+            if type(origins) is not int or not 0 <= origins <= 7:
+                return
+            self._projection_failure_diagnostic = (1, 1, warnings, origins)
+        except BaseException:
+            pass
+        try:
+            if (type(diagnostics) is _CharacterProjectionDiagnostics
+                    and diagnostics.original_failure is not None):
+                self._projection_original_failure = diagnostics.original_failure
+        except BaseException:
+            pass
 
 
 ARCANE_ARMOR_STATE_KEY = "arcane_armor"
@@ -297,6 +467,7 @@ def build_effective_character_values(
     selected_components: frozenset[str],
     selected_catalogs: frozenset[str],
     selected_derivation_components: frozenset[str],
+    _failure_diagnostics: _CharacterProjectionDiagnostics | None = None,
 ) -> dict[str, Any]:
     """Derive read-only effective values from durable inputs and approved sources.
 
@@ -305,7 +476,7 @@ def build_effective_character_values(
     definition or a normalized-definition cache entry.
     """
     from .committed_publication import active
-    activated = active()
+    activated = source_active(systems_service)
     if (activated and systems_service is not None
             and not is_xianxia_system(getattr(definition, "system", ""))
             and state_revision is None):
@@ -324,14 +495,20 @@ def build_effective_character_values(
             from . import character_source_repair
 
             verified_manual_actions = character_source_repair.load_verified_manual_actions(
-                campaign.slug, projected_definition.character_slug
+                campaign.slug, projected_definition.character_slug,
+                **({"connection": phase_of(systems_service).connection} if phase_of(systems_service) is not None else {})
             )
             load_numeric = getattr(character_source_repair, "load_verified_numeric_actions", None)
             verified_numeric_actions = (
-                load_numeric(campaign.slug, projected_definition.character_slug)
+                load_numeric(campaign.slug, projected_definition.character_slug,
+                    **({"connection": phase_of(systems_service).connection} if phase_of(systems_service) is not None else {}))
                 if callable(load_numeric) else ()
             )
+        except SourceReadConnectionFatal:
+            raise
         except (RuntimeError, TypeError, ValueError):
+            if phase_of(systems_service) is not None:
+                raise
             # Offline renderers have no trusted audit reader. MANUAL fails closed.
             verified_manual_actions = ()
             verified_numeric_actions = ()
@@ -348,12 +525,9 @@ def build_effective_character_values(
             {"code": code, "message": message}
             for code, message in source_authority.warnings
         ]
+    authority_input_definition = projected_definition
     projected_state = deepcopy(state or {})
     projection_warnings: list[dict[str, str]] = list(activation_warnings) + source_warnings
-    uses_scoped_catalogs = (
-        selected_catalogs != FULL_CHARACTER_MECHANICS_CATALOGS
-        or selected_derivation_components != FULL_DND_DERIVATION_COMPONENTS
-    )
     scoped_item_catalog: dict[str, Any] | None = None
     scoped_spell_catalog: dict[str, Any] | None = None
     scoped_catalogs_ready = False
@@ -397,29 +571,34 @@ def build_effective_character_values(
 
     def _ensure_scoped_catalogs() -> None:
         nonlocal scoped_catalogs_ready, scoped_item_catalog, scoped_spell_catalog
-        if not uses_scoped_catalogs or scoped_catalogs_ready:
+        if scoped_catalogs_ready:
             return
         if "items" in selected_catalogs:
-            scoped_item_catalog = _build_scoped_item_catalog(
-                systems_service,
-                campaign.slug,
-                campaign_page_records=normalization_page_records,
-            )
+            from .character_read_foundation import build_read_item_catalog
+            scoped_item_catalog = build_read_item_catalog(
+                builder_source_reader(systems_service), campaign.slug, normalization_page_records)
+            if scoped_item_catalog is None:
+                scoped_item_catalog = _build_scoped_item_catalog(
+                    builder_source_reader(systems_service), campaign.slug,
+                    campaign_page_records=normalization_page_records,
+                )
         elif needs_targeted_item_support:
             scoped_item_catalog = _build_targeted_item_support_catalog(
                 list(getattr(projected_definition, "equipment_catalog", []) or []),
                 campaign_slug=campaign.slug,
-                systems_service=systems_service,
+                systems_service=builder_source_reader(systems_service),
                 campaign_page_records=normalization_page_records,
                 include_inactive="attacks" in selected_components,
             )
         else:
             scoped_item_catalog = _build_item_catalog([])
-        scoped_spell_catalog = (
-            _build_scoped_spell_catalog(systems_service, campaign.slug)
-            if "spells" in selected_catalogs
-            else _build_spell_catalog([])
-        )
+        if "spells" in selected_catalogs:
+            from .character_read_foundation import build_read_spell_catalog
+            scoped_spell_catalog = build_read_spell_catalog(builder_source_reader(systems_service), campaign.slug, scoped=True)
+            if scoped_spell_catalog is None:
+                scoped_spell_catalog = _build_scoped_spell_catalog(builder_source_reader(systems_service), campaign.slug)
+        else:
+            scoped_spell_catalog = _build_spell_catalog([])
         scoped_catalogs_ready = True
 
     if systems_service is not None:
@@ -449,21 +628,24 @@ def build_effective_character_values(
                     "campaign_page_records": normalization_page_records,
                     "source_authority": source_authority,
                 }
-                if uses_scoped_catalogs:
-                    _ensure_scoped_catalogs()
-                    normalization_kwargs.update(
-                        {
-                            "derivation_components": selected_derivation_components,
-                            "item_catalog": scoped_item_catalog,
-                            "spell_catalog": scoped_spell_catalog,
-                        }
-                    )
-                return normalize_definition_to_native_model(
-                    projected_definition,
+                _ensure_scoped_catalogs()
+                normalization_kwargs.update(
+                    {
+                        "derivation_components": selected_derivation_components,
+                        "item_catalog": scoped_item_catalog,
+                        "spell_catalog": scoped_spell_catalog,
+                    }
+                )
+                from .character_read_foundation import normalize_read_facade
+                return normalize_read_facade(
+                    normalize_definition_to_native_model, projected_definition,
                     mode="effective" if activated else "historical",
                     **normalization_kwargs,
                 )
 
+            # Keep the exact catalogue available to the final authority binder,
+            # including when normalization itself is served from the cache.
+            _ensure_scoped_catalogs()
             projected_definition = (
                 _normalized_definition_from_cache(
                     cache_key=cache_key,
@@ -473,11 +655,21 @@ def build_effective_character_values(
                 if cache_key is not None
                 else _normalize_definition()
             )
-            projected_state = merge_state_with_definition(
-                projected_definition, projected_state,
-                source_authority=source_authority,
-            )
-        except (CharacterBuildError, TypeError, ValueError) as exc:
+            if (activated and is_dnd_5e_system(definition.system)
+                    and type(state) is dict and "equipment_activation" not in state):
+                projected_state = project_legacy_read_state(
+                    projected_definition, projected_state,
+                    incoming_definition=definition, source_authority=source_authority,
+                    state_revision=state_revision,
+                )
+            else:
+                projected_state = merge_state_with_definition(
+                    projected_definition, projected_state,
+                    source_authority=source_authority,
+                )
+        except (CharacterBuildError, TypeError, ValueError) as error:
+            _note_original_projection_failure(_failure_diagnostics, error)
+            _note_projection_failure(_failure_diagnostics, 1)
             projected_definition, _ = effective_definition(definition, state)
             if source_authority is not None:
                 projected_definition = source_authority.effective_definition(projected_definition)
@@ -489,15 +681,18 @@ def build_effective_character_values(
             projection_warnings.append(
                 {
                     "code": "read_time_projection_failed",
-                    "message": str(exc) or exc.__class__.__name__,
+                    "message": "Some character mechanics could not be safely projected; manager review is required.",
                 }
             )
 
+    transient_effects: dict[str, Any] = {}
     if "divine_avatar" in selected_components:
         try:
             transient_effects = active_divine_avatar_transient_effects(
-                projected_definition,
-                projected_state,
+                authority_input_definition,
+                state,
+                source_authority=source_authority,
+                page_records=normalization_page_records,
             )
             if transient_effects:
                 _ensure_scoped_catalogs()
@@ -506,24 +701,25 @@ def build_effective_character_values(
                     "campaign_page_records": normalization_page_records,
                     "source_authority": source_authority,
                 }
-                if uses_scoped_catalogs:
-                    transient_kwargs.update(
-                        {
-                            "derivation_components": selected_derivation_components,
-                            "item_catalog": scoped_item_catalog,
-                            "spell_catalog": scoped_spell_catalog,
-                        }
-                    )
+                transient_kwargs.update(
+                    {
+                        "derivation_components": selected_derivation_components,
+                        "item_catalog": scoped_item_catalog,
+                        "spell_catalog": scoped_spell_catalog,
+                    }
+                )
                 projected_definition = project_definition_with_transient_effects(
                     projected_definition,
                     transient_effects,
                     **transient_kwargs,
                 )
-        except (CharacterBuildError, TypeError, ValueError) as exc:
+        except (CharacterBuildError, TypeError, ValueError):
+            transient_effects = {}
+            _note_projection_failure(_failure_diagnostics, 2)
             projection_warnings.append(
                 {
                     "code": "transient_mechanics_projection_failed",
-                    "message": str(exc) or exc.__class__.__name__,
+                    "message": "Some transient mechanics could not be safely projected; manager review is required.",
                 }
             )
     if source_authority is not None:
@@ -532,13 +728,66 @@ def build_effective_character_values(
         )
         if not source_authority.field_status("stats.armor_class").is_effective:
             _ensure_scoped_catalogs()
+        try:
+            source_authority = source_authority.bind_projected_numbers(
+                projected_definition, item_catalog=scoped_item_catalog,
+                systems_service=systems_service, campaign_page_records=normalization_page_records,
+                input_definition=authority_input_definition, input_state=state, formula_scope="current",
+            )
+        except HitPointRecipeError:
+            _note_projection_failure(_failure_diagnostics, 4)
+            projection_warnings.append({
+                "code": "read_time_projection_failed",
+                "message": "Some character mechanics need manager review before they can be calculated.",
+            })
+        else:
+            # Current rules text belongs to the read projection. Saved notes and
+            # resource observations remain untouched by this display overlay.
+            resources = projected_state.get("resources")
+            for resource in resources if isinstance(resources, list) else []:
+                if not isinstance(resource, dict):
+                    continue
+                status = source_authority.resource_status("resource", str(resource.get("id") or ""))
+                if (status.is_effective and status.reason == "derived_from_current_managed_owner"
+                        and isinstance(status.effective, dict) and isinstance(status.effective.get("notes"), str)):
+                    resource["notes"] = status.effective["notes"]
+        projected_definition = source_authority.suppress_unknown_numbers(
+            projected_definition, item_catalog=scoped_item_catalog,
+        )
     return {
         "definition": projected_definition,
         "state": projected_state,
         "projection_warnings": projection_warnings,
         "source_authority": source_authority,
+        "source_authority_definition": authority_input_definition,
         "item_catalog": scoped_item_catalog,
+        "campaign_page_records": normalization_page_records,
+        "transient_effects": transient_effects,
     }
+
+
+def build_character_numeric_projection(
+    *, campaign: Campaign, definition: Any, state: dict[str, Any],
+    state_revision: int | None, systems_service: Any | None = None,
+    campaign_page_records: list[Any] | None = None,
+    _failure_diagnostics: _CharacterProjectionDiagnostics | None = None,
+) -> dict[str, Any]:
+    """Use the full numeric recipe without constructing display-only outputs.
+
+    Current witnesses, activation, normalization, transient effects, projected
+    number binding and their failure warnings remain the ordinary read recipe.
+    Callers must still check those warnings and the resulting state revision.
+    No authority or source facts are cached here.
+    """
+    return build_effective_character_values(
+        campaign=campaign, definition=definition, state=state,
+        state_revision=state_revision, systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+        selected_components=FULL_CHARACTER_MECHANICS_COMPONENTS,
+        selected_catalogs=FULL_CHARACTER_MECHANICS_CATALOGS,
+        selected_derivation_components=FULL_DND_DERIVATION_COMPONENTS,
+        _failure_diagnostics=_failure_diagnostics,
+    )
 
 
 def build_character_mechanics_projection(
@@ -552,9 +801,10 @@ def build_character_mechanics_projection(
     components: frozenset[str] | None = None,
     catalog_components: frozenset[str] | None = None,
     derivation_components: frozenset[str] | None = None,
+    _failure_diagnostics: _CharacterProjectionDiagnostics | None = None,
 ) -> dict[str, Any]:
     from .committed_publication import active
-    if (active() and systems_service is not None
+    if (source_active(systems_service) and systems_service is not None
             and not is_xianxia_system(getattr(definition, "system", ""))
             and state_revision is None):
         raise ValueError("A durable state revision is required for DND character mechanics projection")
@@ -604,11 +854,27 @@ def build_character_mechanics_projection(
         selected_components=selected_components,
         selected_catalogs=selected_catalogs,
         selected_derivation_components=selected_derivation_components,
+        _failure_diagnostics=_failure_diagnostics,
     )
     projected_definition = effective_values["definition"]
     projected_state = effective_values["state"]
     projection_warnings = effective_values["projection_warnings"]
     source_authority = effective_values["source_authority"]
+    from .character_infusion_recipes import view as recipe_view
+    artificer_recipes = recipe_view(effective_values["source_authority_definition"], state,
+                                   source_authority, systems_service)
+    feature_value_presentations = {}
+    parent_facet_presentations, background_feature_projections = {}, []
+    if "sheet_entries" in selected_derivation_components and source_authority is not None:
+        from .character_feature_values import build_feature_value_presentations
+        feature_value_presentations = build_feature_value_presentations(
+            effective_values["source_authority_definition"], state, source_authority, systems_service)
+        from .character_parent_facets import presentation as parent_facet_presentation
+        parent_facet_presentations, background_feature_projections = parent_facet_presentation(
+            effective_values["source_authority_definition"], systems_service, source_authority)
+        from .character_feature_history import presentation as history_presentation
+        parent_facet_presentations.update(history_presentation(
+            effective_values["source_authority_definition"], state, source_authority, systems_service))
     if (
         not is_xianxia_system(projected_definition.system)
         and selected_derivation_components & {"spellcasting", "spellcasting_math"}
@@ -618,14 +884,23 @@ def build_character_mechanics_projection(
             if source_authority is not None else []
         )
         transient_spell_adjustments = dict(
-            active_divine_avatar_transient_effects(projected_definition, projected_state)
-            .get("spellcasting_adjustments") or {}
+            effective_values["transient_effects"].get("spellcasting_adjustments") or {}
         ) if "divine_avatar" in selected_components else {}
         projected_definition.spellcasting, spell_item_warnings = project_spellcasting_item_effects(
             dict(projected_definition.spellcasting or {}), spell_item_entries,
             transient_adjustments=transient_spell_adjustments,
         )
         projection_warnings.extend(spell_item_warnings)
+        if source_authority is not None:
+            projected_definition.spellcasting, property_warnings = source_authority.project_spell_properties(
+                definition, projected_definition.spellcasting)
+            projection_warnings.extend(property_warnings)
+    spell_metric_presentations = {}
+    if source_authority is not None and selected_derivation_components & {"spellcasting", "spellcasting_math"}:
+        from .character_spell_metrics import build_spell_metric_presentations
+        spell_metric_presentations = build_spell_metric_presentations(
+            spellcasting=projected_definition.spellcasting, authority=source_authority,
+            raw_definition=definition, systems_service=systems_service)
     divine_avatar_projection_errors = [
         (
             "Divine Avatar mechanics could not be safely projected: "
@@ -660,10 +935,12 @@ def build_character_mechanics_projection(
     )
     arcane_armor_state = (
         present_arcane_armor_state(
-            projected_definition,
-            projected_state,
+            definition,
+            state,
             inventory_lookup=inventory_lookup,
             equipment_catalog_lookup=equipment_catalog_lookup,
+            source_authority=source_authority, systems_service=systems_service,
+            item_catalog=effective_values.get("item_catalog"),
         )
         if "arcane_armor" in selected_components
         else {}
@@ -685,10 +962,14 @@ def build_character_mechanics_projection(
             inventory_lookup=inventory_lookup,
             equipment_catalog_lookup=equipment_catalog_lookup,
             arcane_armor_state=arcane_armor_state,
+            item_catalog=effective_values.get("item_catalog"),
         )
         if "attacks" in selected_components
         else []
     )
+    if "attacks" in selected_components:
+        attack_visibility.extend(arcane_armor_state.get("attacks", []))
+    parent_facet_presentations.update(arcane_armor_state.get("summary_presentations", {}))
     visible_attacks = (
         project_visible_attacks(
             attack_visibility,
@@ -710,6 +991,14 @@ def build_character_mechanics_projection(
         if "defensive_rules" in selected_components
         else []
     )
+    if "defensive_rules" in selected_components and source_authority is not None:
+        from .character_item_capabilities import qualified_sleep_ward_rules
+        defensive_rules.extend(project_defensive_rules({"defensive_state": {
+            "rules": qualified_sleep_ward_rules(source_authority, definition)}}))
+    from .character_spell_slots import (spell_slot_contributions, spell_slot_totals,
+        spell_slot_options_from_contributions)
+    slot_contributions = spell_slot_contributions(projected_definition.spellcasting, projected_state, source_authority)
+    slot_options = spell_slot_options_from_contributions(slot_contributions)
     item_use_actions = (
         project_item_use_actions(
             campaign,
@@ -718,16 +1007,13 @@ def build_character_mechanics_projection(
             inventory_lookup=inventory_lookup,
             equipment_catalog_lookup=equipment_catalog_lookup,
             systems_service=systems_service,
+            slot_options=slot_options,
         )
         if "item_actions" in selected_components
         else []
     )
 
     if source_authority is not None:
-        source_authority = source_authority.bind_projected_numbers(
-            projected_definition, item_catalog=effective_values.get("item_catalog"),
-        )
-        projected_definition = source_authority.suppress_unknown_numbers(projected_definition)
         suppressed_attacks = []
         for projected_attack in attack_visibility:
             attack = projected_attack.get("attack") if isinstance(projected_attack, dict) else None
@@ -760,8 +1046,15 @@ def build_character_mechanics_projection(
         "attack_reminders": attack_reminders,
         "defensive_rules": defensive_rules,
         "item_use_actions": item_use_actions,
+        "slot_contributions": slot_contributions,
+        "slot_totals": spell_slot_totals(slot_contributions),
         "projection_warnings": projection_warnings,
         "source_authority": source_authority,
+        "spell_metric_presentations": spell_metric_presentations,
+        "feature_value_presentations": feature_value_presentations,
+        "artificer_recipe_view": artificer_recipes,
+        "parent_facet_presentations": parent_facet_presentations,
+        "background_feature_projections": background_feature_projections,
         "source_authority_identity": source_authority.identity if source_authority is not None else "",
         "xianxia": xianxia_projection,
     }
@@ -840,11 +1133,13 @@ def project_spell_action_state(
     mark: str,
     always_prepared: bool | None = None,
 ) -> dict[str, Any]:
+    native_projection = spell.get("native_grant_projection") is True
     normalized_mark = normalize_lookup(mark)
     row_mode = str(row_payload.get("spell_mode") or "").strip()
     row_kind = str(row_payload.get("row_kind") or "class").strip() or "class"
     resolved_always_prepared = (
-        bool(always_prepared)
+        spell.get("is_always_prepared") is True
+        if native_projection else bool(always_prepared)
         if always_prepared is not None
         else _spell_payload_is_always_prepared(dict(spell or {}))
     )
@@ -858,19 +1153,37 @@ def project_spell_action_state(
         )
     )
     in_spellbook = bool(not is_cantrip and "spellbook" in normalized_mark)
-    is_fixed = bool(resolved_always_prepared or spell.get("is_bonus_known"))
+    native_wizard = bool(native_projection and row_kind == "class" and row_mode == "wizard")
+    if native_wizard:
+        # These fields come from the current qualified choice ledger. Raw marks
+        # remain historical observations and are never rewritten for display.
+        in_spellbook = bool(not is_cantrip and spell.get("grant_ordinary_spellbook") is True)
+        is_prepared = bool(not is_cantrip and (resolved_always_prepared
+            or in_spellbook and spell.get("grant_ordinary_prepared") is True))
+    is_fixed = (spell.get("grant_fixed") is True if native_projection
+                else bool(resolved_always_prepared or spell.get("is_bonus_known")))
+    qualified = not native_projection or str(spell.get("authority_status") or "").upper() == "VERIFIED"
+    removable_class_choice = bool(
+        native_projection
+        and spell.get("grant_class_choice_can_remove") is True
+        and spell.get("grant_class_choice_state") == "active"
+        and spell.get("grant_class_choice_counted") is True
+    )
     can_toggle_prepared = bool(
         row_kind == "class"
         and row_mode in {"prepared", "wizard"}
         and not is_cantrip
         and (row_mode != "wizard" or in_spellbook)
         and not resolved_always_prepared
+        and qualified
+        and (not native_wizard or type(spell.get("grant_ordinary_prepared")) is bool)
     )
     can_remove = bool(
         not is_cantrip
         and (row_kind == "class" or row_mode == "ritual_book")
-        and not is_fixed
+        and (not is_fixed or removable_class_choice)
         and row_mode != "prepared"
+        and qualified
     )
     can_show_in_current_view = bool(
         is_cantrip
@@ -888,6 +1201,7 @@ def project_spell_action_state(
         "can_toggle_prepared": can_toggle_prepared,
         "can_show_in_current_view": can_show_in_current_view,
         "can_remove": can_remove,
+        "can_remove_class_choice": bool(can_remove and removable_class_choice),
     }
 
 
@@ -965,18 +1279,17 @@ def _filter_item_action_slot_options(
 
 
 def _character_spell_save_dc(spellcasting: dict[str, Any]) -> int | None:
-    for row in list(spellcasting.get("class_rows") or []):
-        try:
-            value = int(dict(row or {}).get("spell_save_dc") or 0)
-        except (TypeError, ValueError):
-            value = 0
-        if value > 0:
-            return value
+    rows = list(spellcasting.get("class_rows") or [])
+    if len(rows) > 1:
+        return None
+    raw = (dict(rows[0] or {}).get("spell_save_dc") if rows
+           else spellcasting.get("spell_save_dc"))
+    if raw is None or isinstance(raw, bool):
+        return None
     try:
-        value = int(spellcasting.get("spell_save_dc") or 0)
+        return int(raw)
     except (TypeError, ValueError):
-        value = 0
-    return value if value > 0 else None
+        return None
 
 
 def _support_state_label(value: Any) -> str:
@@ -1000,6 +1313,7 @@ def project_attack_visibility(
     inventory_lookup: dict[str, dict[str, Any]],
     equipment_catalog_lookup: dict[str, dict[str, Any]],
     arcane_armor_state: dict[str, Any],
+    item_catalog: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     projected_attacks: list[dict[str, Any]] = []
     for attack in list(getattr(definition, "attacks", []) or []):
@@ -1015,6 +1329,7 @@ def project_attack_visibility(
             linked_item_refs,
             inventory_lookup=inventory_lookup,
             equipment_catalog_lookup=equipment_catalog_lookup,
+            item_catalog=item_catalog,
         )
         hidden_reason = ""
         explicit_item_refs = normalize_attack_equipment_refs(attack_payload)
@@ -1136,8 +1451,9 @@ def project_item_use_actions(
     inventory_lookup: dict[str, dict[str, Any]],
     equipment_catalog_lookup: dict[str, dict[str, Any]],
     systems_service: Any | None = None,
+    slot_options: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    spell_slot_options = project_spell_slot_options(
+    spell_slot_options = slot_options if slot_options is not None else project_spell_slot_options(
         dict(getattr(definition, "spellcasting", {}) or {}),
         state,
     )
@@ -1257,6 +1573,8 @@ def project_item_action_choices(
             save_payload["dc"] = character_spell_save_dc
             if character_spell_save_dc is not None:
                 save_payload["label"] = f"{str(save_payload.get('ability') or '').upper()} save DC {character_spell_save_dc}".strip()
+            else:
+                save_payload["label"] = f"{str(save_payload.get('ability') or '').upper()} save; current DC needs verification".strip()
         choices.append(
             {
                 "id": choice_id,
@@ -1275,55 +1593,9 @@ def project_item_action_choices(
     return choices
 
 
-def project_spell_slot_options(spellcasting: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
-    slot_lookup = {
-        (
-            normalize_spell_slot_lane_id(slot.get("slot_lane_id")),
-            int(slot.get("level") or 0),
-        ): dict(slot)
-        for slot in list(dict(state or {}).get("spell_slots") or [])
-    }
-    legacy_slots_by_level: dict[int, list[dict[str, Any]]] = {}
-    for slot in list(dict(state or {}).get("spell_slots") or []):
-        lane_id = normalize_spell_slot_lane_id(slot.get("slot_lane_id"))
-        level = int(slot.get("level") or 0)
-        if lane_id or level <= 0:
-            continue
-        legacy_slots_by_level.setdefault(level, []).append(dict(slot))
-
-    lanes = spell_slot_lanes_from_spellcasting(spellcasting)
-    multiple_lanes = len(lanes) > 1
-    options: list[dict[str, Any]] = []
-    for lane in lanes:
-        lane_id = normalize_spell_slot_lane_id(lane.get("id"))
-        lane_title = str(lane.get("title") or "Spell slots").strip() or "Spell slots"
-        for slot in list(lane.get("slot_progression") or []):
-            level = int(slot.get("level") or 0)
-            if level <= 0:
-                continue
-            max_slots = int(slot.get("max_slots") or 0)
-            state_slot = slot_lookup.get((lane_id, level))
-            if state_slot is None and lane_id and legacy_slots_by_level.get(level):
-                state_slot = legacy_slots_by_level[level].pop(0)
-            state_slot = state_slot or {}
-            used = int(state_slot.get("used") or 0)
-            available = max(max_slots - used, 0)
-            level_label = spell_level_label(level)
-            options.append(
-                {
-                    "level": level,
-                    "level_label": level_label,
-                    "slot_lane_id": lane_id,
-                    "lane_title": lane_title,
-                    "label": f"{lane_title}: {level_label}" if multiple_lanes else level_label,
-                    "used": used,
-                    "max": max_slots,
-                    "available": available,
-                    "selection": f"{lane_id}|{level}",
-                }
-            )
-    return options
-
+def project_spell_slot_options(spellcasting: dict[str, Any], state: dict[str, Any], *, source_authority=None) -> list[dict[str, Any]]:
+    from .character_spell_slots import spell_slot_contributions, spell_slot_options_from_contributions
+    return spell_slot_options_from_contributions(spell_slot_contributions(spellcasting, state, source_authority))
 
 def resolve_projected_item_metadata(
     campaign: Campaign,
@@ -1429,12 +1701,16 @@ def _attack_matches_weapon_wield_mode(
     *,
     equipment_item: dict[str, Any],
     inventory_item: dict[str, Any],
+    item_catalog: dict[str, Any] | None = None,
 ) -> bool:
+    # An explicit SQLite false remains authoritative even for a stale wield mode.
+    if inventory_item.get("is_equipped") is False:
+        return False
     support_item = {
         **dict(equipment_item or {}),
         **dict(inventory_item or {}),
     }
-    support = describe_equipment_state_support(support_item)
+    support = describe_equipment_state_support(support_item, item_catalog=item_catalog)
     if not resolve_item_equipped_state(support_item, support=support):
         return False
     if not bool(support.get("supports_weapon_wield_mode")):
@@ -1462,6 +1738,7 @@ def resolve_attack_equipped_state(
     *,
     inventory_lookup: dict[str, dict[str, Any]],
     equipment_catalog_lookup: dict[str, dict[str, Any]],
+    item_catalog: dict[str, Any] | None = None,
 ) -> bool | None:
     if not linked_item_refs:
         return None
@@ -1481,6 +1758,7 @@ def resolve_attack_equipped_state(
             attack,
             equipment_item=equipment_item,
             inventory_item=inventory_item,
+            item_catalog=item_catalog,
         ):
             return True
     if not saw_linked_item:
@@ -1494,28 +1772,10 @@ def present_arcane_armor_state(
     *,
     inventory_lookup: dict[str, dict[str, Any]],
     equipment_catalog_lookup: dict[str, dict[str, Any]],
+    source_authority=None, systems_service=None, item_catalog=None,
 ) -> dict[str, Any]:
-    if not character_has_feature(definition, ARCANE_ARMOR_FEATURE_NAME):
-        return {"available": False}
-
-    feature_states = dict(state.get("feature_states") or {})
-    arcane_armor_payload = dict(feature_states.get(ARCANE_ARMOR_STATE_KEY) or {})
-    enabled = bool(arcane_armor_payload.get("enabled"))
-    hands_free = armorer_thunder_gauntlets_have_free_hands(
-        inventory_lookup=inventory_lookup,
-        equipment_catalog_lookup=equipment_catalog_lookup,
-    )
-    return {
-        "available": True,
-        "feature_key": ARCANE_ARMOR_STATE_KEY,
-        "label": "Arcane Armor",
-        "enabled": enabled,
-        "status_label": "Enabled" if enabled else "Disabled",
-        "hands_free": hands_free,
-        "hands_label": "Hands free" if hands_free else "Hands occupied",
-        "thunder_gauntlets_available": bool(enabled and hands_free),
-        "defensive_field_available": enabled,
-    }
+    from .character_armor_models import projection
+    return projection(definition, state, source_authority, systems_service, item_catalog)
 
 
 def character_has_feature(definition: Any, feature_name: str) -> bool:
@@ -1574,7 +1834,12 @@ def is_guardian_defensive_field_name(value: Any) -> bool:
 def build_armorer_combat_availability(
     name: Any,
     arcane_armor_state: dict[str, Any],
+    *, feature_id="", systems_ref=None,
 ) -> dict[str, Any]:
+    from .character_armor_models import GAUNTLETS, FIELD
+    if dict(systems_ref or {}).get("entry_key") in {GAUNTLETS, FIELD}:
+        return dict(arcane_armor_state.get("feature_availability", {}).get(feature_id)
+                    or {"available": False, "reason": "The selected model and current wearing need verification."})
     if not bool(arcane_armor_state.get("available")):
         return {"available": True, "reason": ""}
     if is_guardian_thunder_gauntlets_name(name):
@@ -2199,3 +2464,10 @@ def _coerce_int(value: Any, *, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return int(default)
+
+
+# These are the actual old imported facades, not catalog-module substitutes.
+_NATIVE_READ_CATALOG_RECIPE = tuple((name, globals()[name]) for name in (
+    "_build_scoped_item_catalog", "_build_scoped_spell_catalog",
+    "normalize_definition_to_native_model",
+))

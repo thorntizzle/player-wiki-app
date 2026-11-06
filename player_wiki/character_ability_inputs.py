@@ -201,10 +201,17 @@ def mechanics_changed(previous: Any, desired: Any) -> bool:
     for name in ('stats', 'skills', 'proficiencies', 'attacks', 'features', 'spellcasting', 'equipment_catalog', 'resource_templates', 'system'):
         if getattr(previous, name) != getattr(desired, name):
             return True
-    for key in ('classes', 'class_ref', 'class_name', 'class_level_text', 'subclass_ref', 'species', 'species_ref', 'species_page_ref', 'background', 'background_ref', 'background_page_ref', 'size'):
+    for key in ('classes', 'class_ref', 'class_name', 'class_level_text', 'subclass_ref', 'species', 'species_ref', 'species_page_ref', 'background', 'background_ref', 'background_page_ref', 'background_choices', 'size'):
         if previous.profile.get(key) != desired.profile.get(key):
             return True
     for key in ('native_progression', 'source_type'):
         if previous.source.get(key) != desired.source.get(key):
             return True
     return False
+
+
+# Finite ordinary callback surface omitted by invocation-owned current inputs.
+_CURRENT_INPUT_RECIPE = tuple((name, globals()[name]) for name in (
+    'deepcopy',
+    'input_records',
+))

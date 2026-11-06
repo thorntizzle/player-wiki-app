@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import json
+import copy
 import re
 import sqlite3
+from dataclasses import fields
 from typing import Any
 
 from .auth_store import isoformat, parse_timestamp, utcnow
 from .campaign_visibility import normalize_visibility_choice
 from .db import get_db
+from .dnd5e_rules_reference import DND5E_RULES_REFERENCE_SOURCE_ID
 from .rich_text import sanitize_nested_html_fields, sanitize_rich_html
 from .repository import normalize_lookup
+from .system_policy import DND_5E_SYSTEM_CODE
 from .source_health import (
     SourceHealthReference,
     SourceHealthResolution,
@@ -35,18 +39,41 @@ def _normalize_source_health_rule_key(value: object) -> str:
     return normalized.strip("-")
 
 
+class SystemsReplacementOwnershipError(ValueError):
+    """The caller must not commit import bookkeeping over an unowned transaction."""
+
+
 class SystemsStore:
-    def get_durable_revision(self) -> str:
+    def assert_import_ownership(self) -> Any:
+        """Admit a standalone import step without altering caller-owned work."""
+        connection = get_db()
+        if connection.in_transaction:
+            raise SystemsReplacementOwnershipError("Systems import requires no active caller transaction or savepoint.")
+        return connection
+
+    @staticmethod
+    def _rollback_owned_import_write(connection: Any) -> None:
+        """Clean only a write admitted on a transaction-free connection."""
+        try:
+            if connection.in_transaction:
+                connection.rollback()
+            if connection.in_transaction:
+                raise RuntimeError("Import write rollback did not close its transaction.")
+        except BaseException:
+            # A closed connection cannot be committed by later failure bookkeeping.
+            connection.close()
+            raise
+
+    def get_durable_revision(self, *, connection=None) -> str:
         """Read the transaction's opaque Systems identity without service caches."""
-        return str(get_db().execute(
+        return str((connection if connection is not None else get_db()).execute(
             "SELECT token FROM systems_revision WHERE singleton = 1"
         ).fetchone()["token"])
 
     def get_library_with_revision(
-        self, library_slug: str,
-    ) -> tuple[SystemsLibraryRecord | None, str]:
+        self, library_slug: str, *, connection=None,) -> tuple[SystemsLibraryRecord | None, str]:
         """Read library eligibility and its revision from one SQLite snapshot."""
-        row = get_db().execute(
+        row = (connection if connection is not None else get_db()).execute(
             """
             SELECT library.*, revision.token AS revision_token
             FROM systems_revision AS revision
@@ -124,8 +151,8 @@ class SystemsStore:
             raise RuntimeError("Failed to persist systems library.")
         return library
 
-    def get_library(self, library_slug: str) -> SystemsLibraryRecord | None:
-        row = get_db().execute(
+    def get_library(self, library_slug: str, *, connection=None) -> SystemsLibraryRecord | None:
+        row = (connection if connection is not None else get_db()).execute(
             "SELECT * FROM systems_libraries WHERE library_slug = ?",
             (library_slug,),
         ).fetchone()
@@ -192,8 +219,8 @@ class SystemsStore:
             raise RuntimeError("Failed to persist systems source.")
         return source
 
-    def get_source(self, library_slug: str, source_id: str) -> SystemsSourceRecord | None:
-        row = get_db().execute(
+    def get_source(self, library_slug: str, source_id: str, *, connection=None) -> SystemsSourceRecord | None:
+        row = (connection if connection is not None else get_db()).execute(
             """
             SELECT *
             FROM systems_sources
@@ -203,8 +230,8 @@ class SystemsStore:
         ).fetchone()
         return self._map_source(row)
 
-    def list_sources(self, library_slug: str) -> list[SystemsSourceRecord]:
-        rows = get_db().execute(
+    def list_sources(self, library_slug: str, *, connection=None) -> list[SystemsSourceRecord]:
+        rows = (connection if connection is not None else get_db()).execute(
             """
             SELECT *
             FROM systems_sources
@@ -215,8 +242,8 @@ class SystemsStore:
         ).fetchall()
         return [self._map_source(row) for row in rows]
 
-    def get_campaign_policy(self, campaign_slug: str) -> CampaignSystemsPolicyRecord | None:
-        row = get_db().execute(
+    def get_campaign_policy(self, campaign_slug: str, *, connection=None) -> CampaignSystemsPolicyRecord | None:
+        row = (connection if connection is not None else get_db()).execute(
             """
             SELECT *
             FROM campaign_system_policies
@@ -292,9 +319,8 @@ class SystemsStore:
     def get_campaign_enabled_source(
         self,
         campaign_slug: str,
-        source_id: str,
-    ) -> CampaignEnabledSourceRecord | None:
-        row = get_db().execute(
+        source_id: str, *, connection=None,) -> CampaignEnabledSourceRecord | None:
+        row = (connection if connection is not None else get_db()).execute(
             """
             SELECT *
             FROM campaign_enabled_sources
@@ -304,8 +330,8 @@ class SystemsStore:
         ).fetchone()
         return self._map_campaign_enabled_source(row)
 
-    def list_campaign_enabled_sources(self, campaign_slug: str) -> list[CampaignEnabledSourceRecord]:
-        rows = get_db().execute(
+    def list_campaign_enabled_sources(self, campaign_slug: str, *, connection=None) -> list[CampaignEnabledSourceRecord]:
+        rows = (connection if connection is not None else get_db()).execute(
             """
             SELECT *
             FROM campaign_enabled_sources
@@ -368,9 +394,8 @@ class SystemsStore:
     def get_campaign_entry_override(
         self,
         campaign_slug: str,
-        entry_key: str,
-    ) -> CampaignEntryOverrideRecord | None:
-        row = get_db().execute(
+        entry_key: str, *, connection=None,) -> CampaignEntryOverrideRecord | None:
+        row = (connection if connection is not None else get_db()).execute(
             """
             SELECT *
             FROM campaign_entry_overrides
@@ -383,9 +408,8 @@ class SystemsStore:
     def list_campaign_entry_overrides(
         self,
         campaign_slug: str,
-        library_slug: str,
-    ) -> list[CampaignEntryOverrideRecord]:
-        rows = get_db().execute(
+        library_slug: str, *, connection=None,) -> list[CampaignEntryOverrideRecord]:
+        rows = (connection if connection is not None else get_db()).execute(
             """
             SELECT *
             FROM campaign_entry_overrides
@@ -451,8 +475,8 @@ class SystemsStore:
             raise RuntimeError("Failed to persist campaign entry override.")
         return record
 
-    def get_entry(self, library_slug: str, entry_key: str) -> SystemsEntryRecord | None:
-        row = get_db().execute(
+    def get_entry(self, library_slug: str, entry_key: str, *, connection=None) -> SystemsEntryRecord | None:
+        row = (connection if connection is not None else get_db()).execute(
             """
             SELECT *
             FROM systems_entries
@@ -480,8 +504,8 @@ class SystemsStore:
             "seed_version": str(metadata.get("seed_version") or ""),
         }
 
-    def get_entry_by_slug(self, library_slug: str, slug: str) -> SystemsEntryRecord | None:
-        row = get_db().execute(
+    def get_entry_by_slug(self, library_slug: str, slug: str, *, connection=None) -> SystemsEntryRecord | None:
+        row = (connection if connection is not None else get_db()).execute(
             """
             SELECT *
             FROM systems_entries
@@ -495,11 +519,10 @@ class SystemsStore:
         self,
         library_slug: str,
         source_id: str,
-        entry_key: str,
-    ) -> SystemsEntryRecord | None:
+        entry_key: str, *, connection=None,) -> SystemsEntryRecord | None:
         """Resolve the full canonical Systems identity without fallback matching."""
 
-        row = get_db().execute(
+        row = (connection if connection is not None else get_db()).execute(
             """
             SELECT *
             FROM systems_entries
@@ -922,6 +945,14 @@ class SystemsStore:
             )
         return resolutions
 
+    def get_entry_preimage(self, library_slug: str, entry_slug: str) -> dict[str, Any] | None:
+        """Return the exact stored row for administrative compare-and-swap."""
+        row = get_db().execute(
+            "SELECT * FROM systems_entries WHERE library_slug = ? AND slug = ?",
+            (library_slug, entry_slug),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
     def upsert_entry(
         self,
         library_slug: str,
@@ -1106,8 +1137,7 @@ class SystemsStore:
         entry_type: str | None = None,
         query: str = "",
         limit: int | None = None,
-        offset: int = 0,
-    ) -> list[SystemsEntryRecord]:
+        offset: int = 0, connection=None,) -> list[SystemsEntryRecord]:
         normalized_query = query.strip().lower()
         parameters: list[Any] = [library_slug, source_id]
         apply_post_sort_limit = entry_type == "book" and (limit is not None or offset != 0)
@@ -1124,7 +1154,7 @@ class SystemsStore:
         if limit is not None and not apply_post_sort_limit:
             limit_clause = " LIMIT ? OFFSET ?"
             parameters.extend([limit, offset])
-        rows = get_db().execute(
+        rows = (connection if connection is not None else get_db()).execute(
             f"""
             SELECT *
             FROM systems_entries
@@ -1149,8 +1179,7 @@ class SystemsStore:
         entry_type: str | None = None,
         query: str = "",
         limit: int | None = None,
-        offset: int = 0,
-    ) -> list[SystemsEntryRecord]:
+        offset: int = 0, connection=None,) -> list[SystemsEntryRecord]:
         normalized_query = query.strip().lower()
         parameters: list[Any] = [campaign_slug, library_slug, source_id]
         apply_post_sort_limit = entry_type == "book" and (limit is not None or offset != 0)
@@ -1167,7 +1196,7 @@ class SystemsStore:
         if limit is not None and not apply_post_sort_limit:
             limit_clause = " LIMIT ? OFFSET ?"
             parameters.extend([limit, offset])
-        rows = get_db().execute(
+        rows = (connection if connection is not None else get_db()).execute(
             f"""
             SELECT systems_entries.*
             FROM systems_entries
@@ -1190,6 +1219,34 @@ class SystemsStore:
         return entries
 
     def list_entries_for_campaign(
+        self, campaign_slug: str, library_slug: str, source_ids: list[str], *,
+        entry_type: str | None = None, query: str = "", limit: int | None = None,
+        offset: int = 0, connection=None,
+    ) -> list[SystemsEntryRecord]:
+        rows = self._entry_rows_for_campaign(campaign_slug, library_slug, source_ids,
+            entry_type=entry_type, query=query, limit=limit, offset=offset, connection=connection)
+        if rows is None:
+            return []
+        entries = self._sort_entries_for_source_browse([self._map_entry(row) for row in rows])
+        if entry_type == "book" and (limit is not None or offset != 0):
+            end = None if limit is None else offset + limit
+            return entries[offset:end]
+        return entries
+
+    def _feature_catalog_facts(self, *args, **kwargs):
+        """Exact interpreted record signature, without an intermediate record list."""
+        from .character_source_reads import freeze
+        rows = self._entry_rows_for_campaign(*args, **kwargs)
+        # Legacy mapping interprets every row before freezing the list. Retain
+        # that error precedence, then release each interpreted graph as it is
+        # converted instead of retaining both complete catalog representations.
+        values = [self._entry_fields(row) for row in rows or []]
+        for index, fields in enumerate(values):
+            values[index] = ("record", SystemsEntryRecord, tuple(
+                (name, True, freeze(value)) for name, value in fields.items()))
+        return ("sequence", list, tuple(values))
+
+    def _entry_rows_for_campaign(
         self,
         campaign_slug: str,
         library_slug: str,
@@ -1198,15 +1255,14 @@ class SystemsStore:
         entry_type: str | None = None,
         query: str = "",
         limit: int | None = None,
-        offset: int = 0,
-    ) -> list[SystemsEntryRecord]:
+        offset: int = 0, connection=None,) -> list | None:
         normalized_source_ids = [
             str(source_id or "").strip()
             for source_id in list(source_ids or [])
             if str(source_id or "").strip()
         ]
         if not normalized_source_ids:
-            return []
+            return None  # Preserve the public no-source early return.
 
         placeholders = ", ".join("?" for _ in normalized_source_ids)
         normalized_query = query.strip().lower()
@@ -1227,7 +1283,7 @@ class SystemsStore:
         if limit is not None and not apply_post_sort_limit:
             limit_clause = " LIMIT ? OFFSET ?"
             parameters.extend([limit, offset])
-        rows = get_db().execute(
+        rows = (connection if connection is not None else get_db()).execute(
             f"""
             SELECT systems_entries.*
             FROM systems_entries
@@ -1243,11 +1299,7 @@ class SystemsStore:
             """,
             tuple(parameters),
         ).fetchall()
-        entries = self._sort_entries_for_source_browse([self._map_entry(row) for row in rows])
-        if apply_post_sort_limit:
-            end = None if limit is None else offset + limit
-            return entries[offset:end]
-        return entries
+        return rows
 
     def list_entries_for_campaign_by_identity(
         self,
@@ -1258,8 +1310,7 @@ class SystemsStore:
         entry_type: str,
         entry_keys: list[str] | None = None,
         entry_slugs: list[str] | None = None,
-        exact_titles: list[str] | None = None,
-    ) -> list[SystemsEntryRecord]:
+        exact_titles: list[str] | None = None, connection=None,) -> list[SystemsEntryRecord]:
         """Return policy-enabled exact identity candidates in one bounded query."""
         normalized_source_ids = sorted(
             {
@@ -1312,7 +1363,7 @@ class SystemsStore:
             )
             identity_parameters.extend(normalized_exact_titles)
 
-        connection = get_db()
+        connection = (connection if connection is not None else get_db())
         connection.create_function(
             "cpw_normalize_lookup",
             1,
@@ -1388,14 +1439,13 @@ class SystemsStore:
         limit: int | None = 100,
         offset: int = 0,
         campaign_slug: str | None = None,
-        source_visibility: dict[str, dict[str, bool]] | None = None,
-    ) -> list[SystemsEntryRecord]:
+        source_visibility: dict[str, dict[str, bool]] | None = None, connection=None,) -> list[SystemsEntryRecord]:
         normalized_query = query.strip().lower()
         if not normalized_query:
             return []
         if campaign_slug is not None:
             return self._search_eligible_campaign_entries(
-                library_slug, campaign_slug=campaign_slug, query=normalized_query,
+                library_slug, connection=connection, campaign_slug=campaign_slug, query=normalized_query,
                 source_ids=source_ids or [], entry_type=entry_type, limit=limit,
                 offset=offset, source_visibility=source_visibility,
             )
@@ -1418,7 +1468,7 @@ class SystemsStore:
         if limit is not None:
             limit_clause = " LIMIT ? OFFSET ?"
             parameters.extend([limit, offset])
-        rows = get_db().execute(
+        rows = (connection if connection is not None else get_db()).execute(
             f"""
             SELECT *
             FROM systems_entries
@@ -1440,8 +1490,7 @@ class SystemsStore:
         entry_type: str | None,
         limit: int | None,
         offset: int,
-        source_visibility: dict[str, dict[str, bool]] | None,
-    ) -> list[SystemsEntryRecord]:
+        source_visibility: dict[str, dict[str, bool]] | None, connection=None,) -> list[SystemsEntryRecord]:
         if not source_ids or source_visibility == {}:
             return []
         parameters: list[Any] = [campaign_slug, library_slug, *source_ids]
@@ -1474,7 +1523,7 @@ class SystemsStore:
         if limit is not None:
             limit_clause = " LIMIT ? OFFSET ?"
             parameters.extend([limit, offset])
-        connection = get_db()
+        connection = (connection if connection is not None else get_db())
         connection.create_function(
             "cpw_visibility_choice", 1, normalize_visibility_choice, deterministic=True
         )
@@ -1646,6 +1695,201 @@ class SystemsStore:
         *,
         entries: list[dict[str, Any]],
         entry_types: list[str] | None = None,
+        preserve_dnd5e_item_choices: bool = False,
+    ) -> int:
+        # Every DND source replacement shares this admission point. Even an
+        # import omitting item preservation must not race a feature curator and
+        # delete its authenticated grant contract after an unlocked read.
+        protect_native_grants = (library_slug == DND_5E_SYSTEM_CODE
+                                 and source_id != DND5E_RULES_REFERENCE_SOURCE_ID)
+        if preserve_dnd5e_item_choices is False and not protect_native_grants:
+            return self._replace_entries_for_source(
+                library_slug, source_id, entries=entries, entry_types=entry_types,
+            )
+        if (preserve_dnd5e_item_choices is not False and
+                (preserve_dnd5e_item_choices is not True or library_slug != DND_5E_SYSTEM_CODE
+                 or (entry_types and "item" not in entry_types))):
+            raise ValueError("Item choice preservation requires a DND-5E item import.")
+        connection = get_db()
+        if connection.in_transaction:
+            raise SystemsReplacementOwnershipError("Source choice preservation requires its own replacement transaction.")
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            if protect_native_grants:
+                self._refuse_native_grant_replacement(library_slug, source_id, entry_types)
+            merged = (self._preserve_dnd5e_item_choices(library_slug, source_id, entries)
+                      if preserve_dnd5e_item_choices is True else entries)
+            return self._replace_entries_for_source(
+                library_slug, source_id, entries=merged, entry_types=entry_types,
+            )
+        except BaseException:
+            # Import failure bookkeeping commits separately. Never let it commit
+            # a partial replacement left pending by a failed merge/serialization.
+            try:
+                connection.rollback()
+                if connection.in_transaction:
+                    raise RuntimeError("Replacement rollback did not close its transaction.")
+            except BaseException:
+                connection.close()
+                raise
+            raise
+
+    def _refuse_native_grant_replacement(
+        self, library_slug: str, source_id: str, entry_types: list[str] | None,
+    ) -> None:
+        """Retain curated native grants by refusing replacement under its lock.
+
+        Presence, including an invalid/unknown container, is protected. A source
+        import is not an approval to rebase a curated rule onto different prose.
+        Explicit source reconciliation can later replace the authenticated basis.
+        """
+        def unique_object(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("Stored source metadata has duplicate keys.")
+                result[key] = value
+            return result
+
+        def invalid_constant(value):
+            raise ValueError("Stored source metadata contains a nonfinite number.")
+
+        connection = get_db()
+        if not connection.in_transaction:
+            raise SystemsReplacementOwnershipError("Native grant preservation requires a replacement lock.")
+        clause = ""
+        parameters = [library_slug, source_id]
+        if entry_types:
+            clause = " AND entry_type IN (" + ",".join("?" for _ in entry_types) + ")"
+            parameters.extend(str(kind) for kind in entry_types)
+        rows = connection.execute(
+            "SELECT metadata_json FROM systems_entries WHERE library_slug=? AND source_id=?" + clause,
+            parameters,
+        ).fetchall()
+        for row in rows:
+            if type(row["metadata_json"]) is not str:
+                raise ValueError("Stored source metadata is unreadable.")
+            metadata = json.loads(row["metadata_json"], object_pairs_hook=unique_object,
+                                  parse_constant=invalid_constant)
+            if type(metadata) is not dict:
+                raise ValueError("Stored source metadata must be an object.")
+            if "native_spell_grants" in metadata:
+                raise ValueError("Curated native spell grants require explicit source reconciliation before import.")
+
+    def _preserve_dnd5e_item_choices(
+        self, library_slug: str, source_id: str, entries: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Merge only exact existing item choices while the replacement lock is held."""
+        protected = ("spellcasting_modifiers", "native_spellcasting_modifiers", "spell_property_modifiers", "native_spell_property_modifiers")
+
+        def canonical(value: Any) -> str:
+            # JSON's typed representation distinguishes true/1, null/missing,
+            # integers/floats and ordered lists; Python equality does not.
+            return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+        def unique_object(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("Stored item metadata has duplicate keys.")
+                result[key] = value
+            return result
+
+        def invalid_constant(value):
+            raise ValueError("Stored item metadata contains a nonfinite number.")
+
+        if type(entries) is not list:
+            raise ValueError("Item replacement requires a complete entry list.")
+        by_key: dict[str, dict[str, Any]] = {}
+        item_titles: dict[str, int] = {}
+        slugs: set[str] = set()
+        identity_fields = ("entry_key", "entry_type", "slug", "title", "source_page", "source_path")
+        for entry in entries:
+            if (type(entry) is not dict or any(type(entry.get(key)) is not str for key in identity_fields)
+                    or not all(entry[key] for key in ("entry_key", "entry_type", "slug", "title"))
+                    or type(entry.get("metadata")) is not dict):
+                raise ValueError("Imported entry identity or metadata is unsupported.")
+            key, kind, slug = entry["entry_key"], entry["entry_type"], entry["slug"]
+            if (key in by_key or slug in slugs
+                    or not key.startswith(f"{library_slug.lower()}|{kind}|{source_id.lower()}|")):
+                raise ValueError("Imported entry identity is ambiguous.")
+            by_key[key] = entry
+            slugs.add(slug)
+            canonical(entry["metadata"])
+            if kind == "item":
+                title = normalize_lookup(entry["title"])
+                item_titles[title] = item_titles.get(title, 0) + 1
+        rows = get_db().execute(
+            "SELECT library_slug,source_id,entry_key,entry_type,slug,title,source_page,source_path,metadata_json "
+            "FROM systems_entries WHERE library_slug=? AND source_id=? AND entry_type=?",
+            (library_slug, source_id, "item"),
+        ).fetchall()
+        retained = []
+        old_titles: dict[str, int] = {}
+        for row in rows:
+            if any(type(row[key]) is not str for key in ("library_slug", "source_id", *identity_fields, "metadata_json")):
+                raise ValueError("Stored item identity or metadata is unreadable.")
+            metadata = json.loads(row["metadata_json"], object_pairs_hook=unique_object, parse_constant=invalid_constant)
+            if type(metadata) is not dict:
+                raise ValueError("Stored item metadata must be an object.")
+            canonical(metadata)
+            title = normalize_lookup(row["title"])
+            old_titles[title] = old_titles.get(title, 0) + 1
+            if any(field in metadata for field in protected):
+                retained.append((row, metadata))
+        replacements: dict[str, dict[str, Any]] = {}
+        for row, metadata in retained:
+            incoming = by_key.get(row["entry_key"])
+            title = normalize_lookup(row["title"])
+            if (incoming is None or old_titles[title] != 1 or item_titles.get(title) != 1
+                    or any(incoming[key] != row[key] for key in identity_fields)):
+                raise ValueError("Protected item identity changed, disappeared or became ambiguous; reconcile it before import.")
+            merged = dict(incoming["metadata"])
+            if "spell_property_modifiers" in metadata:
+                from .character_spell_properties import normalize_item_spell_properties
+                try:
+                    reviewed_properties = normalize_item_spell_properties(metadata["spell_property_modifiers"])
+                except (ValueError, TypeError) as error:
+                    raise ValueError("Stored reviewed spell properties require reconciliation before import.") from error
+                if "spell_support" in metadata and canonical(metadata["spell_support"]) == "[]":
+                    if "spell_support" in merged and canonical(merged["spell_support"]) != "[]":
+                        raise ValueError("Imported spell grants conflict with the reviewed non-entitlement choice.")
+                    # Preserve the paired explicit empty; future ordinary prose
+                    # saves must not re-infer the superseded cast-clause grant.
+                    merged["spell_support"] = []
+                elif any(isinstance(rule, dict) and rule.get("legacy_source_row_id")
+                         for rule in reviewed_properties):
+                    raise ValueError("Reviewed legacy spell reclassification lacks its explicit empty grant choice.")
+            property_evidence = "native_spell_property_modifiers"
+            if property_evidence in merged and (property_evidence not in metadata
+                    or canonical(metadata[property_evidence]) != canonical(merged[property_evidence])):
+                raise ValueError("Unreviewed native spell properties changed; reconcile them before import.")
+            inert = "native_spellcasting_modifiers"
+            active = "spellcasting_modifiers"
+            if inert not in metadata and inert in merged:
+                raise ValueError("New unreviewed native evidence conflicts with a protected item; reconcile it before import.")
+            if (inert in metadata and inert in merged
+                    and canonical(metadata[inert]) != canonical(merged[inert])):
+                raise ValueError("Unreviewed native item extensions changed; reconcile them before import.")
+            # Omitted fresh source data is not an instruction to clear retained
+            # pending evidence. Explicit new values above must match by JSON type.
+            for field in protected:
+                if field == "spell_property_modifiers" and field in metadata and field in merged and canonical(metadata[field]) != canonical(merged[field]):
+                    raise ValueError("Reviewed spell properties changed; reconcile them before import.")
+                if field in metadata:
+                    merged[field] = copy.deepcopy(metadata[field])
+            if inert in metadata and active not in metadata:
+                merged.pop(active, None)
+            replacements[row["entry_key"]] = {**incoming, "metadata": merged}
+        return [replacements.get(entry["entry_key"], entry) for entry in entries]
+
+    def _replace_entries_for_source(
+        self,
+        library_slug: str,
+        source_id: str,
+        *,
+        entries: list[dict[str, Any]],
+        entry_types: list[str] | None = None,
     ) -> int:
         now = isoformat(utcnow())
         connection = get_db()
@@ -1751,33 +1995,37 @@ class SystemsStore:
         summary: dict[str, Any] | None = None,
         started_by_user_id: int | None = None,
     ) -> SystemsImportRunRecord:
+        connection = self.assert_import_ownership()
         now = isoformat(utcnow())
-        connection = get_db()
-        cursor = connection.execute(
-            """
-            INSERT INTO systems_import_runs (
-                library_slug,
-                source_id,
-                status,
-                import_version,
-                source_path,
-                summary_json,
-                started_at,
-                started_by_user_id
+        try:
+            cursor = connection.execute(
+                """
+                INSERT INTO systems_import_runs (
+                    library_slug,
+                    source_id,
+                    status,
+                    import_version,
+                    source_path,
+                    summary_json,
+                    started_at,
+                    started_by_user_id
+                )
+                VALUES (?, ?, 'started', ?, ?, ?, ?, ?)
+                """,
+                (
+                    library_slug,
+                    source_id,
+                    import_version,
+                    source_path,
+                    json.dumps(summary or {}, sort_keys=True),
+                    now,
+                    started_by_user_id,
+                ),
             )
-            VALUES (?, ?, 'started', ?, ?, ?, ?, ?)
-            """,
-            (
-                library_slug,
-                source_id,
-                import_version,
-                source_path,
-                json.dumps(summary or {}, sort_keys=True),
-                now,
-                started_by_user_id,
-            ),
-        )
-        connection.commit()
+            connection.commit()
+        except BaseException:
+            self._rollback_owned_import_write(connection)
+            raise
         row = get_db().execute(
             "SELECT * FROM systems_import_runs WHERE id = ?",
             (int(cursor.lastrowid),),
@@ -1821,32 +2069,29 @@ class SystemsStore:
         return [record for row in rows if (record := self._map_import_run(row)) is not None]
 
     def complete_import_run(self, import_run_id: int, *, summary: dict[str, Any] | None = None) -> None:
-        now = isoformat(utcnow())
-        get_db().execute(
-            """
-            UPDATE systems_import_runs
-            SET status = 'completed',
-                summary_json = ?,
-                completed_at = ?
-            WHERE id = ?
-            """,
-            (json.dumps(summary or {}, sort_keys=True), now, import_run_id),
-        )
-        get_db().commit()
+        self._update_import_run_status(import_run_id, "completed", summary)
 
     def fail_import_run(self, import_run_id: int, *, summary: dict[str, Any] | None = None) -> None:
+        self._update_import_run_status(import_run_id, "failed", summary)
+
+    def _update_import_run_status(self, import_run_id: int, status: str, summary: dict[str, Any] | None) -> None:
+        connection = self.assert_import_ownership()
         now = isoformat(utcnow())
-        get_db().execute(
-            """
-            UPDATE systems_import_runs
-            SET status = 'failed',
-                summary_json = ?,
-                completed_at = ?
-            WHERE id = ?
-            """,
-            (json.dumps(summary or {}, sort_keys=True), now, import_run_id),
-        )
-        get_db().commit()
+        try:
+            connection.execute(
+                """
+                UPDATE systems_import_runs
+                SET status = ?,
+                    summary_json = ?,
+                    completed_at = ?
+                WHERE id = ?
+                """,
+                (status, json.dumps(summary or {}, sort_keys=True), now, import_run_id),
+            )
+            connection.commit()
+        except BaseException:
+            self._rollback_owned_import_write(connection)
+            raise
 
     def _map_library(self, row: sqlite3.Row | None) -> SystemsLibraryRecord | None:
         if row is None:
@@ -1897,7 +2142,10 @@ class SystemsStore:
     def _map_entry(self, row: sqlite3.Row | None) -> SystemsEntryRecord | None:
         if row is None:
             return None
-        return SystemsEntryRecord(
+        return SystemsEntryRecord(**self._entry_fields(row))
+
+    def _entry_fields(self, row: sqlite3.Row) -> dict[str, Any]:
+        return dict(
             id=int(row["id"]),
             library_slug=str(row["library_slug"]),
             source_id=str(row["source_id"]),
@@ -2050,3 +2298,181 @@ class SystemsStore:
             parameters.append(like_value)
             clauses.append(f"({' OR '.join(term_clauses)})")
         return f" AND {' AND '.join(clauses)}", parameters
+
+
+_NATIVE_FEATURE_METHODS = {name: getattr(SystemsStore, name) for name in (
+    "_map_entry", "_entry_fields", "_entry_rows_for_campaign", "_feature_catalog_facts",
+    "_load_json_object", "list_entries_for_campaign", "_sort_entries_for_source_browse")}
+_NATIVE_ENTRY_CLASS = SystemsEntryRecord
+_NATIVE_ENTRY_INIT = SystemsEntryRecord.__init__
+_NATIVE_STORE_CLASS = SystemsStore
+_NATIVE_ENTRY_LAYOUT = tuple((name, value) for name, value in vars(SystemsEntryRecord).items()
+                             if name != "__slotnames__")
+_NATIVE_ENTRY_SLOTNAMES = tuple(SystemsEntryRecord.__slots__)
+_NATIVE_SLOT_CACHE_ABSENT = object()
+_NATIVE_ENTRY_PROTOCOLS = {name: getattr(SystemsEntryRecord, name) for name in (
+    "__new__", "__init__", "__getattribute__", "__setattr__", "__eq__")}
+_NATIVE_ENTRY_FIELDS = tuple((field, field.name, field.init) for field in fields(SystemsEntryRecord))
+_NATIVE_STORE_ACCESS = SystemsStore.__getattribute__
+_NATIVE_STORE_DICT = vars(SystemsStore)["__dict__"]
+_NATIVE_INTERPRETERS = (sanitize_nested_html_fields, sanitize_rich_html, parse_timestamp, utcnow)
+
+
+def _native_entry_layout_matches():
+    layout = vars(SystemsEntryRecord)
+    slotnames = layout.get("__slotnames__", _NATIVE_SLOT_CACHE_ABSENT)
+    has_cache = slotnames is not _NATIVE_SLOT_CACHE_ABSENT
+    if has_cache:
+        # copyreg lazily records these existing physical slots during ordinary
+        # deepcopy. This adds no field or callback to the record's recipe.
+        if type(slotnames) is not list or len(slotnames) != len(_NATIVE_ENTRY_SLOTNAMES):
+            return False
+        if any(type(name) is not str or name != expected
+               for name, expected in zip(slotnames, _NATIVE_ENTRY_SLOTNAMES)):
+            return False
+    return (len(layout) == len(_NATIVE_ENTRY_LAYOUT) + int(has_cache)
+            and all(name in layout and layout[name] is value
+                    for name, value in _NATIVE_ENTRY_LAYOUT))
+
+
+class ConnectionReadSystemsStore:
+    """Closed composition view: no seed, refresh or mutation forwarding."""
+
+    __slots__ = ("_store", "_connection", "_phase")
+
+    def __init__(self, store, connection, phase):
+        self._store = store
+        self._connection = connection
+        self._phase = phase
+
+    def __getattr__(self, name):
+        # A refusal, never delegation to a mutation/bootstrap API. Optional
+        # unsupported-capability probes cannot leave this phase issuable.
+        if self._phase is not None:
+            self._phase.owner._failed = True
+        raise AttributeError("Unsupported phase Systems read capability.")
+
+    def _read(self, method, args, kwargs):
+        def load():
+            return getattr(self._store, method)(*args, **kwargs, connection=self._connection)
+        if self._phase is None:
+            return load()
+        return self._phase.store_read(method, args, kwargs, load)
+
+    def _supports_feature_facts(self):
+        # Identity-only checks over known stock classes/functions. Do not probe
+        # __func__ or equality on a caller-provided callable or metaclass.
+        return (self._phase is not None and SystemsStore is _NATIVE_STORE_CLASS
+            and type(self._store) is _NATIVE_STORE_CLASS
+            and SystemsStore.__getattribute__ is _NATIVE_STORE_ACCESS
+            and vars(SystemsStore).get("__dict__") is _NATIVE_STORE_DICT
+            and not any(name in object.__getattribute__(self._store, "__dict__")
+                        for name in _NATIVE_FEATURE_METHODS)
+            and all(vars(SystemsStore).get(name) is original
+                    for name, original in _NATIVE_FEATURE_METHODS.items())
+            and SystemsEntryRecord is _NATIVE_ENTRY_CLASS
+            and SystemsEntryRecord.__init__ is _NATIVE_ENTRY_INIT
+            and _native_entry_layout_matches()
+            and all(getattr(SystemsEntryRecord, name) is value
+                    for name, value in _NATIVE_ENTRY_PROTOCOLS.items())
+            and len(fields(SystemsEntryRecord)) == len(_NATIVE_ENTRY_FIELDS)
+            and all(field is original and field.name is name and field.init is init
+                    for field, (original, name, init) in zip(fields(SystemsEntryRecord), _NATIVE_ENTRY_FIELDS))
+            and all(actual is expected for actual, expected in zip(
+                (sanitize_nested_html_fields, sanitize_rich_html, parse_timestamp, utcnow),
+                _NATIVE_INTERPRETERS)))
+
+    def _supports_current_inputs(self):
+        return (type(self) is ConnectionReadSystemsStore and self._supports_feature_facts()
+            and not any(name in object.__getattribute__(self._store, "__dict__")
+                        for name, _original in _CURRENT_INPUT_STORE_METHODS)
+            and all(getattr(SystemsStore, name) is original for name, original in _CURRENT_INPUT_STORE_METHODS)
+            and all(getattr(ConnectionReadSystemsStore, name) is original
+                    for name, original in _CURRENT_INPUT_CONNECTION_METHODS))
+
+    def _feature_catalog_facts(self, *args, **kwargs):
+        if not self._supports_feature_facts():
+            raise RuntimeError("Native feature facts require an ordinary Systems store.")
+        if (kwargs.get("entry_type") not in {"classfeature", "subclassfeature", "item", "spell"}
+                or kwargs.get("query", "") != "" or kwargs.get("limit") is not None
+                or kwargs.get("offset", 0) != 0):
+            raise ValueError("Unsupported native feature catalog selector.")
+        return self._phase.store_fact_read("list_entries_for_campaign", args, kwargs,
+            lambda: self._store._feature_catalog_facts(*args, **kwargs, connection=self._connection))
+
+    def get_durable_revision(self, *args, **kwargs):
+        return self._read("get_durable_revision", args, kwargs)
+
+    def get_library_with_revision(self, *args, **kwargs):
+        return self._read("get_library_with_revision", args, kwargs)
+
+    def get_library(self, *args, **kwargs):
+        return self._read("get_library", args, kwargs)
+
+    def get_source(self, *args, **kwargs):
+        return self._read("get_source", args, kwargs)
+
+    def list_sources(self, *args, **kwargs):
+        return self._read("list_sources", args, kwargs)
+
+    def get_campaign_policy(self, *args, **kwargs):
+        return self._read("get_campaign_policy", args, kwargs)
+
+    def get_campaign_enabled_source(self, *args, **kwargs):
+        return self._read("get_campaign_enabled_source", args, kwargs)
+
+    def list_campaign_enabled_sources(self, *args, **kwargs):
+        return self._read("list_campaign_enabled_sources", args, kwargs)
+
+    def get_campaign_entry_override(self, *args, **kwargs):
+        return self._read("get_campaign_entry_override", args, kwargs)
+
+    def list_campaign_entry_overrides(self, *args, **kwargs):
+        return self._read("list_campaign_entry_overrides", args, kwargs)
+
+    def get_entry(self, *args, **kwargs):
+        return self._read("get_entry", args, kwargs)
+
+    def get_entry_by_slug(self, *args, **kwargs):
+        return self._read("get_entry_by_slug", args, kwargs)
+
+    def get_entry_by_identity(self, *args, **kwargs):
+        return self._read("get_entry_by_identity", args, kwargs)
+
+    def list_entries_for_source(self, *args, **kwargs):
+        return self._read("list_entries_for_source", args, kwargs)
+
+    def list_entries_for_campaign_source(self, *args, **kwargs):
+        return self._read("list_entries_for_campaign_source", args, kwargs)
+
+    def list_entries_for_campaign(self, *args, **kwargs):
+        return self._read("list_entries_for_campaign", args, kwargs)
+
+    def list_entries_for_campaign_by_identity(self, *args, **kwargs):
+        return self._read("list_entries_for_campaign_by_identity", args, kwargs)
+
+    def search_entries(self, *args, **kwargs):
+        return self._read("search_entries", args, kwargs)
+
+    def _search_eligible_campaign_entries(self, *args, **kwargs):
+        return self._read("_search_eligible_campaign_entries", args, kwargs)
+
+
+_CURRENT_INPUT_STORE_METHODS = tuple((name, getattr(SystemsStore, name)) for name in (
+    "get_entry", "get_entry_by_slug", "list_entries_for_campaign_by_identity",
+    "get_campaign_entry_override", "list_campaign_enabled_sources", "list_campaign_entry_overrides"))
+_CURRENT_INPUT_CONNECTION_METHODS = tuple((name, getattr(ConnectionReadSystemsStore, name)) for name in (
+    "__getattribute__", "_read", "_supports_feature_facts", "_supports_current_inputs", "get_entry", "get_entry_by_slug",
+    "list_entries_for_campaign_by_identity", "get_campaign_entry_override",
+    "list_campaign_enabled_sources", "list_campaign_entry_overrides"))
+_CURRENT_INPUT_CONNECTION_CLASS = ConnectionReadSystemsStore
+_CURRENT_INPUT_CONNECTION_SUPPORT = ConnectionReadSystemsStore._supports_current_inputs
+
+
+def ordinary_current_input_store(store):
+    if (type(store) is not _CURRENT_INPUT_CONNECTION_CLASS
+            or ConnectionReadSystemsStore is not _CURRENT_INPUT_CONNECTION_CLASS
+            or any(getattr(_CURRENT_INPUT_CONNECTION_CLASS, name) is not original
+                   for name, original in _CURRENT_INPUT_CONNECTION_METHODS)):
+        return False
+    return _CURRENT_INPUT_CONNECTION_SUPPORT(store)

@@ -26,6 +26,8 @@ MAX_TEXT_LENGTH = 512
 MAX_DIFF_ROWS = 512
 _DIGEST_DOMAIN = b"campaign-player-wiki:character-update-plan:v1\x00"
 class OperationKind(str, Enum):
+    NATIVE_LANGUAGE_ELECTIVE_DECISION = "native_language_elective_decision"
+    NATIVE_RECONSTRUCTION = "native_reconstruction"
     CAMPAIGN_FEATURE_GRANT = "campaign_feature_grant"
     CAMPAIGN_EQUIPMENT_ADD = "campaign_equipment_add"
     SYSTEMS_ITEM_ADD = "systems_item_add"
@@ -61,6 +63,8 @@ class ChangeKind(str, Enum):
 
 
 class SemanticCategory(str, Enum):
+    BUILD = "build and source choices"
+    PLAY_STATE = "preserved play state"
     FEATURES = "features"
     EQUIPMENT_INVENTORY = "equipment/inventory"
     SPELLS = "spells"

@@ -766,6 +766,15 @@ def register_systems_api_routes(
 
         try:
             payload = dependencies.load_json_object()
+            if "registered_feature_grant" in payload:
+                from .systems_feature_authoring import create_registered_campaign_feature
+                # The selected owner includes its required audit and returns only
+                # verified no-seed facts; do not run the legacy management builder.
+                result = create_registered_campaign_feature(
+                    dependencies.get_systems_service(), dependencies.get_auth_store(),
+                    campaign_slug, payload,
+                )
+                return jsonify(result)
             item_mechanics = payload.get("item_mechanics")
             entry = dependencies.get_systems_service().create_custom_campaign_entry(
                 campaign_slug,
@@ -777,6 +786,8 @@ def register_systems_api_routes(
                 search_metadata=str(payload.get("search_metadata") or ""),
                 body_markdown=str(payload.get("body_markdown") or ""),
                 source_page_ref=str(payload.get("source_page_ref") or ""),
+                spell_profile=payload.get("spell_profile"),
+                spell_higher_level_markdown=payload.get("spell_higher_level_markdown"),
                 item_mechanics_review_status=(
                     payload.get("item_mechanics_review_status")
                     or payload.get("mechanics_review_status")
@@ -828,6 +839,10 @@ def register_systems_api_routes(
 
         try:
             payload = dependencies.load_json_object()
+            if "registered_feature_grant" in payload:
+                raise SystemsPolicyValidationError("Registered feature grants are create-only.")
+            if "metadata" in payload or "mechanic_effects" in payload:
+                raise SystemsPolicyValidationError("Body edits cannot replace server-owned mechanic metadata.")
             item_mechanics = payload.get("item_mechanics")
             entry = dependencies.get_systems_service().update_custom_campaign_entry(
                 campaign_slug,
@@ -839,6 +854,8 @@ def register_systems_api_routes(
                 search_metadata=str(payload.get("search_metadata") or ""),
                 body_markdown=str(payload.get("body_markdown") or ""),
                 source_page_ref=str(payload.get("source_page_ref") or ""),
+                spell_profile=payload.get("spell_profile"),
+                spell_higher_level_markdown=payload.get("spell_higher_level_markdown"),
                 item_mechanics_review_status=(
                     payload.get("item_mechanics_review_status")
                     or payload.get("mechanics_review_status")

@@ -169,6 +169,7 @@ domain and access contract for each method/path pair.
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/vitals`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/resources/<resource_id>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<level>`
+- `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/flexible-casting`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>`
 - `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-infusions`
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/item-actions/<action_id>/use`
@@ -187,6 +188,19 @@ domain and access contract for each method/path pair.
 - `POST /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/rest/<rest_type>`
 
 ## Transport Ownership
+
+The Flexible Casting POST accepts `expected_revision`, `direction` (`create` or
+`convert`), `level`, and, for conversion, the explicit `slot_lane_id` source.
+It uses the existing authenticated character mutation response/error envelope.
+Current PHB2014 source and Sorcery Point ownership must qualify in activated
+committed-source mode. Creation costs 2/3/5/6/7 points for levels 1–5; conversion
+gains the selected slot's level without exceeding the point cap. The exchange is
+atomic with its state action audit. Slot pools preserve source-specific capacity
+and usage beneath aggregate `spellcasting.slot_totals`; `slot_pools` and
+`flexible_casting` provide qualified source choices and action availability.
+Temporary-slot spending through the existing spell-slot PATCH accepts positive
+`delta_used`; an absolute `used` edit cannot restore granted slots. Long rest
+expires their capacity. Ordinary class-slot usage contracts remain unchanged.
 
 The final Phase 3B ownership inventory in this section is integrated on pushed `main` and deployed as Fly release `223`, built from exact commit `e5bd742676b958fa5af932c2489b8972d3bbca1a`. The documentation closeout that records this release is a later docs-only descendant and is not part of that deployed image. `player_wiki/session_api_routes.py` owns all 13 live-session JSON handlers and explicit registrations on the existing API Blueprint. Character API registrar modules own their extracted Character transports, Auth API registrar modules own the extracted `/me` transports, and `admin_api_routes.py` owns 12 Admin API rules on that same Blueprint. `player_wiki/api.py` retains the Blueprint, 35 direct route decorators, shared request/auth/error helpers, serializers, service composition, and registrar dependency wiring. Character `/session/character` and character-session endpoints remain Characters-owned. The low-level `/content/...` APIs remain Publishing-owned; neither family is counted among the 13 live-session API rules.
 
@@ -216,6 +230,57 @@ Use the browser Player Wiki lane when you want the built-in removal guidance, ar
 
 ## Request Notes
 
+### Source-owned noncasting item use
+
+`PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>`
+accepts `{"operation":"item_attack_d20","expected_revision":123,"confirm_attack":true}`
+for an exact currently qualified physical item with an approved `item_capabilities`
+v3 attack-d20-substitution declaration. Use the actual current revision. These
+are the only JSON fields; duplicate fields and client replacement values,
+targets, attack totals/outcomes or spell-slot fields are rejected. HTML uses the
+existing authenticated inventory POST with CSRF and `confirm_attack=yes`.
+
+The source supplies replacement 10, cost one, equipped-only activation and its
+fixed counter/recovery rule. The item must have unique quantity-one ownership,
+current activation custody, and a known effective count of at least one with
+maximum equal to the source maximum. Attunement is not required. Unknown,
+exhausted, unequipped, ambiguous or incompatible ownership/counts refuse without
+changing state. The existing permissions and conflict/error envelopes apply.
+
+Success records the choice of 10 instead of the attack d20 and decrements only
+that physical item's current uses. The state update and
+`character_item_action_applied` audit commit atomically under the existing
+source reservation/CAS. The ordinary response returns refreshed character and
+inventory data; `presented_inventory[].item_noncasting_action` supplies the
+current rule, replacement, cost, source/campaign recovery and availability reason.
+This does not resolve an attack, hit, target, damage, save or check. Modifiers and
+final outcomes remain table managed. A stale revision refuses and is not an
+instruction to replay an uncertain use.
+
+Manager admission of a real unrecorded counter and existing count observations
+remain separate `item_uses` operations. Recovery uses the existing explicit rest
+path; an `at_dawn` source retains that fact alongside its approved long-rest
+mapping. Nothing initializes, refills or equips the item on read or use. Shared
+Sheet/editable Session controls use this operation; current read-only
+Session/Combat inventory surfaces remain read-only. Existing v1/v2 item spell
+operations are unchanged.
+
+### Source-owned item spell operations
+
+The existing `PATCH /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/inventory/<item_id>` accepts the following additional DND-5E `operation` values when that exact physical item has a currently approved `item_capabilities` v2 declaration. All require the normal character edit permission and integer `expected_revision`; the existing browser inventory POST uses the same service with CSRF protection. These operations require activated source-owned state and do not infer capabilities from item names or prose.
+
+| Operation | Fields and effect |
+| --- | --- |
+| `item_cast` | `mode_id`, plus `slot_lane_id` and `slot_level` for a paid mode. A source-declared reaction trigger requires boolean `confirm_trigger: true`. Spends the selected qualified slot or one known item use atomically; paid and free budgets stay separate. |
+| `storage_initialize` | Manager-only boolean `confirm_observation: true` records an explicitly observed empty baseline when no ledger exists. It cannot clear or reset an existing ledger. |
+| `storage_store` | `choice_id` from the current inventory projection, `slot_lane_id`, `slot_level`. Atomically spends a compatible qualified slot and adds the selected castable class spell with frozen original-caster values. |
+| `storage_external` | Manager-only `confirm_observation: true`, exact `spell_entry_key`, `slot_level`, actual `caster`, `ability` (`str`, `dex`, `con`, `int`, `wis`, `cha`), integer `ability_modifier`, `save_dc`, `attack_bonus`. Records an actual externally funded casting; its costs must be recorded separately. Omitted original metrics are never filled from the wearer. |
+| `storage_release` | `stored_id` selects one current authenticated stored entry. Requires the declared worn/attuned activation, removes that entry and spends no wearer slot. |
+
+For a slot selection, clients may instead send the existing `slot_selection` string `<pool-id>|<level>`; sending it together with separate slot fields refuses ambiguity. HTML confirmations use `yes`; JSON confirmations require boolean `true`. Source, custody, capacity, qualified slot availability and state revision are rechecked under the existing source-write transaction. Unsupported or unrecorded availability is not initialized by a cast or a read. Recording a cast spends its modeled cost; targeting, components, checks and effects remain table managed.
+
+`presented_inventory` exposes `item_casting_modes` with explicit availability/reasons and current slot options, and `spell_storage` with known/unrecorded status, level capacity/occupancy, authenticated stored entries and available choices. Unknown storage is not an empty list of castable spells. Stored values retain their original source/caster snapshot; later wearer bonuses do not update them. The optional state `item_spell_storage` is preserved by other write families and authenticated by the latest actor-bound item audit checkpoint. Ordinary Character and legacy editable Session controls use this shared model; existing read-only Session/Combat inventory surfaces show the same facts without adding write controls. Source support alone does not admit an item declaration, establish a character baseline or prove an exercised operation.
+
 - `GET /api/v1/app` exposes the current app version, build id, runtime, and active DB/campaign paths.
 - The shared systems ingest endpoints are app-admin only. Campaign DMs can manage campaign systems policy, but only app admins can import new shared library source data.
 - `POST /api/v1/systems/imports/dnd5e` accepts `source_ids`, optional `entry_types`, and an embedded `archive` object with `filename` and `data_base64`. The archive must be a `.zip` containing a compatible DND 5E source `data/` directory.
@@ -233,7 +298,7 @@ Use the browser Player Wiki lane when you want the built-in removal guidance, ar
 - `GET /api/v1/campaigns/<campaign_slug>/control` and `PATCH /api/v1/campaigns/<campaign_slug>/control/visibility` expose the Campaign Control visibility editor. They require campaign visibility management permission, return the same selected/configured/default/effective visibility rows as the Flask Control panel, reject invalid visibility values, reserve `private` for app admins, clear visibility caches after writes, and write `campaign_visibility_updated` audit events for changed scopes.
 - `GET /api/v1/campaigns/<campaign_slug>/help` returns the campaign-scoped Help context used by API clients, including visible help surfaces, viewer-role summary, effective visibility rows, cross-cutting limits, and Flask link fields. It follows campaign-scope access and reuses the same Help context builder as the Flask Help page.
 - The `/wiki` endpoints are player-facing published-wiki reads for API clients. `GET .../wiki` follows campaign-scope access and returns a restricted-wiki message when the campaign is visible but the wiki scope is not; section and page detail reads require wiki-scope access. These endpoints return only visible published pages, rendered body HTML through the same repository renderer as Flask, Flask hrefs by default, and page image URLs only when the referenced protected campaign asset exists. Stale `/app-next` links in rendered wiki body HTML are rewritten to `/campaigns/...`. A page request using a legacy slug declared in visible page frontmatter `redirect_from` receives a permanent `308` redirect to the canonical page-detail API URL; a currently visible page at the legacy slug takes precedence during staged migrations.
-- `PATCH /api/v1/campaigns/<campaign_slug>/content/config` currently supports the live editable campaign fields `title`, `summary`, `system`, `current_session`, `source_wiki_root`, and `systems_library`. Supported `system` and `systems_library` aliases are canonicalized through the app system-policy layer, including `DND-5E` and `Xianxia`.
+- `PATCH /api/v1/campaigns/<campaign_slug>/content/config` supports the editable campaign fields `title`, `summary`, `system`, `current_session`, `source_wiki_root`, `systems_library`, and boolean `allow_artificer_infusion_deactivation`. The last field enables a campaign ruling and defaults to disabled when absent. Supported `system` and `systems_library` aliases are canonicalized through the app system-policy layer, including `DND-5E` and `Xianxia`.
 - Asset detail reads return `data_base64`, and asset writes use an embedded `asset_file` object with `filename` and `data_base64`. `PUT .../content/assets/<asset_ref>` accepts at most 8 MiB of valid PNG, JPEG, GIF, or WebP bytes matching the asset reference suffix (case-insensitively; `.jpg` and `.jpeg` both mean JPEG). Validation also limits each frame to 16 million pixels, cumulative decoded pixels to 64 million, and frame count to 256. GIF files may contain at most 65,536 encoded extension bytes total, counting each extension introducer, label, sub-block length, payload, and zero terminator; header, palette, image descriptor, LZW image data, and trailer bytes do not count. The embedded filename and optional media type do not determine the accepted format. The generic API preserves accepted bytes and animations without conversion; unsupported, malformed, mismatched, or over-budget input returns the existing HTTP 400 `validation_error` envelope before a file is written. Successful writes keep the HTTP 200 asset response. Protected browser asset GET/HEAD reads display only valid matching raster files within those limits inline; unsupported, unknown, invalid, or over-budget legacy files remain available as `application/octet-stream` attachments with `nosniff` and a restrictive document CSP. The character portrait asset route applies the same serving rule under Characters-scope access.
 - Generic content asset API PUT and DELETE reject the reserved `wiki-managed/` namespace and aliases resolving into it with the existing `400 validation_error` envelope; authorized content managers retain asset list/detail reads. New browser Wiki images and direct Session one-shot copies use unique immutable managed refs under `wiki-managed/v1/`. A content manager can GET/HEAD a canonical managed ref for draft preview even without Wiki-scope access. Other viewers need Wiki-scope access and an exact currently visible page referencing the ref with no active reconciliation journal owning it; denied reads return 404. Authorized and denied managed responses, including Range and conditional responses, use `private, no-store`. Existing legacy asset refs keep their prior access behavior.
 - The `/content/...` management endpoints are DM/admin only. They expose unpublished pages and raw character file content, so they intentionally do not follow normal player-facing visibility rules.
@@ -304,3 +369,120 @@ Use the browser Player Wiki lane when you want the built-in removal guidance, ar
 - The browser normal Character workflow now favors inline per-form state edits; DND-5E sheets expose HP, resources, spell slots, inventory quantities, currency, and notes, while Xianxia sheets expose Resources, Techniques request/record actions, Inventory/currency, and Notes state lanes. Batch behavior is still available for compatibility and is not the recommended browser workflow.
 - Browser lane boundaries are now: the normal Character page inline state slice for quick DND HP/resource/slot/inventory/currency/notes and Xianxia resource/technique/inventory/currency/notes updates, `Session Character` for active-session edits, and `Combat`/`Encounter status` for encounter-context edits tied to `combatant=<id>`.
 - API reads and writes use the same visibility and role checks as the app. A DM token can do DM work; a player token only sees or edits what that player could in the site.
+
+### Custom spell profiles
+
+The ordinary custom-entry create/update endpoints additionally accept `spell_profile` for DND-5E entries of type `spell`, plus optional string `spell_higher_level_markdown`. The serializer returns both fields for editing. Existing authentication, manager authorization, CSRF, immutable update identity, error envelopes and partial-outcome ordering apply.
+
+`spell_profile` is a closed object with required `level`, `school`, `casting_time`, `range`, `components`, `duration`, and `classes`; optional `ritual`, `savingThrow`, and `spellAttack`. These use the imported spell metadata shapes. `classes` accepts `fromClassList: [{"name": "Wizard", "source": "PHB"}]`; derived `class_lists` is server-owned. The service validates nested keys, types and bounds (profile at most 16,000 characters). Components may include material text or `{text, cost?, consume?}`; cost is copper pieces and consume is an explicit boolean. Unsupported fields or type conversions return the existing validation envelope rather than silently dropping mechanics.
+
+Omitted/null `spell_profile` preserves existing mechanics; `{}` is invalid. Existing profile fields omitted from an otherwise complete replacement are retained unless explicitly updated (for example ritual false or an empty savingThrow list). The main `body_markdown` remains required. Higher-level text has a 30,000-character limit; omission preserves the existing authored value, while an explicit empty string clears it. The form and API store current sanitized narrative projections alongside the retained profile. Legacy higher-level structures without editor text require an explicit source-backed separation. Source declarations neither authorize a spell cast nor establish caster metrics for a DM-selected ability check.
+
+### Armor Model Read Projection
+
+DND Equipment payloads expose `arcane_armor_state.hands`, keyed by `main-hand` and `off-hand`, with `status` (`clear`, `occupied`, or `unknown`) and `reason`. `enabled` is a strict retained boolean or null when unknown. `thunder_gauntlets_available` requires a qualified selected Guardian, current wearing and at least one proved clear hand; `defensive_field_available` requires the selected feature and current wearing independently of hands. An unproved model/source/activation cannot become availability through a name or copied value.
+
+The shared read frame may include per-hand STR/INT attack formula alternatives and availability reasons, plus the current class-level Defensive Field amount. They are observational projections and do not enter `update_safe_definition`, raw exports or save provenance. Existing equipment and feature-state writes retain their separate contracts; no model switch, hand-assignment, attack, resource use or doffing effect endpoint is added. An item's generic wondrous classification does not prove worn versus held placement, so unsupported placement remains unknown.
+
+Full Character serialization reuses its already computed armor frame for that record. An independent equipment read explicitly scopes components, catalogs and derivation to equipment, current ability layers and transient numeric dependencies, using targeted active-item support. It does not request full sheet-entry or spell normalization solely to produce the armor frame. This is a dependency contract, not a measured latency guarantee.
+
+Native reconstruction Review can show explicit exact-source `armor_model_choices` with the selected class/branch and unchanged historical summary. Independent reconstruction custody and current source checks are required on subsequent reads. Typed artisan-tool choices remain separate class/background proficiency selections; a chosen tool must already be retained, and this support does not grant a physical item or change current play state.
+
+### Explicit Reconstruction Skill Adoption
+
+The existing browser reconstruction form accepts a separate scalar `skill_adoption_<canonical skill key>` choice: `keep` or the current server-generated contract digest for an eligible existing `none` skill and exact ordinary source slot. The corresponding `feature_proficiency_<index>` selection must independently choose that same skill. Unsupported, duplicate, stale or unused confirmations refuse. There is no arbitrary skill-row/bonus input or new API endpoint.
+
+Review includes the original row, source owner/slot and actual qualified derived result. Successful publication would retain immutable `source.native_reconstruction_choices.skill_adoptions` history and its independently audited reconstruction custody. A signed nonpublishing Review is not a saved adoption. Current reads require the source slot and recovered witness; later valid advancement may change expertise or bonus while preserving the historical record. Existing exact play-state, import, original-content and publication checks remain unchanged.
+
+### Optional Class Weapon Source Clauses
+
+Reconstruction recognizes the strict structured optional Firearms clause without adding a proficiency, permission field or required selection. A retained unproved Firearms label remains in the raw definition, with the existing unresolved-weapons status in Review. Fixed current class grants remain independently eligible. Unsupported structured shapes refuse reconstruction; the shared native read extractor withholds its class grant result without turning the object into a label or propagating a shape error. No endpoint, marker, choice index, play-state or publication contract changes.
+
+### Feature proficiency reconstruction and physical tracker associations
+
+Existing native creation/advancement and reconstruction routes share the typed class/subclass feature proficiency parser. No new mutation endpoint is introduced. Native feature proficiency choices are retained under `source.native_feature_proficiency_choices`, bound to source/class/member, prior inputs and selected branch by the native publication proof. They cannot be edited through an ordinary Character update. Reconstruction uses its existing explicit proficiency inputs and unresolved values; missing fixed proficiency observations are not automatically upgraded.
+
+Reconstruction may additionally accept `feature_auto_expertise_<owner-digest>` and `feature_tracker_association_<tracker-digest>` scalar fields. `keep` preserves the observation without adoption; other values must exactly match a currently offered contract digest. Automatic expertise preserves its original observation in `source.native_reconstruction_choices.automatic_tool_expertise`. Conditional retained acquisitions use `feature_proficiency_conditions`; physical associations use `tracker_associations`. These records are history, not independent authority. Their origin digests, complete prior observations and independently recovered generation-pair audit custody are required on replay. Signed Review, manager/CSRF checks, reserved recomputation, exact state, CAS and durable confirmation continue through the existing reconstruction path.
+
+Automatic tool expertise projects from the current authenticated capability and qualified proficient tools, including tools acquired later. It does not invent tool selections or change raw export/update-safe observations during a read. Physical resource identifiers remain unchanged across source qualification, normalization and advancement. Initial association offers support one source-owned class and fixed/level/half-level/PB/threshold capacities and supported sums; ability-dependent offers are withheld until independently qualified inputs are available. Unknown counts do not become known. These contracts do not authorize source admission, Character Apply, spending or recovery operations.
+
+Conditional reconstruction chronology is bounded to confirmed starting class/species/background grants or strictly earlier attained feature grants of the same class. Later or unordered current grants do not establish the prerequisite; unsupported chronology remains unresolved.
+
+Initial physical association also withholds an offer when a current item source modifies that pool capacity. An existing association with an active item bonus still targeting the canonical pool has unproved current capacity; it cannot silently fall back to a smaller base maximum. The saved physical tracker, count and capacity observations remain intact. This support does not retarget item bonuses.
+
+
+### Prepared ammunition and triggered item reactions
+
+The existing inventory PATCH/HTML POST also accepts the following disjoint
+operations, always with the exact current `expected_revision` and existing
+character access/CSRF rules. JSON rejects duplicate or unknown fields, nested
+values, client effect/metric data and conflicting slot selections. HTML uses
+`yes` for the confirmations; JSON requires `true`.
+
+- `item_triggered_reaction`: `confirm_reaction`, `trigger` (one of `pushed`,
+  `pulled`, `knocked_prone`, `fall`) and `target_kind` (`self` or
+  `willing_visible_creature`). Requires the exact current v3 source rule,
+  equipped item and qualified remaining use. Spends one use; does not resolve
+  target effects or maintain reaction economy. Attack confirmations are rejected.
+- `prepared_observe`: manager-only `confirm_observation`, `load_kind` (`empty`,
+  `mundane`, `enchanted`), optional `choice_id` and `slot_level`. The latter two
+  must be empty/absent for nonenchanted loads; enchanted loads require both.
+  Records a first actual current observation only, without spending a slot.
+- `prepared_load`: `confirm_reload`, `choice_id`, and either `slot_selection`
+  (`lane|level`) or `slot_lane_id` plus `slot_level` (1-9). Requires a known empty
+  load and qualified class/attunement/available slot. Atomically spends one slot
+  and records the load. It cannot replace an existing load.
+- `prepared_discharge`: `confirm_discharge`. Requires a known actual load and
+  qualified class/equipped/attuned ownership. Clears that load once; no slot cost
+  and no inferred hit, damage result, target or condition application.
+
+Prepared state is held in `item_prepared_ammunition`, keyed by unique physical
+item ID. Latest actor-bound audit custody, current source basis, full-state
+transition seals, source reservation and CAS guard its use. Unknown/stale facts
+remain preserved and disabled. No operation silently refills, deletes history,
+assigns an infusion or updates other characters. An unadopted source does not
+make a current-load observation or item action available.
+
+
+### Artificer assignment observations
+
+`GET /api/v1/campaigns/<campaign_slug>/characters/<character_slug>/session/artificer-assignments`
+returns `state_revision` and separate `assignments.infusions` / `.tinkering`
+status, maximum, entries, eligible choices and manual-effect limits. It requires
+session-edit permission and never initializes a ledger.
+
+`POST` on the same endpoint uses normal character mutation admission and returns
+the refreshed character. Supply integer `expected_revision`, `kind` (`infusions`
+or `tinkering`), `operation`, and boolean `confirm: true`. Keys must be unique;
+unknown fields, wrong types and nonfinite numbers are rejected.
+
+- `confirm_empty`: no further fields; confirms a genuinely empty unknown member
+  without erasing existing assignments or legacy observations.
+- `assign`: exact returned `choice_id`, `object_mode` (`inventory`/`external`),
+  `object_id`, `object_name`, `recipient`, eligible `object_kind`, `nonmagical: true`,
+  `attunement` (`unknown`/`none`/`self`/`other`), `touch: true`, `replace_oldest`
+  (empty below capacity; exact oldest assignment ID at capacity). Optional integer
+  `value_gp` must meet the Homunculus target's100gp minimum. Infusions require
+  `long_rest: true`. Tinkering requires `tools`, `action`, `tiny` all true,
+  `property_text`, integer `message_seconds` (1-6 for message, zero otherwise).
+  Only visual also requires `visual_type` (`text`/`picture`/`shapes`/`mixed`) and
+  `visual_text`: at most25 actual words, nonempty for text/mixed and empty for
+  picture/shapes. Property descriptions are separate from displayed text.
+- `end`: `assignment_id`, `reason`. Tinkering uses `action_touch` plus `action`
+  and `touch` true. Infusions may record `item_destroyed` or `death_duration`
+  with integer `days_elapsed`. `knowledge_loss` cannot end a still-known recipe;
+  stale knowledge requires reconciliation. `campaign_deactivation` records an
+  actual deactivation only when the current admitted campaign configuration
+  explicitly enables `allow_artificer_infusion_deactivation: true`. The action
+  requires `policy_revision` and `policy_sha256` from the returned infusion
+  `deactivation_policy`; stale policy is rejected. The action audit records the
+  configuration generation and digest; it does not infer a
+  rest, action, or touch cost.
+
+The optional version1 `artificer_assignments` ledger and same-transaction
+`character_artificer_assignment_applied` audit event preserve confirmed-empty
+versus unknown. Recipes, historical counters, inventory, history and unrelated
+play state remain unchanged. External observations do not write another character.
+These controls record assignments and rules; effects, companions, charges and
+recipient statistics remain table-managed. The legacy `artificer-infusions`
+endpoint remains withheld for typed adopters.

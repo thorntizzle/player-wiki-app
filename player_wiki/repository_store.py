@@ -4,6 +4,7 @@ import stat
 import time
 from dataclasses import replace
 from pathlib import Path
+from dataclasses import dataclass
 from threading import Lock
 
 from .campaign_page_refresh import (
@@ -11,7 +12,9 @@ from .campaign_page_refresh import (
     observe_path, validate_witnesses,
 )
 from .db import get_db
-from .repository import Repository, load_campaign, load_campaign_config, resolve_campaign_links
+from .repository import (Repository, load_campaign, load_campaign_config, resolve_campaign_links,
+                         build_page_redirect_index)
+from .models import Campaign
 
 
 class _DatabaseAuthoritativePageStore:
@@ -26,6 +29,26 @@ class _DatabaseAuthoritativePageStore:
 
     def __getattr__(self, name: str):
         return getattr(self._page_store, name)
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignAccessFacts:
+    """Fresh source facts only; never a permission or page-graph result."""
+
+    slug: str
+    system: str
+
+
+@dataclass(slots=True)
+class _CampaignAccessPages:
+    """Reuse visibility/redirect validation without an alias or backlink graph."""
+
+    slug: str
+    current_session: int
+    pages: dict
+
+    is_page_visible = Campaign.is_page_visible
+    visible_pages = Campaign.visible_pages
 
 
 class RepositoryStore:
@@ -106,14 +129,70 @@ class RepositoryStore:
                       last_loaded_unix=self._last_loaded_unix, campaigns_dir=str(self.campaigns_dir))
         from .committed_publication import active
         if active():
-            result.update(config_mirror_conflicts=getattr(self, "_config_conflicts", ()),
-                          page_mirror_conflicts=dict(self.page_store.mirror_conflicts))
+            from .committed_publication import read_snapshot
+            with self._lock:
+                config_conflicts, page_conflicts = read_snapshot(self._observe_committed_mirrors)()
+                self._config_conflicts = config_conflicts
+                self.page_store.mirror_conflicts.update(page_conflicts)
+                result.update(config_mirror_conflicts=config_conflicts,
+                              page_mirror_conflicts=dict(self.page_store.mirror_conflicts))
         return result
 
     def refresh(self) -> Repository:
         with self._lock:
             self._reload_repository()
             return self._repository
+
+    def get_campaign_access_facts(self, campaign_slug: str) -> CampaignAccessFacts | None:
+        """Prove the target's settings/pages without building its link graph."""
+        from .committed_publication import active, read_snapshot
+        from .character_reconstruction_inputs import current_input_scope
+        from .system_policy import normalize_system_code
+
+        if not isinstance(campaign_slug, str):
+            return None
+
+        def legacy_facts():
+            campaign = self.get().get_campaign(campaign_slug)
+            return (CampaignAccessFacts(campaign.slug, campaign.system)
+                    if campaign is not None else None)
+
+        # Reconstruction owns its complete immutable repository witness.
+        if current_input_scope() is not None:
+            return legacy_facts()
+
+        @read_snapshot
+        def observe():
+            if not active():
+                return False, None
+            exists = get_db().execute(
+                "SELECT 1 FROM committed_source_current "
+                "WHERE campaign_slug=? AND object_kind='config' LIMIT 1",
+                (campaign_slug,),
+            ).fetchone()
+            if exists is None:
+                return True, None
+            try:
+                spec = load_campaign_config(self.campaigns_dir / campaign_slug / "campaign.yaml")
+                if spec.slug != campaign_slug:
+                    return True, None
+                pages = self.page_store.list_pages(spec.slug)
+                by_route = {}
+                for page in pages:
+                    if page.route_slug in by_route:
+                        raise ValueError("Duplicate page slug in campaign access facts")
+                    by_route[page.route_slug] = page
+                facts = CampaignAccessFacts(spec.slug, normalize_system_code(spec.config.get("system", "")))
+            except ValueError:
+                # Match committed repository omission for an invalid campaign.
+                return True, None
+            # Redirect conflicts were outside the repository's omission catch.
+            build_page_redirect_index(_CampaignAccessPages(
+                spec.slug, int(spec.config.get("current_session", 0)), by_route))
+            return True, facts
+
+        activated, facts = observe()
+        return facts if activated else legacy_facts()
 
     def refresh_from_database(self) -> Repository:
         """Build from committed rows only; filesystem source evidence is not consumed."""
@@ -228,27 +307,65 @@ class RepositoryStore:
     def _reload_committed_repository(self):
         rows = get_db().execute("SELECT campaign_slug FROM committed_source_current WHERE object_kind='config' ORDER BY campaign_slug").fetchall()
         campaigns, committed_specs = {}, []
-        config_conflicts = []
+        for row in rows:
+            try:
+                from .character_reconstruction_inputs import current_input_scope
+                scope = current_input_scope()
+                path = self.campaigns_dir / row[0] / "campaign.yaml"
+                if scope is None:
+                    spec = load_campaign_config(path)
+                    campaign = load_campaign(spec.config_path, _DatabaseAuthoritativePageStore(self.page_store), config_spec=spec)
+                else:
+                    def observe():
+                        # These APIs still prove current generation bodies,
+                        # admission and every page projection on every get.
+                        current_spec = load_campaign_config(path)
+                        pages = self.page_store.list_pages(current_spec.slug)
+                        from .committed_publication import config
+                        source, _settings = config(current_spec.slug)
+                        return (id(get_db()), get_db().in_transaction, get_db().total_changes,
+                                current_spec, pages, source)
+
+                    def materialize(witness):
+                        current_spec = witness[3]
+                        current_campaign = load_campaign(current_spec.config_path,
+                            _DatabaseAuthoritativePageStore(self.page_store), config_spec=current_spec)
+                        resolve_campaign_links(current_campaign)
+                        return current_spec, current_campaign
+
+                    spec, campaign = scope.resolve(("repository_campaign", id(self), row[0]), observe, materialize)
+            except ValueError:
+                if scope is not None:
+                    # A scope refusal must not become a silently missing
+                    # campaign after its immutable input witness changed.
+                    raise
+                continue
+            committed_specs.append(spec)
+            if scope is None:
+                resolve_campaign_links(campaign)
+            campaigns[campaign.slug] = campaign
+        self._repository = Repository(campaigns, self.page_store, (), tuple(committed_specs))
+        self._last_loaded_unix = time.time()
+        return
+
+    def _observe_committed_mirrors(self):
+        """Observe diagnostic mirrors on demand, never to choose source authority."""
+        from .committed_publication import inspect_page_mirrors, config, digest, _mirror_bytes
+        rows = get_db().execute(
+            "SELECT campaign_slug FROM committed_source_current "
+            "WHERE object_kind='config' ORDER BY campaign_slug").fetchall()
+        config_conflicts, page_conflicts = [], {}
         for row in rows:
             try:
                 spec = load_campaign_config(self.campaigns_dir / row[0] / "campaign.yaml")
-                campaign = load_campaign(spec.config_path, _DatabaseAuthoritativePageStore(self.page_store), config_spec=spec)
             except ValueError:
                 continue
-            from .committed_publication import inspect_page_mirrors, config, digest, _mirror_bytes
             source, settings = config(spec.slug)
-            self.page_store.mirror_conflicts[spec.slug] = inspect_page_mirrors(
+            page_conflicts[spec.slug] = inspect_page_mirrors(
                 spec.slug, spec.content_root, spec.config_path.parent / settings.get("asset_dir", "assets"))
             try:
-                observed = _mirror_bytes(spec.config_path)
-                if digest(observed) != source["primary_sha256"]:
+                if digest(_mirror_bytes(spec.config_path)) != source["primary_sha256"]:
                     config_conflicts.append(spec.slug)
             except (OSError, ValueError):
                 config_conflicts.append(spec.slug)
-            committed_specs.append(spec)
-            resolve_campaign_links(campaign)
-            campaigns[campaign.slug] = campaign
-        self._repository = Repository(campaigns, self.page_store, (), tuple(committed_specs))
-        self._config_conflicts = tuple(config_conflicts)
-        self._last_loaded_unix = time.time()
-        return
+        return tuple(config_conflicts), page_conflicts

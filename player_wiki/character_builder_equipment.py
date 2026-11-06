@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from .character_catalog_operations import (catalog_snapshot, catalog_index, catalog_aux,
+    catalog_rows, catalog_field, catalog_record, catalog_is_record)
+
 from collections.abc import Mapping
 from copy import deepcopy
 import json
@@ -31,6 +34,7 @@ from .character_campaign_options import (
 from .character_page_companion import blocks_page_companion_heuristics
 from .repository import normalize_lookup, slugify
 from .systems_models import SystemsEntryRecord
+from .campaign_item_mechanics import normalize_weapon_extra_damage
 
 _UNRESOLVED_ITEM_ENTRY = object()
 
@@ -115,6 +119,8 @@ __all__ = [
     "_build_weapon_attack_payload",
     "_append_weapon_attack_payloads",
     "_resolve_off_hand_attack_context",
+    "_one_handed_melee_context_is_eligible",
+    "_qualified_dual_wielder_ac_bonus",
     "_resolve_weapon_profile",
     "_resolve_campaign_item_page_support",
     "_resolve_item_support_metadata",
@@ -289,6 +295,7 @@ def _structured_attack_reminder_rules_from_features(
     *,
     ability_scores: dict[str, int] | None = None,
     proficiency_bonus: int = 0,
+    source_authority: Any | None = None,
 ) -> list[dict[str, Any]]:
     rules: list[dict[str, Any]] = []
     for row in _character_mechanic_effect_rows(features, kind="attack_reminder"):
@@ -301,6 +308,7 @@ def _structured_attack_reminder_rules_from_features(
             rule,
             ability_scores=ability_scores,
             proficiency_bonus=proficiency_bonus,
+            source_authority=source_authority,
         )
         for effect_payload in list(rule.get("effects") or []):
             if not isinstance(effect_payload, dict):
@@ -756,6 +764,7 @@ def _derive_attack_reminder_state_from_character_inputs(
     item_catalog: dict[str, Any] | None = None,
     ability_scores: dict[str, int] | None = None,
     proficiency_bonus: int = 0,
+    source_authority: Any | None = None,
 ) -> dict[str, Any]:
     support_flags = _collect_attack_reminder_support_flags(features)
     rules: list[dict[str, Any]] = []
@@ -894,6 +903,7 @@ def _derive_attack_reminder_state_from_character_inputs(
                 rule,
                 ability_scores=ability_scores,
                 proficiency_bonus=proficiency_bonus,
+                source_authority=source_authority,
             )
             effects = []
             for effect_payload in list(rule.get("effects") or []):
@@ -927,6 +937,7 @@ def _derive_attack_reminder_state_from_character_inputs(
             features,
             ability_scores=ability_scores,
             proficiency_bonus=proficiency_bonus,
+            source_authority=source_authority,
         )
     )
     return {"rules": rules}
@@ -994,9 +1005,9 @@ def _resolve_item_entry(
         return None
     if not item_catalog:
         return None
-    by_entry_key = item_catalog.get("by_entry_key") or {}
-    by_title = item_catalog.get("by_title") or {}
-    by_slug = item_catalog.get("by_slug") or {}
+    by_entry_key = catalog_index(item_catalog, "by_entry_key")
+    by_title = catalog_index(item_catalog, "by_title")
+    by_slug = catalog_index(item_catalog, "by_slug")
     candidate_titles: list[str] = []
     if isinstance(item, dict):
         systems_ref = dict(item.get("systems_ref") or {})
@@ -1152,7 +1163,7 @@ def describe_equipment_state_support(
             "is_magic_item": False,
         }
 
-    resolved_catalog = dict(item_catalog or {})
+    resolved_catalog = catalog_snapshot(item_catalog)
     resolved_entry = entry if isinstance(entry, SystemsEntryRecord) else _resolve_item_entry(item, resolved_catalog)
     campaign_item_support = None
     trusted_kind = ""
@@ -1324,6 +1335,7 @@ def _build_level_one_attacks(
         damage_bonus = int(context["ability_modifier"] or 0)
         damage_bonus += int(context.get("item_damage_bonus") or 0)
         damage_bonus += shared_weapon_damage_bonus
+        two_handed_damage_bonus = damage_bonus
         if has_dueling and _qualifies_for_dueling(context, off_hand_context=off_hand_context):
             damage_bonus += 2
         ignore_loading = (
@@ -1440,7 +1452,7 @@ def _build_level_one_attacks(
             )
             if has_two_handed_variant:
                 polearm_two_handed_profile = dict(polearm_bonus_profile)
-                polearm_two_handed_damage_bonus = int(context["ability_modifier"] or 0)
+                polearm_two_handed_damage_bonus = two_handed_damage_bonus
                 _append_weapon_attack_payloads(
                     attacks,
                     context,
@@ -1549,10 +1561,9 @@ def _build_level_one_attacks(
         if has_two_handed_variant:
             two_handed_profile = dict(profile)
             two_handed_profile["damage"] = str(profile.get("versatile_damage") or "").strip()
-            two_handed_attack_bonus = int(context["ability_modifier"] or 0)
-            if bool(context["is_proficient"]):
-                two_handed_attack_bonus += proficiency_bonus
-            two_handed_damage_bonus = int(context["ability_modifier"] or 0)
+            # All weapon/shared modifiers still apply; Dueling was added only
+            # to the one-handed mode after this shared damage value was saved.
+            two_handed_attack_bonus = attack_bonus
             _append_weapon_attack_payloads(
                 attacks,
                 context,
@@ -1664,9 +1675,11 @@ def _build_level_one_attacks(
             if has_two_weapon_fighting
             else min(int(off_hand_context["ability_modifier"] or 0), 0)
         )
+        off_hand_damage_bonus += int(off_hand_context.get("item_damage_bonus") or 0) + shared_weapon_damage_bonus
         off_hand_attack_bonus = int(off_hand_context["ability_modifier"] or 0)
         if bool(off_hand_context["is_proficient"]):
             off_hand_attack_bonus += proficiency_bonus
+        off_hand_attack_bonus += int(off_hand_context.get("item_attack_bonus") or 0) + shared_weapon_attack_bonus
         _append_weapon_attack_payloads(
             attacks,
             off_hand_context,
@@ -1704,9 +1717,11 @@ def _build_level_one_attacks(
         crossbow_attack_bonus = int(crossbow_expert_bonus_context["ability_modifier"] or 0)
         if bool(crossbow_expert_bonus_context["is_proficient"]):
             crossbow_attack_bonus += proficiency_bonus
+        crossbow_attack_bonus += int(crossbow_expert_bonus_context.get("item_attack_bonus") or 0) + shared_weapon_attack_bonus
         if has_archery and str(crossbow_profile.get("type") or "").strip().upper() == "R":
             crossbow_attack_bonus += 2
         crossbow_damage_bonus = int(crossbow_expert_bonus_context["ability_modifier"] or 0)
+        crossbow_damage_bonus += int(crossbow_expert_bonus_context.get("item_damage_bonus") or 0) + shared_weapon_damage_bonus
         crossbow_extra_notes = _base_attack_feat_notes(
             crossbow_expert_bonus_context,
             has_charger_phb=has_charger_phb,
@@ -1793,6 +1808,11 @@ def _build_level_one_attacks(
 
 
 def _effect_keys_for_feature(feature: dict[str, Any]) -> list[str]:
+    from .character_feature_composition import wild_resource_registration
+    if wild_resource_registration(feature) is not None:
+        # A finite registered rule cannot acquire unrelated Alert/AC/etc
+        # mechanics merely through its editor-controlled title or slug.
+        return []
     systems_ref = dict(feature.get("systems_ref") or {})
     campaign_option = dict(feature.get("campaign_option") or {})
     feature_name = str(feature.get("name") or systems_ref.get("title") or "").strip()
@@ -2084,6 +2104,11 @@ def _build_weapon_attack_payload(
         "authority_requires_proficiency_bonus": bool(context.get("is_proficient")),
         "authority_weapon_proficiencies": list(context.get("proficiency_matches") or []),
     }
+    item = dict(context.get("item") or {})
+    if (bool(item.get("is_equipped", False))
+            and (not profile.get("requires_attunement") or bool(item.get("is_attuned", False)))):
+        for rider in normalize_weapon_extra_damage(profile.get("weapon_extra_damage")):
+            payload["damage"] += f" + {rider['dice']} {rider['damage_type']}"
     if clean_mode_key:
         payload["mode_key"] = clean_mode_key
     if clean_variant_label:
@@ -2155,15 +2180,9 @@ def _resolve_off_hand_attack_context(
     eligible_contexts: list[dict[str, Any]] = []
     for context in attack_contexts:
         item = dict(context.get("item") or {})
-        if not resolve_item_equipped_state(item, item_catalog=item_catalog):
-            continue
-        profile = dict(context.get("profile") or {})
-        if str(profile.get("type") or "").strip().upper() != "M":
-            continue
-        properties = set(profile.get("properties") or [])
-        if "2H" in properties:
-            continue
-        if not allow_non_light and "L" not in properties:
+        if not _one_handed_melee_context_is_eligible(
+            context, allow_non_light=allow_non_light, item_catalog=item_catalog,
+        ):
             continue
         if explicit_weapon_wield_mode(item, item_catalog=item_catalog) == WEAPON_WIELD_MODE_OFF_HAND:
             explicit_contexts.append(context)
@@ -2175,6 +2194,93 @@ def _resolve_off_hand_attack_context(
     if len(eligible_contexts) >= 2:
         return eligible_contexts[1]
     return None
+
+
+def _one_handed_melee_context_is_eligible(
+    context: dict[str, Any], *, allow_non_light: bool,
+    item_catalog: dict[str, Any] | None = None,
+) -> bool:
+    """Physical weapon facts shared with the existing off-hand selector.
+
+    Attack proficiency, ability and damage are deliberately not hand facts.
+    The selector retains its historical explicit/quantity fallback; conditional
+    AC additionally proves the complete, unique current main/off-hand pair.
+    """
+    item = dict(context.get("item") or {})
+    profile = dict(context.get("profile") or {})
+    properties = set(profile.get("properties") or [])
+    return bool(
+        resolve_item_equipped_state(item, item_catalog=item_catalog)
+        and str(profile.get("type") or "").strip().upper() == "M"
+        and "2H" not in properties
+        and (allow_non_light or "L" in properties)
+    )
+
+
+def _qualified_dual_wielder_ac_bonus(
+    *, equipment_catalog: list[dict[str, Any]], features: list[dict[str, Any]],
+    item_catalog: dict[str, Any], inventory_rows: tuple[str, ...] | None,
+    qualified_feature_ids: frozenset[str],
+) -> int:
+    """One PHB feat increment from qualified current physical hand custody.
+
+    Runtime inventory rows come from SourceAuthority's exact read frame, never
+    historical default quantities. No frame/owner means no automatic increment.
+    """
+    owners = [row for row in features if isinstance(row, dict)
+              and str(row.get("id") or "") in qualified_feature_ids
+              and not row.get("mechanics_suppressed")
+              and dict(row.get("systems_ref") or {}).get("entry_key") == "dnd-5e|feat|phb|dualwielder"
+              and dict(row.get("systems_ref") or {}).get("entry_type") == "feat"
+              and dict(row.get("systems_ref") or {}).get("source_id") == "PHB"]
+    if len(owners) != 1 or inventory_rows is None:
+        return 0
+    try:
+        inventory = [json.loads(row) for row in inventory_rows]
+    except (TypeError, ValueError):
+        return 0
+    by_id: dict[str, dict[str, Any]] = {}
+    for item in equipment_catalog:
+        if not isinstance(item, dict) or item.get("is_currency_only"):
+            continue
+        item_id = str(item.get("id") or "").strip()
+        if not item_id or item_id in by_id:
+            return 0
+        by_id[item_id] = item
+    seen: set[str] = set()
+    hands: list[str] = []
+    for row in inventory:
+        if not isinstance(row, dict):
+            return 0
+        item_id = str(row.get("catalog_ref") or row.get("id") or "").strip()
+        if (not item_id or item_id in seen
+                or row.get("id") and row.get("catalog_ref") and row["id"] != row["catalog_ref"]):
+            return 0
+        seen.add(item_id)
+        if row.get("is_equipped") is not True:
+            continue
+        item = by_id.get(item_id)
+        if (item is None or item.get("is_equipped") is not True
+                or item.get("mechanics_suppressed") or _resolve_item_entry(item, item_catalog) is None):
+            return 0
+        armor = _resolve_armor_profile(item, item_catalog)
+        if armor is not None and armor.get("is_shield"):
+            return 0
+        profile = _resolve_weapon_profile(item, item_catalog)
+        if profile is None:
+            if row.get("weapon_wield_mode"):
+                return 0
+            continue  # Qualified worn armor/magic items do not occupy a weapon hand.
+        mode = explicit_weapon_wield_mode(item, item_catalog=item_catalog)
+        if (type(row.get("quantity")) is not int or row["quantity"] <= 0
+                or mode not in {WEAPON_WIELD_MODE_MAIN_HAND, WEAPON_WIELD_MODE_OFF_HAND}
+                or mode != _normalize_weapon_wield_mode_value(row.get("weapon_wield_mode"))
+                or not _one_handed_melee_context_is_eligible(
+                    {"item": item, "profile": profile}, allow_non_light=True,
+                    item_catalog=item_catalog)):
+            return 0
+        hands.append(mode)
+    return int(sorted(hands) == sorted([WEAPON_WIELD_MODE_MAIN_HAND, WEAPON_WIELD_MODE_OFF_HAND]))
 
 
 def _resolve_weapon_profile(
@@ -2217,9 +2323,9 @@ def _resolve_weapon_profile(
             str(item.get("name") or "").strip(),
             base_item,
         ]
-    profiles_by_norm = item_catalog.get("phb_weapon_profiles_normalized")
+    profiles_by_norm = catalog_aux(item_catalog, "phb_weapon_profiles_normalized")
     if profiles_by_norm is None:
-        profiles = item_catalog.get("phb_weapon_profiles") or _load_phb_weapon_profiles()
+        profiles = catalog_aux(item_catalog, "phb_weapon_profiles") or _load_phb_weapon_profiles()
         profiles_by_norm = {
             normalize_lookup(title): profile
             for title, profile in profiles.items()
@@ -2239,9 +2345,17 @@ def _resolve_weapon_profile(
                 fallback_bonus=0 if item.get("mechanics_suppressed") else parsed_bonus,
             )
             resolved_profile = _materialize_builtin_profile_value(profile)
+            # The base weapon supplies defaults, not replacements for current
+            # source declarations. Never recover range from Character prose.
+            source_range = resolved_metadata.get("range")
+            if isinstance(source_range, str) and source_range.strip():
+                resolved_profile["range"] = source_range.strip()
             resolved_profile["item_attack_bonus"] = attack_bonus
             resolved_profile["item_damage_bonus"] = damage_bonus
             resolved_profile["requires_attunement"] = resolved_requires_attunement
+            resolved_profile["weapon_extra_damage"] = normalize_weapon_extra_damage(
+                resolved_metadata.get("weapon_extra_damage")
+            )
             return resolved_profile
     return None
 
@@ -2255,7 +2369,7 @@ def _resolve_campaign_item_page_support(
         return None
     if not item_catalog:
         return None
-    by_title = item_catalog.get("campaign_item_support_by_title") or {}
+    by_title = catalog_aux(item_catalog, "campaign_item_support_by_title") or {}
     raw_reference = str(item or "").strip()
     candidate_titles = [raw_reference, _humanize_item_reference(raw_reference)] if raw_reference else []
     for title in candidate_titles:
@@ -2292,9 +2406,24 @@ def _item_effect_metadata(
 ) -> dict[str, Any]:
     payload = dict(metadata or {})
     effect_payload: dict[str, Any] = {}
+    if "item_capabilities" in payload:
+        from .character_item_capabilities import normalize_item_capabilities, validate_capability_spell_support
+        try:
+            capability = normalize_item_capabilities(payload["item_capabilities"])
+            validate_capability_spell_support(capability, payload.get("spell_support", []))
+            from .character_item_capabilities import validate_capability_source
+            validate_capability_source(capability, payload)
+        except (TypeError, ValueError):
+            return {}  # Never fall back to bare spell support from a bad contract.
+        effect_payload["item_capabilities"] = capability
+    weapon_extra_damage = normalize_weapon_extra_damage(payload.get("weapon_extra_damage"))
+    if weapon_extra_damage:
+        effect_payload["weapon_extra_damage"] = weapon_extra_damage
     spell_support = [dict(item or {}) for item in list(payload.get("spell_support") or []) if isinstance(item, dict)]
     if spell_support:
         effect_payload["spell_support"] = spell_support
+    if "spell_property_modifiers" in payload:
+        effect_payload["spell_property_modifiers"] = deepcopy(payload["spell_property_modifiers"])
     raw_spellcasting_modifiers = payload.get("spellcasting_modifiers")
     spellcasting_modifiers = deepcopy(
         raw_spellcasting_modifiers if isinstance(raw_spellcasting_modifiers, list)
@@ -2346,11 +2475,18 @@ def _attack_reminder_rule_save_dc(
     *,
     ability_scores: dict[str, int] | None,
     proficiency_bonus: int,
+    source_authority: Any | None = None,
 ) -> int | None:
     ability_key = normalize_lookup(str(rule.get("save_dc_ability_key") or "").strip())
     if ability_key not in ABILITY_KEYS:
         return None
-    score = int(dict(ability_scores or {}).get(ability_key) or DEFAULT_ABILITY_SCORE)
+    if source_authority is not None and (
+            not source_authority.field_status(f"stats.ability_scores.{ability_key}.score").is_effective
+            or not source_authority.field_status("stats.proficiency_bonus").is_effective):
+        return None
+    score = dict(ability_scores or {}).get(ability_key)
+    if type(score) is not int:
+        return None
     return 8 + int(proficiency_bonus or 0) + _ability_modifier(score)
 
 
@@ -2385,8 +2521,18 @@ def _active_item_effect_entries(
         payload = dict(item or {})
         metadata = _resolve_item_support_metadata(payload, item_catalog)
         effect_payload = _item_effect_metadata(metadata)
-        if not effect_payload or not _item_effect_is_active(payload, metadata=metadata):
+        if not effect_payload:
             continue
+        default_active = _item_effect_is_active(payload, metadata=metadata)
+        capability = effect_payload.get("item_capabilities")
+        if not default_active:
+            if capability is None:
+                continue
+            effect_payload = {"item_capabilities": capability}
+            casting = capability.get("casting")
+            if (casting is not None and payload.get("is_attuned") is True
+                    and (casting["activation"] == "attuned" or payload.get("is_equipped") is True)):
+                effect_payload["spell_support"] = deepcopy(metadata.get("spell_support", []))
         entries.append(
             {
                 "item_id": str(payload.get("id") or "").strip(),
@@ -2552,10 +2698,10 @@ def _resolve_armor_profile(
         return resolved_entry_profile
 
     resolved_catalog = item_catalog or {}
-    armor_profiles = resolved_catalog.get("phb_armor_profiles_normalized")
+    armor_profiles = catalog_aux(resolved_catalog, "phb_armor_profiles_normalized")
     if armor_profiles is None:
         armor_profiles = (
-            resolved_catalog.get("phb_armor_profiles")
+            catalog_aux(resolved_catalog, "phb_armor_profiles")
             or _load_phb_armor_profiles()
         )
     resolved_metadata = (
@@ -2631,7 +2777,10 @@ def _resolved_armor_profiles(
 def _character_has_named_feature(features: list[dict[str, Any]] | None, *feature_values: str) -> bool:
     normalized_targets = {normalize_lookup(value) for value in feature_values if str(value or "").strip()}
     for feature in list(features or []):
-        if blocks_page_companion_heuristics(feature):
+        if feature.get("mechanics_suppressed") or blocks_page_companion_heuristics(feature):
+            continue
+        from .character_feature_composition import wild_resource_registration
+        if wild_resource_registration(feature) is not None:
             continue
         systems_ref = dict(feature.get("systems_ref") or {})
         candidates = (
@@ -3702,3 +3851,9 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(normalized)
         deduped.append(cleaned)
     return deduped
+
+
+# Finite ordinary callback surface omitted by invocation-owned current inputs.
+_CURRENT_INPUT_RECIPE = tuple((name, globals()[name]) for name in (
+    '_systems_ref_from_entry',
+))

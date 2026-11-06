@@ -1,6 +1,6 @@
 # Characters Overview
 
-Last updated: 2026-09-29
+Last updated: 2026-10-19
 
 ## Owns
 
@@ -43,6 +43,89 @@ Last updated: 2026-09-29
   and optional-feature lookup work is request-local, revision-aware where the
   rendered entry requires it, detached from mutable cache containers, and
   cleared by the owning Systems mutation paths.
+- Shared committed page proofs reuse bounded pure projection construction,
+  while each use still proves current source and projection rows. Pure HTML
+  sanitation can reuse exact text under the same policy across HTTP requests;
+  it does not reuse character values or authority. Ordinary character reads
+  also avoid filesystem mirror diagnostics; the diagnostic consumer observes
+  those mirrors on demand. The Flask character roster is an identity directory:
+  name, class/level, species, background, search and sheet links. It retains the
+  existing committed record/pair, portrait, state, journal, visibility and access
+  checks, but does not build current mechanics, HP/Hit Dice/resource previews or
+  full rule/repair warnings. Those are qualified when the character is opened;
+  deliberately deferred mechanics does not produce an authority-unavailable
+  warning on the directory. Initial full record acquisition remains in use.
+- Activated DND assignment GETs construct authority and their complete detached
+  display inside one owned source-read phase. Mechanical card consumers such as
+  the Session chooser retain the full mechanics projection, including all item,
+  recipe and attack warnings. Each card remains scoped to its exact saved
+  character and is exposed only after the fresh post-snapshot guard succeeds.
+  The Flask identity directory does not enter those mechanical card phases.
+  Ordinary source conflicts retain historical fallback; connection cleanup
+  failures propagate. Existing write authority, ambient transactions and
+  nonrequest callers retain their original paths.
+- Native feature lookup in an open source phase can detach only its exact
+  class/source bucket while retaining the full producer, source readset,
+  caller validation and fresh guard. Native foundations own catalogs detached
+  on input in every branch. Reusable prepared foundations keep independent
+  consumer copies; the private create-and-consume-once path transfers its
+  locally owned catalogs without a second copy. Exact-ref phase page reads
+  detach only their indexed row, retaining campaign checks, projection proof
+  and the complete fresh guard. No catalog index aliases or positive authority
+  are shared.
+- Within one actual source-phase reconstruction-basis invocation, repeated
+  proficiency targets can reuse their private category-owner content. Every
+  target keeps its selection and digest; unphased providers retain per-target
+  production. Source-state and entry-override point reads detach only their
+  selected records, with full producers/readsets and fresh guards retained.
+  Missing records, explicit disabled overrides and all enabled checks remain
+  distinct; no authority or historical-witness result is cached across calls.
+- Ordinary owned assignment/Features authority calculations can compile a small
+  staged set of current reconstruction inputs within that single invocation:
+  optional weapon labels/basis, the validated instrument basis, and the original
+  Constitution input basis used by HP. HP still checks its classes, features,
+  recipe, current Constitution and maximum. Complete ordered historical evidence,
+  authority identities, warnings and fresh closing proofs remain in use. Language
+  basis calls remain separate; language-outcome frames retain the legacy HP tail.
+  Custom providers, unsupported representations, reserved/nonread callers and
+  prospective checkpoints retain the original path. Nothing is persisted or
+  reused across phases, requests or actors; entered drift refuses without replay.
+- Activated native DND Features GET/HEAD reads give the shell and selected
+  Features producers separate guarded source phases. Each retains its own
+  derivation recipe and exact shell-then-section page-body inputs; only its
+  detached result leaves the phase after the fresh guard. Other sections,
+  noneligible reads and writes retain their existing paths. Activated shell
+  projection caching remains disabled.
+- Ordinary committed page-list batches establish activation once inside their
+  exact snapshot while preserving every canonical per-row proof and current
+  page/config revision read. They still allocate fresh Page objects through
+  the same constructor; other mapping and custom-store paths retain their
+  existing checks. No access or source-admission result is cached per request.
+- Canonical page proofs can privately project validated config system identity
+  without copying unused settings. Every row still freshly proves config
+  admission/digest and runs the complete schema validator. Public config reads
+  retain detached mutable mappings; deep, unsupported, large and non-request
+  inputs retain the original decoder/copy fallback. No validation result or
+  private mapping escapes into a shared authority cache.
+- One numeric-status pass can reuse its private native plain-data inputs for
+  owner hashes; every target decision and witness check still runs. Historical
+  requalification replay reconstructs only its privately owned expected source
+  once per batch, preserving marker order and public defensive-copy behavior.
+  Custom, cyclic, deep or oversized inputs retain the original paths. No
+  authority result, witness success or mutable input frame crosses a pass.
+- Repeated committed Character YAML parsing can reuse exact-byte plain
+  mappings within a bounded HTTP request cache. Cached returns are deeply
+  detached; unsupported/deep/oversized/nonfinite values and parse failures
+  retain original behavior. All current-row, digest, actor, revision, history,
+  ownership, source, fresh-guard and transaction/CAS checks still run; no
+  positive authority or verified history is cached. Character pair, portrait
+  and record-load readers retain their original failure semantics.
+- Campaign access checks requiring existence or system avoid alias/backlink
+  graph construction while freshly proving target configuration and page
+  projections, including duplicate-route and visible-redirect refusals.
+  Actual user, membership, role, visibility and own-character checks remain
+  unchanged. Captured phase policy normalization is reusable only within its
+  open phase; dynamic subset identities and fresh finish guards remain.
 - Character access checks run before admission to expensive presentation work.
   At most two expensive Character reads are admitted concurrently; saturation
   returns a generic private `503` with `Cache-Control: no-store` and
@@ -70,12 +153,22 @@ Last updated: 2026-09-29
 
 ## Current Data Contract
 
+- The manager Character Update reconstruction mode establishes an existing supported single-class DND-5E foundation only after committed-source readiness. Assigned-player edit access does not grant this manager action; View As remains read-only. Explicit original/confirmed/reconstructed inputs, exact source owners and accepted HP contributions are distinct from current play observations. The [DND foundation contract](characters-dnd5e.md#existing-character-native-foundation-contract) owns its bounded choices, preservation, qualification and continuation behavior.
+- Reconstruction and its exact-preserving renewal retain the entire raw SQLite state tuple and definition-owned current selections, including absent/null/opaque values, rather than initializing older state. Stable identity, original import/history evidence, personal content and portrait data remain retained. Unknown or incompatible owners/maxima require an honest unresolved/separate disposition; saved totals or copied origin/authorization metadata supply no authority.
+- A missing legacy equipment-activation marker can remain absent only through the proof-bound reconstruction compatibility contract. The same prerequisite is checked during Review and publication; ordinary writes, malformed markers and ambiguous physical owners keep their existing repair requirements. Reconstruction does not insert activation defaults or change current equipment selections.
+- Already-valid activation marker ordering remains unchanged. Authenticated source metadata for the same physical item does not retire its retained spell ownership; both spell-retirement and aggregate-transition checks require the same current proof, including the publication reservation. Ordinary item removal or unproved relinking keeps its existing safeguards.
+- Reconstruction entry loading also refuses unsupported/mismatched systems without initializing missing state. Its typed historical evidence remains distinct from current source qualification. Exact same-origin item-mapping history survives removal and unrelated advancement by stable ID and complete-entry comparison; its page references supply no mechanics and cannot restore a removed physical owner. New choices and extant equipment still require their current sources and ordinary publication proof. Reconstructed advancement preview and strict construction share physical HP/Constitution/effect inputs; ambiguous retained whole gains combined with continuing effects refuse until reliable included-effect evidence has a separately supported representation.
+- A necessary physical item mapping is an explicit same-owner source-authentication choice, requiring a unique current approved published-page relation. It adds only source metadata under independent reconstruction proof; existing page content, IDs and complete inventory state remain exact. Source identity and support for individual clauses are separate. Inert selected-subclass containers, actual attained domain/preparation rules and distinct bonus-cantrip owners use the bounded [DND foundation contract](characters-dnd5e.md#existing-character-native-foundation-contract). Requalification still has a managed-resource boundary; unsupported retained templates can block renewal without being removed or initialized.
+- Activated reconstruction reuses the reserved committed update, immutable generation, matching audit and existing mirror/outbox recovery. Prospective proof is internal to the transaction; a half-published origin is not effective authority. Confirmation requires actual definition/state/generation/audit and mirror/portrait readback. An uncertain result may have committed and requires supported inspection/recovery before deciding another action, without automatic Apply resubmission. Source support and local diagnostics do not authorize deployment, database preparation or live writes.
+- DND aggregate formulas qualify their own dependencies before arithmetic, preserving independent outputs when Constitution or another required input is unavailable. Qualified spell rows supply a unique single-class summary; feature/item reminders and item-action DC labels consume qualified numbers. Trusted pending reconstruction refresh precedes ordinary candidate projection while retaining currentness checks. Anticipated numeric failures known before reservation report a failed update; possible-publication/readback failures remain uncertain, without claiming a phase that was not established. These source behaviors do not establish a completed runtime reconstruction.
 - Stable character definition data lives under `campaigns/<campaign-slug>/characters/<character-slug>/`.
 - Character slugs are exact, cross-platform-safe directory names; Character reads, creation/import,
   and deletion reject path-like or escaping identities before state or filesystem effects.
 - Imported and manually created characters use `definition.yaml`; imported characters also use `import.yaml`.
 - `definition.yaml` carries a normalized top-level `system` discriminator.
-- Mutable play state lives in SQLite. Mutable state must not be written back into `definition.yaml`.
+- Strict committed-source admission, snapshot coherence, exact read and load-for-write interpret a legacy character with both `system` and `system_code` absent using the existing DND-5E model default while preserving its stored bytes. Explicit null, invalid/code-only aliases and other systems retain their existing treatment. This compatibility does not admit or activate a target by itself.
+- Committed roster, readiness and Source Health reads share that same system interpretation. Source Health receives the effective system already checked against campaign settings; raw definitions remain unchanged for exact snapshot comparison.
+- SQLite owns current pools, equipment activation, and other versioned play-state fields. Preserve their field-specific ownership rather than copying state back into `definition.yaml`. Current spell preparation is an existing exception to the broad storage shorthand: prepared marks persist on definition spell rows through the supported guarded spell-management path. Their gameplay lifetime does not imply that they already live in SQLite; changing that representation requires an explicit compatible migration.
 - DND equipment equip, attune, and wield choices use versioned SQLite inventory state joined to definition rows by one exact stable item ID. The file-backed activation fields are historical evidence after cutover; a temporary state overlay supplies read-time mechanics. This is a DND-only storage rule, and Xianxia inventory dispatch stays separate. Existing equipment browser/API/Combat actions retain their access and route contracts while serializing a state-only revision against current definition identity and publication/deletion journals.
 - Structural Character publication keeps the file pair and SQLite row under the existing forward-recovery journal. It refuses ambiguous activation joins; a manager-only repair choice can preserve an exact state row, remap a selected row to a unique definition ID, or discard stale activation while retaining inventory evidence. See [DND character equipment](characters-dnd5e.md#current-equipment-ac-and-attack-contract) and the [controlled-copy cutover procedure](../character-equipment-activation-migration.md).
 - DND-5E stores versioned authoritative ability inputs in

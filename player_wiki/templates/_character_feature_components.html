@@ -26,3 +26,7 @@
 {% endmacro %}
 
 {{ render_feature_components(feature.children) }}
+
+{% if feature.assignment_kind %}
+  <p><a href="{{ url_for('character_artificer_assignments_view', campaign_slug=campaign.slug, character_slug=feature.assignment_character_slug) }}#{{ feature.assignment_kind }}">Manage assignments</a></p>
+{% endif %}

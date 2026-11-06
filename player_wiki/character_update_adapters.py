@@ -17,6 +17,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
+import hashlib
 import html
 import json
 import re
@@ -1524,6 +1525,7 @@ def _semantic_surface(
 ) -> _SemanticSurface:
     cells: list[_SemanticCell] = []
     warnings: list[str] = []
+    spellcasting = dict(definition.get("spellcasting") or {})
     cells.extend(
         _row_semantic_cells(
             _mapping_rows(definition, "features"),
@@ -1533,6 +1535,26 @@ def _semantic_surface(
             warnings,
         )
     )
+    if "native_spell_grants" in spellcasting:
+        model = spellcasting["native_spell_grants"]
+        if (not isinstance(model, Mapping) or type(model.get("schema_version")) is not int
+                or model.get("schema_version") != 1):
+            warnings.append("Native spell grant claims need source qualification; the saved model is unsupported.")
+        else:
+            for field, identity_key, label in (
+                ("occurrences", "id", "Source feature spell grant claim"),
+                ("migration_edges", "old_spell_id", "Historical UNKNOWN spell observation"),
+            ):
+                claims = model.get(field)
+                if not isinstance(claims, list) or any(not isinstance(row, Mapping) for row in claims):
+                    warnings.append(label + " records are malformed.")
+                    continue
+                cells.extend(_row_semantic_cells(
+                    claims, SemanticCategory.SPELLS,
+                    lambda row, key=identity_key, prefix=field: _native_spell_claim_identity(row, key, prefix),
+                    lambda row, kind=field, title=label: _native_spell_claim_summary(row, kind, title),
+                    warnings,
+                ))
     inventory_lookup = {
         str(row.get("catalog_ref") or row.get("id") or "").strip(): row
         for row in _mapping_rows(state, "inventory")
@@ -1547,7 +1569,6 @@ def _semantic_surface(
             warnings,
         )
     )
-    spellcasting = dict(definition.get("spellcasting") or {})
     cells.extend(
         _row_semantic_cells(
             [
@@ -1561,6 +1582,26 @@ def _semantic_surface(
             warnings,
         )
     )
+    # Keep each saved observation independently visible. A bounded human
+    # summary may shorten malformed data; the internal identity still binds
+    # its complete JSON value so that shortening cannot erase a change.
+    for spell in list(spellcasting.get("spells") or []):
+        if not isinstance(spell, Mapping) or not _spell_identity(spell):
+            continue
+        for field in _SPELL_OBSERVATION_FIELDS:
+            if field not in spell:
+                continue
+            observation = json.dumps(spell[field], ensure_ascii=False, sort_keys=True)
+            digest = hashlib.sha256(observation.encode("utf-8")).hexdigest()
+            owner_digest = hashlib.sha256(_spell_identity(spell).encode("utf-8")).hexdigest()
+            label = str(spell.get("name") or "Spell") + ": saved " + field
+            cells.extend(_row_semantic_cells(
+                [{"id": "spell-observation:" + owner_digest + ":" + field + ":" + digest,
+                  "label": label, "observation": observation}],
+                SemanticCategory.SPELLS, lambda row: row["id"],
+                lambda row: (row["label"], "Historical observation " + row["observation"] + "; no grant authority asserted"),
+                warnings,
+            ))
     cells.extend(
         _row_semantic_cells(
             _mapping_rows(definition, "attacks"),
@@ -1702,19 +1743,51 @@ def _equipment_summary(
     )
 
 
+_SPELL_OBSERVATION_FIELDS = (
+    "mark", "is_prepared", "is_known", "is_always_prepared", "is_bonus_known",
+    "base_mark", "base_is_always_prepared", "base_is_bonus_known",
+    "always_prepared", "isAlwaysPrepared", "alwaysPrepared",
+    "bonus_known", "isBonusKnown", "bonusKnown",
+)
+
+
 def _spell_summary(row: Mapping[str, Any]) -> tuple[str, str]:
     name = _clean_human_text(row.get("name") or row.get("title"), fallback="Spell")
     level = int(row.get("level") or row.get("spell_level") or 0)
-    preparation = (
-        "always prepared"
-        if bool(row.get("is_always_prepared"))
-        else "prepared"
-        if bool(row.get("is_prepared"))
-        else "known"
-        if bool(row.get("is_known"))
-        else "available"
-    )
-    return name, _summary("Spell", name, "level", level, preparation)
+    # Review compares durable observations. A raw flag is not a qualified
+    # grant, and false/missing/null/malformed observations are not equivalent.
+    observations = []
+    fields = list(_SPELL_OBSERVATION_FIELDS[:8])
+    fields.extend(key for key in _SPELL_OBSERVATION_FIELDS[8:] if key in row)
+    for key in fields:
+        value = json.dumps(row[key], ensure_ascii=False, sort_keys=True) if key in row else "MISSING"
+        observations.extend(("saved " + key, value))
+    return name, _summary("Spell", name, "level", level, *observations)
+
+
+def _native_spell_claim_summary(row: Mapping[str, Any], kind: str, label: str) -> tuple[str, str]:
+    if kind == "migration_edges":
+        return label, _summary(label, "saved spell", row.get("old_spell_id"),
+            "mapped occurrences", json.dumps(row.get("grant_ids"), ensure_ascii=False),
+            "unresolved history retained; no entitlement or negative grant fact inferred",
+            "observation digest", row.get("unresolved_observation_digest"))
+    spell_ref = row.get("spell_ref")
+    ref = dict(spell_ref) if isinstance(spell_ref, Mapping) else {}
+    return label, _summary(label, "owner", row.get("owner_id"),
+        "rule", row.get("rule_id"), "leaf", row.get("leaf_id"),
+        "spell", ref.get("entry_key"), "publication", ref.get("source_id"),
+        "requires independently authenticated custody and current source qualification")
+
+
+def _native_spell_claim_identity(row: Mapping[str, Any], key: str, kind: str) -> str:
+    identity = row.get(key)
+    if not isinstance(identity, str) or not identity.strip():
+        return ""
+    # A changed proof is a changed claim even when display labels agree. The
+    # original source and observation digests stay in the authenticated model.
+    basis = row.get("unresolved_observation_digest" if kind == "migration_edges" else "source_basis_digest")
+    digest = hashlib.sha256(json.dumps([identity, basis], ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return "native " + kind + " " + digest
 
 
 def _attack_summary(row: Mapping[str, Any]) -> tuple[str, str]:

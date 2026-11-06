@@ -12,6 +12,7 @@ from typing import Any
 from .auth_store import isoformat, utcnow
 from .character_campaign_options import normalize_campaign_base_rule_refs
 from .db import get_db
+from ._native_read_policy import _capture_class_recipe, _class_recipe_matches
 from .models import (
     DEPRECATED_WIKI_PAGE_TYPES,
     DEPRECATED_WIKI_SECTIONS,
@@ -222,12 +223,54 @@ class CampaignPageStore:
         *,
         content_dir: Path | None = None,
     ) -> list[Page]:
-        from .committed_publication import active, page_rows, read_snapshot
+        from .committed_publication import active, current, page_rows, read_snapshot, _mapper_page_rows
         if active():
+            connection = get_db()
             @read_snapshot
-            def committed_pages():
-                return sorted([self._map_page(row, include_body=False) for row in page_rows(campaign_slug)], key=page_sort_key)
-            return committed_pages()
+            def committed_pages(*, connection):
+                captured = (_mapper_page_rows(campaign_slug, connection=connection)
+                            if _native_page_mapping(self) else None)
+                rows, mapper = (captured if captured is not None else
+                                (page_rows(campaign_slug, connection=connection), None))
+                if mapper is not None and not _native_page_mapping(self):
+                    raise ValueError("Committed page mapper changed; reload required.")
+                if (type(self) is not CampaignPageStore
+                        or "_map_page" in vars(self)
+                        or "_map_page_from_decoded_metadata" in vars(self)):
+                    return sorted([self._map_page(row, include_body=False) for row in rows], key=page_sort_key)
+                activated = None
+
+                def map_batch_page(index, row):
+                    nonlocal activated
+                    if mapper is not None and not _native_page_mapping(self):
+                        raise ValueError("Committed page mapper changed; reload required.")
+                    metadata = json.loads(str(row["metadata_json"] or "{}"))
+                    page = self._map_page_from_decoded_metadata(
+                        row, include_body=False, metadata=metadata,
+                    )
+                    # Preserve first-constructor/activation error precedence and
+                    # empty batches. This bool never leaves this SQL snapshot.
+                    if activated is None:
+                        activated = active(connection)
+                    if activated:
+                        stamps = mapper.prove_stamps(index) if mapper is not None else None
+                        if stamps is None:
+                            source = current(str(row["campaign_slug"]), "page", str(row["page_ref"]),
+                                             connection=connection)
+                            settings = current(str(row["campaign_slug"]), "config", connection=connection)
+                        else:
+                            source, settings = stamps
+                        if source is None or settings is None:
+                            raise ValueError("Committed page identity is unavailable.")
+                        page.committed_revision = int(source["revision"])
+                        page.committed_config_revision = int(settings["revision"])
+                    return page
+
+                pages = [map_batch_page(index, row) for index, row in enumerate(rows)]
+                if mapper is not None and not _native_page_mapping(self):
+                    raise ValueError("Committed page mapper changed; reload required.")
+                return sorted(pages, key=page_sort_key)
+            return committed_pages(connection=connection)
         if content_dir is not None:
             self._ensure_campaign_pages_current(campaign_slug, content_dir)
 
@@ -1060,3 +1103,125 @@ class CampaignPageStore:
             ),
             updated_at=str(row["updated_at"]),
         )
+
+
+_NATIVE_PAGE_MAPPER_NAMES = ("_map_page", "_map_page_from_decoded_metadata")
+from . import models as _page_mapping_models
+from . import repository as _page_mapping_repository
+from . import campaign_page_refresh as _page_mapping_refresh
+
+_NATIVE_PAGE_MAPPING_PROVIDERS = tuple(
+    (module, name, getattr(module, name)) for module, names in (
+        (json, ("loads", "JSONDecoder", "_default_decoder")),
+        (_page_mapping_models, ("Page", "page_sort_key", "section_sort_key", "subsection_sort_key")),
+        (_page_mapping_repository, ("build_page_from_content", "Page", "Path", "slugify", "title_from_slug",
+                                    "extract_obsidian_targets")),
+        (_page_mapping_refresh, ("build_page_from_content", "extract_obsidian_targets", "normalize_page_ref")),
+    ) for name in names
+)
+_NATIVE_PAGE_TYPE = Page
+_NATIVE_PAGE_STORE_TYPE = CampaignPageStore
+_NATIVE_PAGE_RECIPE = _capture_class_recipe(
+    Page, functions=("__init__",), slots=True,
+    inherited=("__new__", "__setattr__", "__getattribute__"),
+    absent=("__getattr__", "__dict__"),
+)
+_NATIVE_PAGE_STORE_RECIPE = _capture_class_recipe(
+    CampaignPageStore, functions=("__init__", *_NATIVE_PAGE_MAPPER_NAMES),
+    inherited=("__new__", "__setattr__", "__getattribute__"),
+    absent=("__getattr__",), getsets=("__dict__",),
+)
+_NATIVE_JSON_TYPE = json.JSONDecoder
+_NATIVE_JSON_RECIPE = _capture_class_recipe(
+    _NATIVE_JSON_TYPE, functions=("__init__", "decode", "raw_decode"),
+    inherited=("__new__", "__setattr__", "__getattribute__"),
+    absent=("__getattr__", "scan_once"), getsets=("__dict__",),
+)
+_NATIVE_JSON_INSTANCE = json._default_decoder
+_NATIVE_JSON_INITIAL_STATE = (object.__getattribute__(_NATIVE_JSON_INSTANCE, "__dict__")
+                              if type(_NATIVE_JSON_INSTANCE) is _NATIVE_JSON_TYPE
+                              and _class_recipe_matches(_NATIVE_JSON_RECIPE) else None)
+_NATIVE_JSON_DECODER = (tuple(_NATIVE_JSON_INITIAL_STATE.items())
+                        if type(_NATIVE_JSON_INITIAL_STATE) is dict
+                        and all(type(name) is str for name in _NATIVE_JSON_INITIAL_STATE) else None)
+_NATIVE_BUILD_PAGE = build_page_from_content
+_NATIVE_PAGE_SORT = page_sort_key
+
+
+def _native_page_mapping(store):
+    """Finite pure default construction only; custom consumers keep point reads."""
+    if (CampaignPageStore is not _NATIVE_PAGE_STORE_TYPE
+            or type(store) is not _NATIVE_PAGE_STORE_TYPE
+            or Page is not _NATIVE_PAGE_TYPE):
+        return False
+    if (not _class_recipe_matches(_NATIVE_PAGE_STORE_RECIPE)
+            or not _class_recipe_matches(_NATIVE_PAGE_RECIPE)
+            or build_page_from_content is not _NATIVE_BUILD_PAGE
+            or page_sort_key is not _NATIVE_PAGE_SORT
+            or any(getattr(module, name) is not provider for module, name, provider in _NATIVE_PAGE_MAPPING_PROVIDERS)
+            or json.JSONDecoder is not _NATIVE_JSON_TYPE
+            or type(json._default_decoder) is not _NATIVE_JSON_TYPE
+            or not _class_recipe_matches(_NATIVE_JSON_RECIPE)
+            or _NATIVE_JSON_DECODER is None):
+        return False
+    store_state = object.__getattribute__(store, "__dict__")
+    if (type(store_state) is not dict or any(type(name) is not str for name in store_state)
+            or any(name in store_state for name in _NATIVE_PAGE_MAPPER_NAMES)):
+        return False
+    state = object.__getattribute__(_NATIVE_JSON_INSTANCE, "__dict__")
+    return (type(state) is dict and all(type(name) is str for name in state)
+            and len(state) == len(_NATIVE_JSON_DECODER)
+            and all(state.get(name) is value for name, value in _NATIVE_JSON_DECODER))
+
+
+class PhaseCampaignPageStore:
+    """Closed pure projection adapter over already-proved phase page rows."""
+
+    def __init__(self, phase, mapper):
+        self.source_read_phase = phase
+        self._mapper = mapper
+
+    def _rows(self, campaign_slug):
+        phase = self.source_read_phase
+        phase.require_open()
+        if campaign_slug != phase.owner.campaign_slug:
+            from .character_source_reads import SourceReadConflict
+            raise SourceReadConflict("Cross-campaign phase page read.")
+        return phase.fact("pages")
+
+    def _map_record(self, row, *, include_body):
+        phase = self.source_read_phase
+        fact = phase.page_fact(row["page_ref"])
+        matching = [fact] if fact is not None else []
+        if len(matching) != 1 or matching[0][0] != dict(row):
+            from .character_source_reads import SourceReadConflict
+            raise SourceReadConflict("Unproved phase page projection.")
+        record = self._mapper._map_record(matching[0][0], include_body=include_body)
+        record.page.committed_revision = int(matching[0][1]["revision"])
+        record.page.committed_config_revision = int(phase.fact("config")[0]["revision"])
+        return record
+
+    def list_page_records(self, campaign_slug, *, include_body=False, content_dir=None):
+        return sorted((self._map_record(row, include_body=include_body) for row, _ in self._rows(campaign_slug)),
+                      key=lambda record: (*page_sort_key(record.page), record.page_ref))
+
+    def list_pages(self, campaign_slug, *, content_dir=None):
+        return sorted([record.page for record in self.list_page_records(campaign_slug)], key=page_sort_key)
+
+    def get_page_record(self, campaign_slug, page_ref, *, include_body=True, content_dir=None):
+        page_ref = CampaignPageStore.normalize_page_ref(page_ref)
+        phase = self.source_read_phase
+        phase.require_open()
+        if campaign_slug != phase.owner.campaign_slug:
+            from .character_source_reads import SourceReadConflict
+            raise SourceReadConflict("Cross-campaign phase page read.")
+        fact = phase.page_fact(page_ref)
+        return self._map_record(fact[0], include_body=include_body) if fact is not None else None
+
+    def get_page_by_route_slug(self, campaign_slug, route_slug, *, include_body=False):
+        matches = [row for row, _ in self._rows(campaign_slug) if row["route_slug"] == route_slug]
+        return self._map_record(matches[0], include_body=include_body).page if len(matches) == 1 else None
+
+    def get_page_body_markdown(self, campaign_slug, route_slug):
+        record = self.get_page_by_route_slug(campaign_slug, route_slug, include_body=True)
+        return record.body_markdown if record is not None else None

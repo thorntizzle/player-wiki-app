@@ -1894,6 +1894,152 @@ def _assign_missing_imported_ids(payload: dict[str, Any]) -> dict[str, Any]:
     return definition
 
 
+def _native_import_retention_rows(imported, existing):
+    """Select original observations, never imported decision authority."""
+    from .character_spell_grants import (
+        GrantContractError, has_native_grants, publication_identity,
+        validate_native_grant_model, native_class_choice_rows, canonical_digest,
+        is_confirmed_native_grant_custody,
+    )
+    from .character_source_repair import load_verified_numeric_actions
+    from .character_source_authority import class_choice_retention_ids
+
+    if not has_native_grants(existing):
+        return None
+    try:
+        model = validate_native_grant_model(existing)
+        witnesses = load_verified_numeric_actions(existing.campaign_slug, existing.character_slug, strict=True)
+        if not any(is_confirmed_native_grant_custody(witness, existing) for witness in witnesses):
+            raise CharacterImportError("Native grant ownership needs confirmed custody before reimport.")
+        if has_native_grants(imported):
+            validate_native_grant_model(imported)
+            if (imported.source["native_acquisitions"] != existing.source["native_acquisitions"]
+                    or imported.spellcasting["native_spell_grants"] != model):
+                raise CharacterImportError("Reimport cannot replace native grant ownership.")
+        if (imported.campaign_slug != existing.campaign_slug
+                or imported.character_slug != existing.character_slug
+                or imported.system != existing.system
+                or _resolve_native_character_level(imported) < _resolve_native_character_level(existing)):
+            raise CharacterImportError("Native grant reimport requires the same Character at the same or a later level.")
+
+        previous_classes = ensure_profile_class_rows(existing.profile)
+        incoming_classes = ensure_profile_class_rows(imported.profile)
+        previous_ids = [row.get("row_id") for row in previous_classes]
+        incoming_ids = [row.get("row_id") for row in incoming_classes]
+        if (not all(previous_ids) or len(set(previous_ids)) != len(previous_ids)
+                or not all(incoming_ids) or len(set(incoming_ids)) != len(incoming_ids)):
+            raise CharacterImportError("Native grant class ownership is ambiguous.")
+        for previous in previous_classes:
+            matches = [row for row in incoming_classes if row.get("row_id") == previous.get("row_id")]
+            if len(matches) != 1:
+                raise CharacterImportError("Reimport cannot remap or delete a native class owner.")
+            for name_key, ref_key in (("class_name", "systems_ref"), ("subclass_name", "subclass_ref")):
+                incoming_ref = matches[0].get(ref_key)
+                if incoming_ref and incoming_ref != previous.get(ref_key):
+                    raise CharacterImportError("Reimport changed a native class publication.")
+                if not incoming_ref and (_normalize_import_match_text(matches[0].get(name_key))
+                        != _normalize_import_match_text(previous.get(name_key))):
+                    raise CharacterImportError("Reimport cannot remap a native class owner by position or title.")
+
+        rows = list(native_class_choice_rows(existing).values())
+        if any(type(row.get("id")) is not str or not row["id"] for row in rows):
+            raise CharacterImportError("Native spell observation identity is malformed.")
+        protected_ids = set(class_choice_retention_ids(existing))
+        protected_ids.update(edge["old_spell_id"] for edge in model["migration_edges"])
+        protected_rows = []
+        for row in rows:
+            overlaps = any(row.get("class_row_id") == grant["class_row_id"]
+                and row.get("systems_ref") and publication_identity(row["systems_ref"]) == publication_identity(grant["spell_ref"])
+                for grant in model["occurrences"])
+            if overlaps or row["id"] in protected_ids:
+                if (row.get("spell_source_row_id") or type(row.get("class_row_id")) is not str
+                        or row.get("class_row_id") not in previous_ids):
+                    raise CharacterImportError("Native spell decision has no exact class owner.")
+                # Retaining an observation is not a new decision or a claim of
+                # current usability. Unresolved ordinary rows and their exact
+                # markers must survive just like confirmed active/retired rows.
+                protected_rows.append(deepcopy(row))
+        protected_ids = {row["id"] for row in protected_rows}
+        publications = [(row["class_row_id"], canonical_digest(publication_identity(row["systems_ref"])))
+                        for row in protected_rows if row.get("systems_ref")]
+        if len(publications) != len(set(publications)):
+            raise CharacterImportError("Native class spell ownership is ambiguous.")
+        incoming_rows = list(imported.spellcasting.get("spells") or [])
+        for row in incoming_rows:
+            if not isinstance(row, dict):
+                raise CharacterImportError("Imported spell identity is malformed.")
+            if "native_class_choice_state" in row:
+                matches = [old for old in protected_rows if old["id"] == row.get("id")]
+                if (len(matches) != 1 or "native_class_choice_state" not in matches[0]
+                        or row["native_class_choice_state"] != matches[0]["native_class_choice_state"]):
+                    raise CharacterImportError("An import cannot select or reactivate a native spell choice.")
+        for original in protected_rows:
+            identity_keys = set(_spell_match_keys(original))
+            matches = [row for row in incoming_rows
+                       if row.get("id") == original["id"] or identity_keys.intersection(_spell_match_keys(row))]
+            if len(matches) > 1:
+                raise CharacterImportError("Imported native spell identity is ambiguous.")
+            if matches:
+                incoming = matches[0]
+                if (incoming.get("class_row_id") != original.get("class_row_id")
+                        or incoming.get("spell_source_row_id")
+                        or incoming.get("id") and incoming["id"] != original["id"]
+                        or incoming.get("systems_ref") and incoming["systems_ref"] != original.get("systems_ref")
+                        or incoming.get("page_ref") and incoming["page_ref"] != original.get("page_ref")):
+                    raise CharacterImportError("Imported native spell identity was remapped.")
+        return model, protected_rows, protected_ids
+    except (GrantContractError, KeyError, TypeError, ValueError) as exc:
+        raise CharacterImportError("Native grant observations need source review before reimport.") from exc
+
+
+def _retain_native_import_observations(candidate, existing, retention):
+    if retention is None:
+        return candidate
+    from .character_spell_grants import publication_identity, validate_native_grant_model
+
+    model, protected_rows, protected_ids = retention
+    payload = deepcopy(candidate.to_dict())
+    features = list(payload.get("features") or [])
+    for owner in existing.source["native_acquisitions"]["owners"]:
+        matches = [row for row in features if isinstance(row, dict) and row.get("id") == owner["owner_id"]]
+        if (len(matches) != 1 or not matches[0].get("systems_ref")
+                or publication_identity(matches[0]["systems_ref"]) != publication_identity(owner["source_ref"])):
+            raise CharacterImportError("Reimport cannot delete or remap a native feature owner.")
+    spells = list(payload.get("spellcasting", {}).get("spells") or [])
+    for original in protected_rows:
+        identity_keys = set(_spell_match_keys(original))
+        matches = [row for row in spells if isinstance(row, dict)
+                   and (row.get("id") == original["id"] or identity_keys.intersection(_spell_match_keys(row)))]
+        if len(matches) > 1:
+            raise CharacterImportError("Reimport has ambiguous native spell observations.")
+        if matches:
+            match = matches[0]
+            if (match.get("id") != original["id"]
+                    or match.get("class_row_id") != original.get("class_row_id")
+                    or match.get("spell_source_row_id")
+                    or match.get("systems_ref") != original.get("systems_ref")
+                    or match.get("page_ref") != original.get("page_ref")):
+                raise CharacterImportError("Reimport cannot remap a native spell decision.")
+            spells[spells.index(match)] = deepcopy(original)
+        else:
+            # Absence in a sheet is not a new management decision. Retain the
+            # exact observation, including preparation and unknown raw keys.
+            spells.append(deepcopy(original))
+    source = dict(payload.get("source") or {})
+    source["native_acquisitions"] = deepcopy(existing.source["native_acquisitions"])
+    target_ids = {"spell_choice:" + row_id for row_id in protected_ids}
+    source["source_authorizations"] = [row for row in list(source.get("source_authorizations") or [])
+        if not (isinstance(row, dict) and row.get("target_kind") == "spell_choice")]
+    source["source_authorizations"].extend(deepcopy([row for row in list(existing.source.get("source_authorizations") or [])
+        if isinstance(row, dict) and row.get("target_kind") == "spell_choice" and row.get("target_id") in target_ids]))
+    payload["source"] = source
+    payload["spellcasting"]["spells"] = spells
+    payload["spellcasting"]["native_spell_grants"] = deepcopy(model)
+    retained = CharacterDefinition.from_dict(payload)
+    validate_native_grant_model(retained)
+    return retained
+
+
 def converge_imported_definition(
     definition: CharacterDefinition,
     *,
@@ -1907,6 +2053,26 @@ def converge_imported_definition(
     resolved_species: Any | None = None,
     resolved_background: Any | None = None,
 ) -> CharacterDefinition:
+    if existing_definition is not None and isinstance(existing_definition.source.get("native_reconstruction"), dict):
+        # A sheet reimport is new import evidence, not permission to replace a
+        # target-authenticated native foundation with uploaded proof/history.
+        # Retain exact same-owner mechanical rows and current prepared marks.
+        payload = definition.to_dict()
+        retained = existing_definition.to_dict()
+        for name in ("source", "stats", "skills", "proficiencies", "attacks", "features",
+                     "spellcasting", "equipment_catalog", "resource_templates"):
+            payload[name] = deepcopy(retained[name])
+        profile = deepcopy(retained["profile"])
+        for key, value in payload.get("profile", {}).items():
+            if key not in profile:
+                profile[key] = deepcopy(value)
+        payload["profile"] = profile
+        payload["reference_notes"] = {**dict(payload.get("reference_notes") or {}),
+                                      **deepcopy(retained.get("reference_notes") or {})}
+        payload["campaign_slug"], payload["character_slug"] = existing_definition.campaign_slug, existing_definition.character_slug
+        return CharacterDefinition.from_dict(payload)
+    native_retention = (_native_import_retention_rows(definition, existing_definition)
+                        if existing_definition is not None else None)
     if existing_definition is not None:
         definition = _merge_existing_native_managed_overlays(
             definition,
@@ -2008,7 +2174,10 @@ def converge_imported_definition(
         dict(renormalized_payload.get("source") or {}),
         dict(existing_payload.get("source") or {}),
     )
-    return CharacterDefinition.from_dict(_assign_missing_imported_ids(renormalized_payload))
+    return _retain_native_import_observations(
+        CharacterDefinition.from_dict(_assign_missing_imported_ids(renormalized_payload)),
+        existing_definition, native_retention,
+    )
 
 
 def preserve_existing_character_overrides(

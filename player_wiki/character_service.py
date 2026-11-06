@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .character_equipment_activation import activation_marker
+from .character_equipment_activation import activation_marker, activation_frame_digest
 
 from copy import deepcopy
 from typing import Any
@@ -33,6 +33,59 @@ SUPPORTED_FEATURE_STATE_KEYS = {"arcane_armor", "divine_avatar_forms"}
 
 class CharacterStateValidationError(ValueError):
     pass
+
+
+def _inventory_note_target(
+    definition: CharacterDefinition, state: dict[str, Any], item_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    catalog = [row for row in definition.equipment_catalog if row.get("id") == item_id]
+    inventory = [row for row in list(state.get("inventory") or [])
+                 if isinstance(row, dict) and item_id in {
+                     str(row.get("id") or "").strip(), str(row.get("catalog_ref") or "").strip(),
+                 }]
+    if (not item_id or len(catalog) != 1 or len(inventory) != 1
+            or catalog[0].get("source_kind") != "manual_edit"
+            or catalog[0].get("is_currency_only")):
+        raise CharacterStateValidationError("Item notes need one exact supplemental inventory identity.")
+    row = inventory[0]
+    if (str(row.get("catalog_ref") or row.get("id") or "").strip() != item_id
+            or any(str(row.get(key) or "").strip() not in {"", item_id}
+                   for key in ("id", "catalog_ref"))):
+        raise CharacterStateValidationError("Item note inventory identities do not match.")
+    return catalog[0], row
+
+
+def current_inventory_note_values(
+    definition: CharacterDefinition, state: dict[str, Any],
+) -> dict[str, str]:
+    """Display current notes only for unambiguous existing supplemental rows."""
+    notes: dict[str, str] = {}
+    for item in definition.equipment_catalog:
+        item_id = str(item.get("id") or "").strip()
+        try:
+            catalog, row = _inventory_note_target(definition, state, item_id)
+        except CharacterStateValidationError:
+            continue
+        notes[item_id] = str(row.get("notes", catalog.get("notes", "")) or "")
+    return notes
+
+
+def prepare_inventory_note_overrides(
+    definition: CharacterDefinition, state: dict[str, Any], submitted: dict[str, str],
+) -> dict[str, dict[str, str]]:
+    """Separate explicit current-note edits from omission and unchanged defaults."""
+    overrides: dict[str, dict[str, str]] = {}
+    for item_id, value in submitted.items():
+        if not isinstance(item_id, str) or item_id != item_id.strip() or not isinstance(value, str):
+            raise CharacterStateValidationError("Item note intent must contain exact IDs and text.")
+        catalog, row = _inventory_note_target(definition, state, item_id)
+        current = str(row.get("notes", catalog.get("notes", "")) or "")
+        if value == current:
+            continue
+        edited = value.strip()
+        if edited != current:
+            overrides[item_id] = {"notes": edited}
+    return overrides
 
 
 def build_resource_state(template: dict[str, Any]) -> dict[str, Any]:
@@ -254,52 +307,12 @@ def prospective_inventory_projection_state(
     return prospective
 
 
-def merge_state_with_definition(
-    definition: CharacterDefinition,
-    state: dict[str, Any],
-    *,
-    hp_delta: int = 0,
-    inventory_quantity_overrides: dict[str, int] | None = None,
-    inventory_state_overrides: dict[str, dict[str, Any]] | None = None,
+def _reconcile_numeric_pools(
+    definition: CharacterDefinition, payload: dict[str, Any], *,
+    source_authority: Any | None,
     removed_resource_ids: set[str] | None = None,
-    prior_definition: CharacterDefinition | None = None,
-    explicit_removed_item_id: str | None = None,
-    source_authority: Any | None = None,
 ) -> dict[str, Any]:
-    if is_xianxia_system(definition.system):
-        if explicit_removed_item_id:
-            raise CharacterStateValidationError("DND equipment removal cannot be applied to this system.")
-        return _merge_xianxia_state_with_definition(
-            definition,
-            state,
-            inventory_quantity_overrides=inventory_quantity_overrides,
-            inventory_state_overrides=inventory_state_overrides,
-        )
-
-    from .committed_publication import active
-    if source_authority is None and active():
-        raise CharacterStateValidationError("Character numeric authority is unavailable.")
-
-    from .character_equipment_activation import activation_marker, analyze_activation
-    if explicit_removed_item_id:
-        if prior_definition is None:
-            raise CharacterStateValidationError("Explicit equipment removal needs the prior Character identity.")
-        state = prospective_exact_item_removal_state(
-            prior_definition, definition, state, explicit_removed_item_id,
-        )
-
-    activation_analysis = analyze_activation(definition, state)
-    activation_issues = [row for row in activation_analysis["rows"]
-                         if row["status"] not in {"exact", "new_definition_row"}]
-    if activation_analysis["blocked"] and (
-        activation_issues or any(w["code"] == "activation_migration_required"
-                                 for w in activation_analysis["warnings"])
-    ):
-        raise CharacterStateValidationError(
-            "Equipment activation identity needs manager repair before this Character update."
-        )
-
-    payload = deepcopy(state)
+    """Shared numeric calculation; callers own activation and copy boundaries."""
     hit_die_pools = [
         *derive_hit_dice_max_pools(definition),
         *list(dict(payload.get("hit_dice") or {}).get("pools") or []),
@@ -450,6 +463,215 @@ def merge_state_with_definition(
             continue
         merged_slots.append(deepcopy(slot))
     payload["spell_slots"] = merged_slots
+    return payload
+
+
+def _reconcile_current_hp(
+    definition: CharacterDefinition, payload: dict[str, Any], *,
+    source_authority: Any | None, hp_delta: int = 0,
+) -> dict[str, Any]:
+    """Preserve the ordinary merge's source-qualified HP calculation."""
+    vitals = dict(payload.get("vitals") or {})
+    current_hp = int(vitals.get("current_hp") or 0)
+    max_hp_status = source_authority.field_status("stats.max_hp") if source_authority is not None else None
+    if max_hp_status is not None and not max_hp_status.is_effective:
+        if hp_delta:
+            raise CharacterStateValidationError("HP maximum needs repair before an HP adjustment.")
+        return payload
+    max_hp = int(max_hp_status.effective if max_hp_status is not None else (definition.stats or {}).get("max_hp") or 0)
+    if hp_delta:
+        current_hp += int(hp_delta)
+    vitals["current_hp"] = max(0, min(current_hp, max_hp))
+    payload["vitals"] = vitals
+    return payload
+
+
+def project_legacy_read_state(
+    definition: CharacterDefinition, state: dict[str, Any], *,
+    incoming_definition: CharacterDefinition, source_authority: Any,
+    state_revision: int,
+) -> dict[str, Any]:
+    """Project numeric values without performing an equipment-state migration.
+
+    Only an absent legacy marker with exact physical owners is eligible. This
+    read boundary never grants permission to update the retained state.
+    """
+    import hashlib
+
+    from .committed_publication import active
+    from .character_equipment_activation import analyze_activation, effective_definition
+    from .character_source_authority import SourceAuthority, _canonical
+    from .system_policy import is_dnd_5e_system
+
+    def refuse() -> None:
+        raise CharacterStateValidationError("Legacy read projection needs exact retained equipment identity and current source authority.")
+
+    if (not active() or not is_dnd_5e_system(incoming_definition.system)
+            or definition.system != incoming_definition.system
+            or definition.campaign_slug != incoming_definition.campaign_slug
+            or definition.character_slug != incoming_definition.character_slug
+            or type(state) is not dict or "equipment_activation" in state
+            or type(state_revision) is not int or state_revision < 0
+            or type(source_authority) is not SourceAuthority
+            or source_authority.state_revision != state_revision):
+        refuse()
+    authority_definition, _ = effective_definition(incoming_definition, state)
+    if (source_authority.definition_digest != hashlib.sha256(
+            _canonical(authority_definition.to_dict()).encode("utf-8")).hexdigest()
+            or source_authority.state_digest != hashlib.sha256(
+                _canonical(state).encode("utf-8")).hexdigest()):
+        refuse()
+
+    def physical_owners(candidate: CharacterDefinition) -> dict[str, dict[str, Any]]:
+        catalog = candidate.equipment_catalog
+        inventory = state.get("inventory")
+        if type(catalog) is not list or type(inventory) is not list:
+            refuse()
+        owners: dict[str, dict[str, Any]] = {}
+        for item in catalog:
+            if (type(item) is not dict or ("is_currency_only" in item
+                    and type(item["is_currency_only"]) is not bool)):
+                refuse()
+            if item.get("is_currency_only"):
+                continue
+            identity = item.get("id")
+            if (type(identity) is not str or not identity or identity != identity.strip()
+                    or identity in owners):
+                refuse()
+            owners[identity] = item
+        seen: set[str] = set()
+        for item in inventory:
+            if type(item) is not dict:
+                refuse()
+            identifiers = [item[key] for key in ("id", "catalog_ref") if key in item]
+            if (not identifiers or any(type(value) is not str or not value
+                    or value != value.strip() for value in identifiers)
+                    or len(set(identifiers)) != 1):
+                refuse()
+            identity = identifiers[0]
+            if identity in seen or identity not in owners or item.get("unlinked_activation_discarded"):
+                refuse()
+            seen.add(identity)
+        if seen != set(owners):
+            refuse()
+        analysis = analyze_activation(candidate, state)
+        if (any(row["status"] != "exact" for row in analysis["rows"])
+                or {warning["code"] for warning in analysis["warnings"]}
+                   != {"activation_migration_required"}):
+            refuse()
+        return owners
+
+    incoming_owners = physical_owners(incoming_definition)
+    normalized_owners = physical_owners(definition)
+
+    def source_binding(item: dict[str, Any]) -> tuple[Any, Any, Any]:
+        # Match only the optional representations produced by the normalizer.
+        # These local comparison values never replace retained observations.
+        kind = item.get("source_kind")
+        if kind is None:
+            kind = ""
+        elif type(kind) is str:
+            kind = kind.strip()
+        else:
+            refuse()
+        reference = item.get("systems_ref")
+        if reference is None:
+            reference = {}
+        elif type(reference) is not dict:
+            refuse()
+        page = item.get("page_ref")
+        if type(page) is str:
+            page = page.strip() or None
+        elif page is not None and type(page) is not dict:
+            refuse()
+        return kind, reference, page
+
+    def same_typed_reference(left: Any, right: Any) -> bool:
+        # Preserve every qualifier, including extra/nested fields, without
+        # Python's bool/int equality or coercion of unsupported values.
+        if type(left) is not type(right):
+            return False
+        if type(left) is dict:
+            if any(type(key) is not str for key in (*left, *right)):
+                refuse()
+            return left.keys() == right.keys() and all(
+                same_typed_reference(left[key], right[key]) for key in left
+            )
+        if type(left) is list:
+            return len(left) == len(right) and all(
+                same_typed_reference(old, new) for old, new in zip(left, right)
+            )
+        if left is None or type(left) in (str, bool, int, float):
+            return left == right
+        refuse()
+
+    # Normalization may derive current mechanics, but cannot remap a physical
+    # owner or silently acquire a different linked source for this read path.
+    for identity, item in incoming_owners.items():
+        normalized = normalized_owners[identity]
+        try:
+            if not all(same_typed_reference(old, new) for old, new in zip(
+                    source_binding(item), source_binding(normalized))):
+                refuse()
+        except RecursionError:
+            refuse()
+
+    payload = _reconcile_numeric_pools(
+        definition, deepcopy(state), source_authority=source_authority,
+    )
+    return _reconcile_current_hp(definition, payload, source_authority=source_authority)
+
+
+def merge_state_with_definition(
+    definition: CharacterDefinition,
+    state: dict[str, Any],
+    *,
+    hp_delta: int = 0,
+    inventory_quantity_overrides: dict[str, int] | None = None,
+    inventory_state_overrides: dict[str, dict[str, Any]] | None = None,
+    removed_resource_ids: set[str] | None = None,
+    prior_definition: CharacterDefinition | None = None,
+    explicit_removed_item_id: str | None = None,
+    source_authority: Any | None = None,
+) -> dict[str, Any]:
+    if is_xianxia_system(definition.system):
+        if explicit_removed_item_id:
+            raise CharacterStateValidationError("DND equipment removal cannot be applied to this system.")
+        return _merge_xianxia_state_with_definition(
+            definition,
+            state,
+            inventory_quantity_overrides=inventory_quantity_overrides,
+            inventory_state_overrides=inventory_state_overrides,
+        )
+
+    from .committed_publication import active
+    if source_authority is None and active():
+        raise CharacterStateValidationError("Character numeric authority is unavailable.")
+
+    from .character_equipment_activation import activation_marker, analyze_activation
+    if explicit_removed_item_id:
+        if prior_definition is None:
+            raise CharacterStateValidationError("Explicit equipment removal needs the prior Character identity.")
+        state = prospective_exact_item_removal_state(
+            prior_definition, definition, state, explicit_removed_item_id,
+        )
+
+    activation_analysis = analyze_activation(definition, state)
+    activation_issues = [row for row in activation_analysis["rows"]
+                         if row["status"] not in {"exact", "new_definition_row"}]
+    if activation_analysis["blocked"] and (
+        activation_issues or any(w["code"] == "activation_migration_required"
+                                 for w in activation_analysis["warnings"])
+    ):
+        raise CharacterStateValidationError(
+            "Equipment activation identity needs manager repair before this Character update."
+        )
+
+    payload = deepcopy(state)
+    payload = _reconcile_numeric_pools(
+        definition, payload, source_authority=source_authority,
+        removed_resource_ids=removed_resource_ids,
+    )
 
     quantity_overrides = {
         str(key).strip(): int(value)
@@ -461,6 +683,14 @@ def merge_state_with_definition(
         for key, value in dict(inventory_state_overrides or {}).items()
         if str(key).strip()
     }
+    for item_id, override in dict(inventory_state_overrides or {}).items():
+        if "notes" not in override:
+            continue
+        if (not isinstance(item_id, str) or not item_id or item_id != item_id.strip()
+                or not isinstance(override["notes"], str)
+                or set(override) - {"notes", "is_equipped", "is_attuned", "weapon_wield_mode", "active_infusions"}):
+            raise CharacterStateValidationError("Item note state intent is invalid.")
+        _inventory_note_target(definition, state, item_id)
     existing_inventory = list(payload.get("inventory") or [])
     existing_inventory_by_ref = {
         _inventory_item_ref(item): dict(item)
@@ -504,6 +734,8 @@ def merge_state_with_definition(
                 )
         item_state_override = state_overrides.get(catalog_ref)
         if item_state_override:
+            if "notes" in item_state_override:
+                merged_item["notes"] = item_state_override["notes"]
             if "is_equipped" in item_state_override:
                 merged_item["is_equipped"] = bool(item_state_override.get("is_equipped"))
             if "is_attuned" in item_state_override:
@@ -539,19 +771,9 @@ def merge_state_with_definition(
     payload["equipment_activation"] = activation_marker(definition)
     payload["attunement"] = _normalize_attunement_state(payload.get("attunement"), merged_inventory)
 
-    vitals = dict(payload.get("vitals") or {})
-    current_hp = int(vitals.get("current_hp") or 0)
-    max_hp_status = source_authority.field_status("stats.max_hp") if source_authority is not None else None
-    if max_hp_status is not None and not max_hp_status.is_effective:
-        if hp_delta:
-            raise CharacterStateValidationError("HP maximum needs repair before an HP adjustment.")
-        return payload
-    max_hp = int(max_hp_status.effective if max_hp_status is not None else (definition.stats or {}).get("max_hp") or 0)
-    if hp_delta:
-        current_hp += int(hp_delta)
-    vitals["current_hp"] = max(0, min(current_hp, max_hp))
-    payload["vitals"] = vitals
-    return payload
+    return _reconcile_current_hp(
+        definition, payload, source_authority=source_authority, hp_delta=hp_delta,
+    )
 
 
 def _merge_xianxia_state_with_definition(
@@ -617,6 +839,7 @@ def validate_state(
     definition: CharacterDefinition, state: dict[str, Any], *,
     source_authority: Any | None = None,
     previous_state: dict[str, Any] | None = None,
+    initial_item_charge_id: str | None = None,
 ) -> dict[str, Any]:
     payload = deepcopy(state)
     is_xianxia = is_xianxia_system(definition.system)
@@ -798,15 +1021,34 @@ def validate_state(
             if not isinstance(item, dict):
                 continue
             item_id = str(item.get("id") or "").strip()
-            if item_id in cleared_charges:
+            catalog_id = str(item.get("catalog_ref") or item_id).strip()
+            pair = (item.get("charges_current"), item.get("charges_max"))
+            if catalog_id in cleared_charges and pair == (None, None):
                 if (sum(1 for row in payload.get("inventory") or []
-                        if isinstance(row, dict) and str(row.get("id") or "").strip() == item_id) != 1
-                        or (item.get("charges_current"), item.get("charges_max")) != (None, None)):
+                        if isinstance(row, dict) and str(row.get("catalog_ref") or row.get("id") or "").strip() == catalog_id) != 1):
                     raise CharacterStateValidationError("Relinked item charges changed.")
                 continue
-            if source_authority.resource_status("item_charge", item_id).is_effective:
+            # A clearing marker records the earlier source transition. It
+            # cannot authorize current uses or permanently prevent a later
+            # explicit bounded admission to the new qualified source.
+            prior_pair = prior_charges.get(item_id, (None, None))
+            rule = source_authority.item_counter_rule(definition, item_id)
+            if pair != prior_pair and rule is not None:
+                from .character_item_capabilities import known_counter
+                if (sum(isinstance(other, dict) and other.get("id") == item_id for other in payload.get("inventory", [])) != 1
+                        or (item.get("catalog_ref") or item_id) != rule["catalog_id"]
+                        or type(item.get("quantity")) is not int or item["quantity"] != 1
+                        or not known_counter(item, rule["maximum"])
+                        or (prior_pair == (None, None) and initial_item_charge_id != item_id)
+                        or (prior_pair != (None, None)
+                            and not source_authority.resource_status("item_charge", item_id).is_effective)):
+                    raise CharacterStateValidationError("Item uses need a known bounded source-owned count or explicit manager admission.")
                 continue
-            if (item.get("charges_current"), item.get("charges_max")) != prior_charges.get(item_id, (None, None)):
+            if rule is None and source_authority.resource_status("item_charge", item_id).is_effective:
+                # Preserve the existing qualified numeric-witness receiver for
+                # items outside the new source-owned counter contract.
+                continue
+            if pair != prior_pair:
                 raise CharacterStateValidationError("Item charges need manager repair before they can change.")
     for item in payload.get("inventory") or []:
         quantity = int(item.get("quantity") or 0)
@@ -882,6 +1124,9 @@ def validate_state(
     else:
         payload.pop("xianxia", None)
     payload["status"] = str(payload.get("status") or definition.status)
+    if (initial_item_charge_id is not None
+            and activation_frame_digest(payload) != activation_frame_digest(state)):
+        raise CharacterStateValidationError("Initial item uses cannot normalize unrelated current-state observations.")
     return payload
 
 

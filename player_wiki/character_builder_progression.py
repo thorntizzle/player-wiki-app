@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from .character_ability_inputs import advance_inputs, advancement_scores as ability_advancement_scores, require_resolved_ability_inputs
+from .character_catalog_operations import (catalog_snapshot, catalog_index, catalog_aux,
+    catalog_rows, catalog_field, catalog_record, catalog_is_record)
+
+from .character_ability_inputs import advancement_scores as ability_advancement_scores, require_resolved_ability_inputs
 
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any
 
 from .auth_store import isoformat, utcnow
@@ -43,7 +47,6 @@ from .character_builder_derivation import (
     _apply_feat_ability_score_bonuses,
     _apply_feat_expertise_to_skill_proficiency_levels,
     _apply_feature_expertise_to_skill_proficiency_levels,
-    _build_leveled_stats,
     _build_skills_payload_from_levels,
     _definition_base_stats_without_adjustments,
     _extract_feat_skill_proficiencies,
@@ -54,6 +57,10 @@ from .character_builder_derivation import (
 )
 from .character_campaign_options import collect_campaign_option_proficiency_grants
 from .character_models import CharacterDefinition, CharacterImportMetadata
+from .character_spell_grants import (
+    ACQUISITION_FIELD, TRUSTED_ACQUISITION_KEY, AcquisitionContext, GrantContractError,
+    build_occurrences, canonical_digest, has_native_grants, validate_native_grant_model,
+)
 from .character_profile import (
     ensure_profile_class_rows,
     profile_class_level_text,
@@ -133,11 +140,21 @@ _BUILDER_PROXY_NAMES = (
     '_build_leveled_import_metadata',
     '_merge_feature_payloads',
     '_apply_tracker_templates_to_feature_payloads',
+    '_derive_continuation_tracker_templates',
+    '_require_known_continuation_resource_observations',
+    '_require_preserved_continuation_resource_state',
+    '_continuation_pool_ids',
+    '_retain_continuation_resource_templates',
     '_profile_class_row_level_map',
     '_merge_resource_templates',
     '_extract_existing_feature_choice_map',
     '_merge_selected_choice_maps',
     '_build_native_level_up_preview',
+    '_prospective_native_level_up_abilities',
+    '_prospective_native_level_up_numbers',
+    '_preserve_native_level_up_resource_observations',
+    '_summarize_preview_resource',
+    'validated_background_instrument_names',
     '_build_level_up_spellcasting',
     'normalize_definition_to_native_model',
     '_multiclass_requirement_text',
@@ -564,6 +581,9 @@ def _ensure_native_progression_hp_baseline(
     baseline_repaired: bool = False,
 ) -> dict[str, Any]:
     source = dict(source_payload or {})
+    from .character_hp_recipe import recipe_for_source
+    if recipe_for_source(source) is not None:
+        return source
     if _native_progression_hp_baseline(source) is not None:
         if baseline_repaired:
             native_progression = _native_progression_payload(source)
@@ -701,7 +721,7 @@ def _build_imported_spell_repair_rows(
         return []
 
     automatic_prepared_lookup_keys_by_row: dict[str, set[str]] = {}
-    resolved_spell_catalog = dict(spell_catalog or {})
+    resolved_spell_catalog = catalog_snapshot(spell_catalog)
     for row_context in spell_row_contexts:
         row_id = str(row_context.get("row_id") or "").strip()
         if not row_id:
@@ -966,6 +986,9 @@ def _apply_prepared_automatic_prepared_spell_flags(
     updated_payloads: list[dict[str, Any]] = []
     for payload in assigned_payloads:
         spell_payload = dict(payload or {})
+        if spell_payload.get("native_grant_projection") is True:
+            updated_payloads.append(spell_payload)
+            continue
         row_id = _spell_payload_class_row_id(spell_payload)
         payload_key = _spell_payload_key(spell_payload)
         if payload_key and payload_key in row_lookup_keys.get(row_id, set()):
@@ -1031,7 +1054,7 @@ def _imported_spell_candidate_row_ids(
     matched_row_ids: list[str] = []
     spell_entry = _resolve_spell_payload_entry(
         spell_payload,
-        dict(spell_catalog or {}),
+        catalog_snapshot(spell_catalog),
     )
     if spell_entry is not None:
         class_lists = dict((getattr(spell_entry, "metadata", {}) or {})).get("class_lists") or {}
@@ -1166,6 +1189,7 @@ def _build_multiclass_add_choice_sections(
     item_catalog: dict[str, Any],
     spell_catalog: dict[str, Any],
     values: dict[str, str],
+    class_row_id: str = "",
 ) -> list[dict[str, Any]]:
     sections = _build_level_up_choice_sections(
         definition=definition,
@@ -1183,6 +1207,7 @@ def _build_multiclass_add_choice_sections(
         target_level=1,
         current_ability_scores=_ability_scores_from_definition(definition),
         values=values,
+        class_row_id=class_row_id,
     )
     multiclass_fields = (
         _multiclass_skill_choice_fields(selected_class, definition=definition, values=values)
@@ -1198,6 +1223,142 @@ def _build_multiclass_add_choice_sections(
     return [{"title": "Class Choices", "fields": multiclass_fields}, *sections]
 
 
+def _attained_native_feature_entries(
+    systems_service: Any, campaign_slug: str, selected_class: SystemsEntryRecord | None,
+    selected_subclass: SystemsEntryRecord | None, *, attained_level: int, definition=None, verified_numeric_actions=(),
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    from .character_armor_models import selectors, stored
+    branches = {}
+    if definition is not None and stored(definition):
+        branches = selectors(definition, systems_service, verified_numeric_actions)
+    seen: set[str] = set()
+    for owner in (selected_class, selected_subclass):
+        if not isinstance(owner, SystemsEntryRecord) or attained_level < 1:
+            continue
+        for entry in systems_service.collect_attained_deterministic_feature_entries(
+            campaign_slug, owner, attained_level=attained_level, selected_feature_branches=branches,
+        ):
+            if not isinstance(entry, SystemsEntryRecord) or entry.entry_key in seen:
+                continue
+            label = normalize_lookup(str(entry.title or ""))
+            if label in ABILITY_SCORE_IMPROVEMENT_NAMES or "choose subclass feature" in label:
+                continue
+            seen.add(entry.entry_key)
+            payload = {"kind": "systems", "entry": entry, "name": entry.title, "label": entry.title}
+            if entry.entry_type in {"classfeature", "subclassfeature"}:
+                payload["native_acquisition"] = {"grant_rule_id": entry.entry_key, "choice_slot_id": entry.entry_key}
+            entries.append(payload)
+    return entries
+
+
+def _restored_native_resource_fields(
+    definition: CharacterDefinition, *, historical_entries: list[dict[str, Any]],
+    class_row_id: str, candidate_templates: list[dict[str, Any]], values: dict[str, str],
+    tracker_authority_inputs: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Identify omitted attained resources independently of new-level grants."""
+    features, _ = _build_feature_payloads(
+        historical_entries, ability_scores=_ability_scores_from_definition(definition),
+        current_level=_resolve_native_character_level(definition), class_row_id=class_row_id,
+        class_row_levels=_profile_class_row_level_map(definition.profile),
+        defer_trackers=True,
+    )
+    _, attained_templates = _derive_continuation_tracker_templates(
+        definition, _merge_feature_payloads(list(definition.features or []), features, preserve_source_aliases=True),
+        profile=definition.profile,
+        ability_scores=_ability_scores_from_definition(definition),
+        current_level=_resolve_native_character_level(definition),
+        **tracker_authority_inputs,
+    )
+    existing_ids = {str(row.get("id") or "").strip() for row in definition.resource_templates}
+    attained_ids = {str(row.get("id") or "").strip() for row in attained_templates} - existing_ids
+    fields: list[dict[str, Any]] = []
+    for template in candidate_templates:
+        resource_id = str(template.get("id") or "").strip()
+        if not resource_id or resource_id not in attained_ids:
+            continue
+        maximum = template.get("max")
+        if type(maximum) is not int or maximum < 0:
+            raise CharacterBuildError("A restored resource needs a verified bounded maximum before level-up.")
+        name = f"restored_resource_current_{resource_id}"
+        fields.append({"name": name, "id": resource_id, "label": str(template.get("label") or resource_id),
+                       "max": maximum, "value": str(values.get(name) or "")})
+    return fields
+
+
+def _missing_attained_native_feature_entries(
+    definition: CharacterDefinition, entries: list[dict[str, Any]], *, class_row_id: str,
+) -> list[dict[str, Any]]:
+    from .character_armor_models import historical_ids
+    summaries = historical_ids(definition)
+    existing = {
+        str(dict(feature.get("systems_ref") or {}).get("entry_key") or "").strip()
+        for feature in definition.features
+        if str(feature.get("class_row_id") or "").strip() == class_row_id and feature.get("id") not in summaries
+    }
+    return [row for row in entries if row["entry"].entry_key not in existing]
+
+
+def _preview_native_restored_resource_summaries(
+    templates: list[dict[str, Any]], fields: list[dict[str, Any]],
+    *, state: dict[str, Any] | None = None,
+) -> list[str]:
+    fields_by_id = {str(field["id"]): field for field in fields}
+    summaries: list[str] = []
+    for template in templates:
+        projected = dict(template)
+        field = fields_by_id.get(str(template.get("id") or ""))
+        if field is not None:
+            raw = str(field.get("value") or "").strip()
+            if (not raw or not raw.isascii() or not raw.isdecimal() or len(raw) > 10
+                    or not 0 <= int(raw) <= int(field["max"])):
+                summaries.append(f"{field['label']}: current amount required (maximum {field['max']})")
+                continue
+            projected["initial_current"] = int(raw)
+        elif state is not None:
+            observed = [row for row in list(state.get("resources") or [])
+                        if isinstance(row, dict) and row.get("id") == template.get("id")]
+            if len(observed) == 1 and type(observed[0].get("current")) is int:
+                projected["initial_current"] = observed[0]["current"]
+            elif observed:
+                summaries.append(f"{template.get('label') or template.get('id')}: current UNKNOWN (manager repair required)")
+                continue
+        summary = _summarize_preview_resource(projected)
+        if summary:
+            summaries.append(summary)
+    return summaries
+
+
+def _apply_restored_native_resource_currents(
+    definition: CharacterDefinition, *, fields: list[dict[str, Any]], values: dict[str, str],
+    state: dict[str, Any],
+) -> CharacterDefinition:
+    allowed = {str(field["name"]) for field in fields}
+    if any(str(key).startswith("restored_resource_current_") and key not in allowed for key in values):
+        raise CharacterBuildError("A restored-resource current value does not belong to this advancement. Refresh level-up.")
+    state_ids = {str(row.get("id") or "").strip() for row in list(state.get("resources") or []) if isinstance(row, dict)}
+    currents: dict[str, int] = {}
+    for field in fields:
+        resource_id = str(field["id"])
+        if resource_id in state_ids:
+            raise CharacterBuildError("A restored resource already has play state. Refresh before leveling up.")
+        raw = str(values.get(str(field["name"]), "")).strip()
+        if not raw or not raw.isascii() or not raw.isdecimal() or len(raw) > 10:
+            raise CharacterBuildError(f"Enter a whole-number current amount for {field['label']}.")
+        current = int(raw)
+        if not 0 <= current <= int(field["max"]):
+            raise CharacterBuildError(f"Current {field['label']} must be between 0 and {field['max']}.")
+        currents[resource_id] = current
+    payload = definition.to_dict()
+    payload["resource_templates"] = [
+        {**template, "initial_current": currents[str(template.get("id") or "")]}
+        if str(template.get("id") or "") in currents else dict(template)
+        for template in definition.resource_templates
+    ]
+    return CharacterDefinition.from_dict(payload)
+
+
 def build_native_level_up_context(
     systems_service: Any,
     campaign_slug: str,
@@ -1205,7 +1366,27 @@ def build_native_level_up_context(
     form_values: dict[str, str] | None = None,
     *,
     campaign_page_records: list[Any] | None = None,
+    state: dict[str, Any] | None = None,
+    state_revision: int | None = None,
+    authority_page_records: list[Any] | None = None,
+    verified_manual_actions: tuple[Any, ...] = (),
+    verified_numeric_actions: tuple[Any, ...] = (),
 ) -> dict[str, Any]:
+    raw_values = dict(form_values or {})
+    acquisition_context = raw_values.pop(TRUSTED_ACQUISITION_KEY, None)
+    from .committed_publication import active
+    activated = active()
+    if not activated:
+        if has_native_grants(definition):
+            raise GrantContractError("This Character's spell-grant records need manager review before level-up.")
+        raw_values.pop(ACQUISITION_FIELD, None)
+        acquisition_context = None
+    if acquisition_context is not None and not isinstance(acquisition_context, AcquisitionContext):
+        raise GrantContractError("Native acquisition context is unavailable.")
+    acquisition_prior_definition = CharacterDefinition.from_dict(deepcopy(definition.to_dict()))
+    tracker_authority_inputs = dict(state=state, state_revision=state_revision,
+        systems_service=systems_service, campaign_page_records=authority_page_records,
+        verified_manual_actions=verified_manual_actions, verified_numeric_actions=verified_numeric_actions)
     readiness = native_level_up_readiness(
         systems_service,
         campaign_slug,
@@ -1215,7 +1396,14 @@ def build_native_level_up_context(
     if str(readiness.get("status") or "").strip() != NATIVE_LEVEL_UP_READY:
         raise CharacterBuildError(str(readiness.get("message") or "This character is not ready for native level-up."))
 
-    values = _normalize_level_up_values(definition, form_values or {})
+    if state is not None and activated:
+        from .character_equipment_activation import effective_definition
+
+        definition, activation_warnings = effective_definition(definition, state)
+        if activation_warnings:
+            raise CharacterBuildError("Equipment activation identity needs manager repair before level-up.")
+    values = _normalize_level_up_values(definition, raw_values)
+    submitted_values = dict(values)
     current_level = int(readiness.get("current_level") or _resolve_native_character_level(definition))
     next_level = current_level + 1
     static_bundle = _build_common_builder_static_bundle(
@@ -1231,6 +1419,19 @@ def build_native_level_up_context(
     optionalfeature_catalog = dict(static_bundle.get("optionalfeature_catalog") or {})
     item_catalog = dict(static_bundle.get("item_catalog") or {})
     spell_catalog = dict(static_bundle.get("spell_catalog") or {})
+    # Choice fields use current independent ownership. Keep the raw definition
+    # for numeric/resource preview and strict production, including retired rows.
+    spell_choice_definition = definition
+    if activated and has_native_grants(acquisition_prior_definition):
+        from .character_source_authority import build_reconciled_source_authority
+        choice_authority = build_reconciled_source_authority(
+            definition=acquisition_prior_definition, state=state,
+            state_revision=state_revision, systems_service=systems_service,
+            campaign_page_records=authority_page_records,
+            verified_manual_actions=verified_manual_actions,
+            verified_numeric_actions=verified_numeric_actions,
+        )
+        spell_choice_definition = choice_authority.effective_definition(definition)
     row_contexts = [
         dict(row or {})
         for row in list(readiness.get("selected_class_rows") or [])
@@ -1331,7 +1532,7 @@ def build_native_level_up_context(
                 values,
                 static_keys=LEVEL_UP_BUILDER_STATIC_KEYS,
                 build_sections=lambda current_values: _build_multiclass_add_choice_sections(
-                    definition=definition,
+                    definition=spell_choice_definition,
                     selected_class=selected_class,
                     selected_subclass=selected_subclass,
                     feat_options=feat_options,
@@ -1344,6 +1545,7 @@ def build_native_level_up_context(
                     item_catalog=item_catalog,
                     spell_catalog=spell_catalog,
                     values=current_values,
+                    class_row_id=acted_row_id,
                 ),
             )
         else:
@@ -1391,7 +1593,7 @@ def build_native_level_up_context(
             values,
             static_keys=LEVEL_UP_BUILDER_STATIC_KEYS,
             build_sections=lambda current_values: _build_level_up_choice_sections(
-                definition=definition,
+                definition=spell_choice_definition,
                 selected_class=selected_class,
                 selected_subclass=selected_subclass,
                 feat_options=feat_options,
@@ -1426,6 +1628,17 @@ def build_native_level_up_context(
         else sync_profile_class_summary(dict(definition.profile or {}))
     )
     if isinstance(selected_class, SystemsEntryRecord):
+        attained_entries = _attained_native_feature_entries(
+            systems_service, campaign_slug, selected_class, selected_subclass, attained_level=row_target_level, definition=definition,
+            verified_numeric_actions=verified_numeric_actions,
+        )
+        attained_entries = _missing_attained_native_feature_entries(
+            definition, attained_entries, class_row_id=acted_row_id,
+        )
+        historical_entries = _attained_native_feature_entries(
+            systems_service, campaign_slug, selected_class, selected_subclass, attained_level=row_current_level, definition=definition,
+            verified_numeric_actions=verified_numeric_actions,
+        )
         preview = _build_native_level_up_preview(
             definition=definition,
             selected_class=selected_class,
@@ -1443,8 +1656,27 @@ def build_native_level_up_context(
             values=values,
             class_row_id=acted_row_id,
             resulting_profile=preview_profile,
+            item_catalog=item_catalog,
+            attained_feature_entries=attained_entries,
+            tracker_authority_inputs=tracker_authority_inputs,
+            acquisition_context=acquisition_context,
+            acquisition_prior_definition=acquisition_prior_definition,
+            spell_choice_definition=spell_choice_definition,
         )
+        preview_resource_templates = preview.pop("_resource_templates", [])
+        restored_resource_fields = _restored_native_resource_fields(
+            definition, historical_entries=historical_entries, class_row_id=acted_row_id,
+            candidate_templates=preview_resource_templates, values=submitted_values,
+            tracker_authority_inputs=tracker_authority_inputs,
+        )
+        preview["resources"] = _preview_native_restored_resource_summaries(
+            preview_resource_templates, restored_resource_fields, state=state,
+        )
+        for field in restored_resource_fields:
+            if field["name"] in submitted_values:
+                values[field["name"]] = submitted_values[field["name"]]
     else:
+        restored_resource_fields = []
         try:
             preview_max_hp = max(int((definition.stats or {}).get("max_hp") or 0) + _parse_level_up_hit_point_gain(values), 1)
         except CharacterBuildError:
@@ -1460,7 +1692,9 @@ def build_native_level_up_context(
         }
     return {
         "values": values,
+        TRUSTED_ACQUISITION_KEY: acquisition_context,
         "character_name": definition.name,
+        "physical_hp_input": bool(dict(definition.source.get("native_progression") or {}).get("hp_recipe")),
         "current_level": current_level,
         "next_level": next_level,
         "campaign_slug": campaign_slug,
@@ -1505,6 +1739,7 @@ def build_native_level_up_context(
         "spell_catalog": spell_catalog,
         "limitations": list(NATIVE_LEVEL_UP_LIMITATIONS),
         "preview": preview,
+        "restored_resource_fields": restored_resource_fields,
         "selected_class_rows": row_contexts,
         "field_live_preview": _level_up_field_live_preview_metadata(),
         "preview_region_ids": list(LEVEL_UP_PREVIEW_REGION_IDS),
@@ -1531,9 +1766,25 @@ def build_native_level_up_character_definition(
     from .character_source_authority import build_reconciled_source_authority
     from .committed_publication import active
 
+    activated = active()
+    if not activated and has_native_grants(current_definition):
+        raise GrantContractError("This Character's spell-grant records need manager review before level-up.")
+    acquisition_context = level_up_context.get(TRUSTED_ACQUISITION_KEY) if activated else None
+    if activated and not isinstance(acquisition_context, AcquisitionContext):
+        raise GrantContractError("Refresh level-up to obtain its acquisition intent.")
+    prior_definition = CharacterDefinition.from_dict(deepcopy(current_definition.to_dict()))
+    if activated and (acquisition_context.mode != "progression" or acquisition_context.campaign_slug != campaign_slug
+            or acquisition_context.prior_definition_digest != canonical_digest(prior_definition.to_dict())
+            or acquisition_context.prior_state_revision != state_revision):
+        raise GrantContractError("The native acquisition no longer matches this character generation.")
+    level_up_context.pop("_validated_native_advancement", None)
     if state is None or state_revision is None or level_up_context.get("systems_service") is None:
         raise CharacterBuildError("Refresh the Character before recalculating level-up mechanics.")
-    activated = active()
+    _require_known_continuation_resource_observations(prior_definition, state)
+    tracker_authority_inputs = dict(state=state, state_revision=state_revision,
+        systems_service=level_up_context["systems_service"], campaign_page_records=authority_page_records,
+        verified_manual_actions=verified_manual_actions, verified_numeric_actions=verified_numeric_actions)
+    current_authority = None
     if activated:
         current_authority = build_reconciled_source_authority(
             definition=current_definition, state=state, state_revision=state_revision,
@@ -1542,16 +1793,36 @@ def build_native_level_up_character_definition(
             verified_manual_actions=verified_manual_actions,
             verified_numeric_actions=verified_numeric_actions,
         )
+        # Equipment activation is state-owned. Recalculate AC from qualified
+        # current inputs before refusing an otherwise owned native advancement.
+        current_authority = current_authority.bind_current_numbers(
+            current_definition, state,
+            item_catalog=level_up_context.get("item_catalog"),
+            systems_service=level_up_context["systems_service"],
+            campaign_page_records=authority_page_records,
+        )
         try:
             current_authority.require_authoring_inputs()
         except ValueError as exc:
             raise CharacterBuildError(str(exc)) from exc
+        if any(not current_authority.field_status(
+                f"skills.{str(row.get('name') or '').strip().casefold()}").is_effective
+                for row in current_definition.skills if isinstance(row, dict)):
+            raise CharacterBuildError("Character skill choices need source repair before level-up.")
+        from .character_equipment_activation import effective_definition as equipment_definition
+        current_definition, activation_warnings = equipment_definition(current_definition, state)
+        if activation_warnings:
+            raise CharacterBuildError("Equipment activation identity needs manager repair before level-up.")
     current_definition = normalize_definition_to_native_model(
         current_definition,
+        source_authority=current_authority,
         item_catalog=level_up_context.get("item_catalog"),
         systems_service=level_up_context.get("systems_service"),
         campaign_page_records=level_up_context.get("campaign_page_records"),
     )
+    if isinstance(prior_definition.source.get("native_reconstruction_choices"), dict):
+        from .character_reconstruction import retain_reconstruction_content
+        current_definition = retain_reconstruction_content(prior_definition, current_definition)
     require_resolved_ability_inputs(current_definition)
     support_error = _native_level_up_support_error(
         current_definition,
@@ -1575,21 +1846,29 @@ def build_native_level_up_character_definition(
     optionalfeature_catalog = dict(level_up_context.get("optionalfeature_catalog") or {})
     spell_catalog = dict(level_up_context.get("spell_catalog") or {})
     context_values = level_up_context.get("values")
+    raw_values = dict(form_values or {})
+    raw_values.pop(TRUSTED_ACQUISITION_KEY, None)
+    submitted_values = {
+        **(dict(context_values) if isinstance(context_values, dict) else {}),
+        **{key: str(value) for key, value in raw_values.items()},
+    }
     values = _normalize_level_up_values(
         current_definition,
         _sanitize_choice_section_values(
-            {
-                **(dict(context_values) if isinstance(context_values, dict) else {}),
-                **{key: str(value) for key, value in dict(form_values or {}).items()},
-            },
+            submitted_values,
             choice_sections=choice_sections,
-            static_keys=LEVEL_UP_BUILDER_STATIC_KEYS,
+            static_keys=set(LEVEL_UP_BUILDER_STATIC_KEYS) | {
+                str(field["name"]) for field in list(level_up_context.get("restored_resource_fields") or [])
+            },
         ),
     )
     if selected_class is None or selected_species is None or selected_background is None:
         raise CharacterBuildError("This native character is missing the class, species, or background needed for level-up.")
     if level_up_context.get("requires_subclass") and selected_subclass is None:
         raise CharacterBuildError("Choose a subclass before leveling up this character.")
+    background_instrument_names = validated_background_instrument_names(
+        current_definition, level_up_context["systems_service"], level_up_context.get("item_catalog"),
+    )
 
     current_level = int(level_up_context.get("current_level") or _resolve_native_character_level(current_definition))
     target_level = int(level_up_context.get("next_level") or (current_level + 1))
@@ -1612,6 +1891,14 @@ def build_native_level_up_character_definition(
         raise CharacterBuildError("This class row can only advance one level at a time.")
 
     hp_gain = _parse_level_up_hit_point_gain(values)
+    from .character_hp_recipe import recipe_for_source
+    reconstruction_hp_recipe = recipe_for_source(current_definition.source)
+    if reconstruction_hp_recipe is not None:
+        from .character_hit_dice import _hit_die_faces_for_class_row
+        faces = _hit_die_faces_for_class_row({
+            "systems_ref": _systems_ref_from_entry(selected_class), "metadata": selected_class.metadata})
+        if not 1 <= hp_gain <= faces:
+            raise CharacterBuildError(f"Enter the physical Hit Die contribution from 1 to {faces}; Constitution is applied separately.")
     _, selected_choices = _resolve_builder_choices(choice_sections, values)
     advancement_scores = ability_advancement_scores(current_definition.stats)
     base_ability_scores, level_up_feat_entries, _ = _resolve_level_up_ability_score_choices(
@@ -1643,6 +1930,13 @@ def build_native_level_up_character_definition(
         selected_choices=selected_choices,
         optionalfeature_catalog=optionalfeature_catalog,
     )
+    new_feature_entries.extend(_missing_attained_native_feature_entries(
+        current_definition, _attained_native_feature_entries(
+            level_up_context["systems_service"], campaign_slug, selected_class, selected_subclass,
+            attained_level=row_target_level, definition=prior_definition,
+            verified_numeric_actions=verified_numeric_actions,
+        ), class_row_id=target_class_row_id,
+    ))
     new_feature_entries.extend(level_up_feat_entries)
     new_feature_entries.extend(
         _collect_feat_optionalfeature_entries(
@@ -1656,6 +1950,12 @@ def build_native_level_up_character_definition(
         values=values,
         field_prefix_base="levelup_campaign_spell_manager",
     )
+    if not has_native_grants(prior_definition) and any(
+        isinstance(row.get("entry") or row.get("systems_entry"), SystemsEntryRecord)
+        and "native_spell_grants" in (row.get("entry") or row.get("systems_entry")).metadata
+        for row in new_feature_entries
+    ):
+        raise GrantContractError("Review the native spell-grant migration before acquiring this source feature.")
     new_automatic_prepared_feature_entries = _automatic_prepared_feature_entries(
         feature_entries=new_feature_entries,
         class_progression=class_progression,
@@ -1676,18 +1976,36 @@ def build_native_level_up_character_definition(
     )
     proficiency_bonus = _proficiency_bonus_for_level(target_level)
     existing_skill_proficiency_levels = _skill_proficiency_levels_from_rows(
-        list(current_definition.skills or []),
+        [row for row in list(current_definition.skills or [])
+         if not activated or current_authority.field_status(
+             f"skills.{str(row.get('name') or '').strip().casefold()}").is_effective],
         ability_scores=_ability_scores_from_definition(current_definition),
         proficiency_bonus=int(
             (current_definition.stats or {}).get("proficiency_bonus")
             or _proficiency_bonus_for_level(current_level)
         ),
+        prefer_explicit=(activated or _character_source_type(current_definition) == "native_character_builder"),
     )
     campaign_option_proficiencies = collect_campaign_option_proficiency_grants(selected_campaign_option_payloads)
+    from .character_feature_proficiency_grants import native_grants, native_frame, current_native_selections, automatic
+    if activated:
+        from .character_feature_proficiency_grants import contract
+        for selection in feature_choice_selections:
+            _fixed, source_slots = contract(selection["entry"], item_catalog=level_up_context.get("item_catalog"))
+            for slot in source_slots:
+                condition = slot.get("condition")
+                observed = [tool for tool in prior_definition.proficiencies.get("tools", [])
+                            if normalize_lookup(tool) == normalize_lookup(condition)] if condition else []
+                if observed and (len(observed) != 1 or not current_authority.field_status(
+                        "proficiencies.tools." + observed[0].casefold()).is_effective):
+                    raise CharacterBuildError("A conditional replacement needs qualified prior tool proficiency.")
+    feature_grants = native_grants(feature_choice_selections, selected_choices,
+        prior=prior_definition.proficiencies, item_catalog=level_up_context.get("item_catalog"))
     for skill_name in (
         _extract_feat_skill_proficiencies(feat_selections, selected_choices)
         + (_extract_multiclass_gained_skill_proficiencies(selected_choices) if advancement_mode == "add_class" else [])
         + list(campaign_option_proficiencies.get("skills") or [])
+        + feature_grants["skills"]
     ):
         normalized_skill = normalize_lookup(skill_name)
         if normalized_skill not in SKILL_LABELS:
@@ -1714,12 +2032,6 @@ def build_native_level_up_character_definition(
         proficiency_bonus,
     )
 
-    new_features, _ = _build_feature_payloads(
-        new_feature_entries,
-        ability_scores=ability_scores,
-        current_level=row_target_level,
-        class_row_id=target_class_row_id,
-    )
     resulting_profile = _build_resulting_level_up_profile(
         current_definition,
         action=advancement_mode,
@@ -1728,12 +2040,34 @@ def build_native_level_up_character_definition(
         selected_subclass=selected_subclass,
         row_target_level=row_target_level,
     )
-    merged_features = _merge_feature_payloads(list(current_definition.features or []), new_features)
-    merged_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
-        merged_features,
+    new_features, _ = _build_feature_payloads(
+        new_feature_entries,
         ability_scores=ability_scores,
         current_level=target_level,
+        class_row_id=target_class_row_id,
         class_row_levels=_profile_class_row_level_map(resulting_profile),
+        defer_trackers=True,
+        acquisition_context=acquisition_context,
+    )
+    from .character_armor_models import merge_continuation
+    merged_features = merge_continuation(current_definition, new_features)
+    item_catalog = dict(level_up_context.get("item_catalog") or _build_item_catalog([]))
+    selected_feat_features, _ = _build_feature_payloads(
+        level_up_feat_entries, ability_scores=ability_scores, current_level=target_level,
+        class_row_id=target_class_row_id, class_row_levels=_profile_class_row_level_map(resulting_profile),
+        defer_trackers=True,
+    )
+    ability_scores, prospective_ability_inputs = _prospective_native_level_up_abilities(
+        current_definition, base_ability_scores=base_ability_scores, feat_selections=feat_selections,
+        selected_choices=selected_choices, selected_feat_features=selected_feat_features,
+        features=merged_features, item_catalog=item_catalog,
+    )
+    skills = _build_skills_payload_from_levels(ability_scores, existing_skill_proficiency_levels, proficiency_bonus)
+    merged_features, derived_resource_templates = _derive_continuation_tracker_templates(
+        current_definition, merged_features, profile=resulting_profile,
+        ability_scores=ability_scores,
+        current_level=target_level,
+        **tracker_authority_inputs,
     )
 
     combined_selected_choices = _merge_selected_choice_maps(
@@ -1747,15 +2081,18 @@ def build_native_level_up_character_definition(
         + (_extract_multiclass_gained_armor_proficiencies(selected_class) if advancement_mode == "add_class" else [])
         + _extract_feat_armor_proficiencies(feat_selections, selected_choices)
         + list(campaign_option_proficiencies.get("armor") or [])
+        + feature_grants["armor"]
     )
     resulting_weapon_proficiencies = _dedupe_preserve_order(
         list((current_definition.proficiencies or {}).get("weapons") or [])
         + (_extract_multiclass_gained_weapon_proficiencies(selected_class) if advancement_mode == "add_class" else [])
         + _extract_feat_weapon_proficiencies(feat_selections, selected_choices)
         + list(campaign_option_proficiencies.get("weapons") or [])
+        + feature_grants["weapons"]
     )
     resulting_tool_proficiencies = _dedupe_preserve_order(
         list((current_definition.proficiencies or {}).get("tools") or [])
+        + background_instrument_names
         + (
             _extract_multiclass_gained_tool_proficiencies(selected_class, selected_choices)
             if advancement_mode == "add_class"
@@ -1763,6 +2100,7 @@ def build_native_level_up_character_definition(
         )
         + _extract_feat_tool_proficiencies(feat_selections, selected_choices)
         + list(campaign_option_proficiencies.get("tools") or [])
+        + feature_grants["tools"]
     )
     resulting_language_proficiencies = _dedupe_preserve_order(
         list((current_definition.proficiencies or {}).get("languages") or [])
@@ -1773,54 +2111,50 @@ def build_native_level_up_character_definition(
         )
         + _extract_feat_language_proficiencies(feat_selections, selected_choices)
         + list(campaign_option_proficiencies.get("languages") or [])
+        + feature_grants["languages"]
     )
+    retained_expertise = current_native_selections(current_definition, level_up_context["systems_service"],
+        authority=current_authority if activated else None)
+    expertise_selections = [row for row in retained_expertise if automatic(row["entry"])] + feature_choice_selections
+    if activated:
+        new_tool_grants = (feature_grants["tools"] + background_instrument_names
+            + _extract_feat_tool_proficiencies(feat_selections, selected_choices)
+            + list(campaign_option_proficiencies.get("tools") or [])
+            + (_extract_multiclass_gained_tool_proficiencies(selected_class, selected_choices)
+               if advancement_mode == "add_class" else []))
+        new_tool_keys = {normalize_lookup(tool) for tool in new_tool_grants}
+        automatic_tools = [tool for tool in resulting_tool_proficiencies
+            if normalize_lookup(tool) in new_tool_keys or current_authority.field_status(
+                "proficiencies.tools." + tool.casefold()).is_effective]
+        expertise_selections = [{**row, "automatic_tool_proficiencies": automatic_tools} for row in expertise_selections]
     resulting_tool_expertise = _apply_feature_expertise_to_tool_proficiencies(
         list((current_definition.proficiencies or {}).get("tool_expertise") or []),
         available_tool_proficiencies=resulting_tool_proficiencies,
-        feature_selections=feature_choice_selections,
+        feature_selections=expertise_selections,
         selected_choices=selected_choices,
         strict=True,
     )
-    attacks = _build_level_one_attacks(
-        equipment_catalog=list(current_definition.equipment_catalog or []),
-        item_catalog=item_catalog,
-        ability_scores=ability_scores,
-        proficiency_bonus=proficiency_bonus,
-        weapon_proficiencies=_dedupe_preserve_order(
-            list((current_definition.proficiencies or {}).get("weapons") or [])
-            + (_extract_multiclass_gained_weapon_proficiencies(selected_class) if advancement_mode == "add_class" else [])
-            + _extract_feat_weapon_proficiencies(feat_selections, selected_choices)
-        ),
-        selected_choices=combined_selected_choices,
-        features=merged_features,
+    prospective_stats, attacks = _prospective_native_level_up_numbers(
+        definition=current_definition, profile=resulting_profile, selected_class=selected_class,
+        selected_subclass=selected_subclass, ability_scores=ability_scores, skills=skills,
+        features=merged_features, feat_selections=feat_selections, selected_choices=selected_choices,
+        hp_gain=hp_gain, total_character_level=target_level, item_catalog=item_catalog,
+        selected_campaign_option_payloads=selected_campaign_option_payloads,
+        weapon_proficiencies=resulting_weapon_proficiencies, attack_choices=combined_selected_choices,
     )
+    prospective_stats["ability_inputs"] = prospective_ability_inputs
     total_hp_delta = hp_gain + _feat_hit_point_bonus(
         feat_selections,
         current_level=target_level,
     )
+    spell_output_contributors = [] if activated and has_native_grants(prior_definition) else None
     definition = CharacterDefinition(
         campaign_slug=campaign_slug,
         character_slug=current_definition.character_slug,
         name=current_definition.name,
         status=current_definition.status,
         profile=resulting_profile,
-        stats=_build_leveled_stats(
-            current_definition=current_definition,
-            selected_class=selected_class,
-            selected_subclass=selected_subclass,
-            ability_scores=ability_scores,
-            skills=skills,
-            proficiency_bonus=proficiency_bonus,
-            hp_gain=hp_gain,
-            feat_selections=feat_selections,
-            selected_choices=selected_choices,
-            current_level=target_level,
-            equipment_catalog=list(current_definition.equipment_catalog or []),
-            features=merged_features,
-            item_catalog=item_catalog,
-            selected_campaign_option_payloads=selected_campaign_option_payloads,
-            resulting_profile=resulting_profile,
-        ),
+        stats=prospective_stats,
         skills=skills,
         proficiencies={
             "armor": resulting_armor_proficiencies,
@@ -1846,12 +2180,15 @@ def build_native_level_up_character_definition(
             automatic_prepared_feature_entries=new_automatic_prepared_feature_entries,
             selected_campaign_option_payloads=selected_campaign_option_payloads,
             class_row_id=target_class_row_id,
+            source_authority=current_authority,
+            output_contributors=spell_output_contributors,
         ),
         equipment_catalog=list(current_definition.equipment_catalog or []),
         reference_notes=dict(current_definition.reference_notes or {}),
         resource_templates=_merge_resource_templates(
             list(current_definition.resource_templates or []),
             derived_resource_templates,
+            preserve_observation_ids=_continuation_pool_ids(merged_features),
         ),
         source=_build_leveled_source(
             current_definition.source,
@@ -1868,46 +2205,71 @@ def build_native_level_up_character_definition(
             row_to_level=row_target_level,
         ),
     )
-    from .character_builder_derivation import (
-        _campaign_option_feat_selections_from_features,
-        _campaign_option_feat_selected_choices_from_features,
-    )
-    selected_feat_features, _ = _build_feature_payloads(
-        level_up_feat_entries,
-        ability_scores=ability_scores,
-        current_level=row_target_level,
-        class_row_id=target_class_row_id,
-    )
-    selected_campaign_bonus = _apply_feat_ability_score_bonuses(
-        {key: 0 for key in ABILITY_KEYS},
-        feat_selections=_campaign_option_feat_selections_from_features(selected_feat_features),
-        selected_choices=_campaign_option_feat_selected_choices_from_features(selected_feat_features), strict=False,
-    )
-    selected_feat_bonuses = _apply_feat_ability_score_bonuses(
-        {key: 0 for key in ABILITY_KEYS},
-        feat_selections=feat_selections, selected_choices=selected_choices, strict=True,
-    )
-    # Only selected feats can contribute this fixed layer. Automatic class,
-    # subclass and optional-feature grants remain in their modeled layer.
-    # ASI intent precedes caps; no delta comes from a capped sheet result.
-    advance_inputs(
-        definition.stats,
-        {key: base_ability_scores[key] - advancement_scores[key] for key in ABILITY_KEYS},
-        fixed_bonuses={
-            key: selected_feat_bonuses[key] - selected_campaign_bonus[key]
-            for key in ABILITY_KEYS
-        },
-    )
-    definition = normalize_definition_to_native_model(
-        definition,
-        mode="authoring" if activated else "historical",
-        source_authority=build_reconciled_source_authority(
+    grant_frame = native_frame(feature_choice_selections, selected_choices, prior_definition.proficiencies,
+        target_class_row_id, prior_definition.source.get("native_feature_proficiency_choices", []))
+    if grant_frame:
+        definition.source["native_feature_proficiency_choices"] = grant_frame
+    if has_native_grants(prior_definition):
+        prior_model = validate_native_grant_model(prior_definition)
+        if not getattr(current_authority, "native_grant_custody_confirmed", False):
+            raise GrantContractError("The prior native spell-grant acquisition needs confirmed source custody.")
+        retained_owners = current_authority.native_grant_owners
+        model, acquisitions = build_occurrences(
+            definition, level_up_context["systems_service"], acquisition_context=acquisition_context,
+            retained_owners=retained_owners, migration_edges=prior_model["migration_edges"],
+            prior_definition=prior_definition, prior_custody=verified_numeric_actions,
+            prior_state_revision=state_revision,
+        )
+        definition.spellcasting["native_spell_grants"] = model
+        definition.source["native_acquisitions"] = acquisitions
+        from .character_spell_grants import omit_redundant_native_spell_outputs
+        definition = omit_redundant_native_spell_outputs(
+            definition, prior_definition=prior_definition,
+            contributors=spell_output_contributors,
+            systems_service=level_up_context["systems_service"],
+        )
+    if reconstruction_hp_recipe is not None:
+        from .character_reconstruction_authority import advance_reconstruction_choices
+        definition = advance_reconstruction_choices(current_definition, definition,
+            feat_selections=feat_selections, feature_selections=feature_choice_selections,
+            selected_choices=selected_choices, base_scores=base_ability_scores,
+            prior_scores=advancement_scores, class_entry=selected_class,
+            systems_service=level_up_context["systems_service"], elective_witnesses=verified_numeric_actions)
+        from .character_hp_recipe import next_level_maximum
+        payload = deepcopy(definition.to_dict())
+        history = payload["source"]["native_progression"]["history"]
+        history[-1]["physical_hp_gain"] = hp_gain
+        expected_hp = next_level_maximum(payload["source"]["native_progression"]["hp_recipe"], history[:-1],
+            level=target_level, constitution=ability_scores["con"], faces=faces, physical_hp_gain=hp_gain)
+        history[-1]["max_hp_delta"] = expected_hp - int(current_definition.stats["max_hp"])
+        total_hp_delta = history[-1]["max_hp_delta"]
+        payload["stats"]["max_hp"] = expected_hp
+        definition = CharacterDefinition.from_dict(payload)
+    pending_authority = None
+    if activated:
+        pending_authority = build_reconciled_source_authority(
             definition=definition, state=state, state_revision=state_revision,
             systems_service=level_up_context["systems_service"],
             campaign_page_records=authority_page_records,
             verified_manual_actions=verified_manual_actions,
             verified_numeric_actions=verified_numeric_actions,
-        ) if activated else None,
+        )
+        # The changed class level invalidates old final-number witnesses before
+        # the post-publication audit. Carry only choices from qualified prior
+        # skills and this validated advancement through this in-memory derivation.
+        # Publication still requires the ordinary pending proof and durable audit.
+        pending_skills = {f"skills.{str(row.get('name') or '').strip().casefold()}": row for row in skills}
+        pending_authority = replace(pending_authority, field_statuses=tuple(
+            replace(row, status="VERIFIED", effective=deepcopy(pending_skills[row.path]),
+                    reason="pending_native_skill_derivation")
+            if row.path in pending_skills else row
+            for row in pending_authority.field_statuses
+        ))
+    retained_continuation = definition
+    definition = normalize_definition_to_native_model(
+        definition,
+        mode="authoring" if activated else "historical",
+        source_authority=pending_authority,
         item_catalog=item_catalog,
         spell_catalog=spell_catalog,
         systems_service=level_up_context.get("systems_service"),
@@ -1917,13 +2279,58 @@ def build_native_level_up_character_definition(
         resolved_species=selected_species,
         resolved_background=selected_background,
     )
+    if reconstruction_hp_recipe is not None:
+        definition = retain_reconstruction_content(retained_continuation, definition)
     require_resolved_ability_inputs(definition)
+    restored_fields = _restored_native_resource_fields(
+        prior_definition, historical_entries=_attained_native_feature_entries(
+            level_up_context["systems_service"], campaign_slug, selected_class, selected_subclass,
+            attained_level=row_current_level, definition=prior_definition,
+            verified_numeric_actions=verified_numeric_actions,
+        ), class_row_id=target_class_row_id, candidate_templates=list(definition.resource_templates or []),
+        values=submitted_values,
+        tracker_authority_inputs=tracker_authority_inputs,
+    )
+    definition = _apply_restored_native_resource_currents(
+        definition, fields=restored_fields, values=submitted_values, state=state,
+    )
+    definition.resource_templates = _preserve_native_level_up_resource_observations(
+        list(definition.resource_templates or []), list(prior_definition.resource_templates or []),
+    )
+    # Activation and refreshed source metadata are derivation inputs. Existing
+    # physical possessions keep their exact raw source rows and observations;
+    # genuinely new grants, if any, retain their newly derived rows.
+    prior_items = list(prior_definition.equipment_catalog or [])
+    prior_ids = [row.get("id") for row in prior_items]
+    candidate_ids = [row.get("id") for row in definition.equipment_catalog]
+    if (len(prior_ids) != len(set(prior_ids))
+            or len(candidate_ids) != len(set(candidate_ids))
+            or not set(prior_ids).issubset(candidate_ids)):
+        raise CharacterBuildError("Equipment identity needs manager repair before level-up.")
+    prior_by_id = {row.get("id"): row for row in prior_items}
+    definition.equipment_catalog = [
+        deepcopy(prior_by_id.get(row.get("id"), row)) for row in definition.equipment_catalog
+    ]
     import_metadata = _build_leveled_import_metadata(
         campaign_slug=campaign_slug,
         current_definition=current_definition,
         current_import_metadata=current_import_metadata,
         target_level=target_level,
     )
+    from .character_source_authority import NativeAdvancementIntent
+    definition.resource_templates = _retain_continuation_resource_templates(
+        list(prior_definition.resource_templates or []), list(definition.resource_templates or []),
+        _continuation_pool_ids(definition.features),
+    )
+    restored_ids = {str(field["id"]) for field in restored_fields}
+    level_up_context["_validated_native_advancement"] = NativeAdvancementIntent.from_validated(
+        prior_definition, definition,
+        restored_resource_currents=tuple(
+            (str(template["id"]), template["initial_current"])
+            for template in definition.resource_templates if str(template.get("id") or "") in restored_ids
+        ),
+    )
+    _require_preserved_continuation_resource_state(prior_definition, definition, state, allow_new_pools=True)
     return definition, import_metadata, total_hp_delta
 
 
@@ -2173,7 +2580,11 @@ def apply_imported_progression_repairs(
     current_import_metadata: CharacterImportMetadata,
     repair_context: dict[str, Any],
     form_values: dict[str, str] | None = None,
+    *, state: dict[str, Any] | None = None, state_revision: int | None = None,
+    verified_manual_actions: tuple[Any, ...] = (), verified_numeric_actions: tuple[Any, ...] = (),
+    authority_page_records: list[Any] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata]:
+    _require_known_continuation_resource_observations(current_definition, state)
     require_resolved_ability_inputs(current_definition)
     if _character_source_type(current_definition) not in IMPORTED_CHARACTER_SOURCE_TYPES:
         raise CharacterBuildError("Only imported character sheets can use progression repair.")
@@ -2315,13 +2726,17 @@ def apply_imported_progression_repairs(
         repaired_feature_entries,
         ability_scores=ability_scores,
         current_level=current_level,
+        defer_trackers=True,
     )
-    merged_features = _merge_feature_payloads(list(current_definition.features or []), repaired_features)
-    merged_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
-        merged_features,
+    from .character_armor_models import merge_continuation
+    merged_features = merge_continuation(current_definition, repaired_features)
+    merged_features, derived_resource_templates = _derive_continuation_tracker_templates(
+        current_definition, merged_features, profile=profile,
         ability_scores=ability_scores,
         current_level=current_level,
-        class_row_levels=_profile_class_row_level_map(profile),
+        state=state, state_revision=state_revision, systems_service=repair_context.get("systems_service"),
+        campaign_page_records=authority_page_records, verified_manual_actions=verified_manual_actions,
+        verified_numeric_actions=verified_numeric_actions,
     )
 
     spellcasting = dict(current_definition.spellcasting or {})
@@ -2382,6 +2797,7 @@ def apply_imported_progression_repairs(
     payload["resource_templates"] = _merge_resource_templates(
         list(current_definition.resource_templates or []),
         derived_resource_templates,
+        preserve_observation_ids=_continuation_pool_ids(merged_features),
     )
     payload["spellcasting"] = spellcasting
     payload["source"] = _with_native_progression_event(
@@ -2396,8 +2812,16 @@ def apply_imported_progression_repairs(
         action="repair",
     )
 
+    from .character_source_authority import build_reconciled_source_authority
+    from .committed_publication import active
+    candidate = CharacterDefinition.from_dict(payload)
+    candidate_authority = build_reconciled_source_authority(
+        definition=candidate, state=state, state_revision=state_revision,
+        systems_service=repair_context.get("systems_service"), campaign_page_records=authority_page_records,
+        verified_manual_actions=verified_manual_actions, verified_numeric_actions=verified_numeric_actions,
+    ) if active() and _continuation_pool_ids(candidate.features) else None
     definition = normalize_definition_to_native_model(
-        CharacterDefinition.from_dict(payload),
+        candidate, source_authority=candidate_authority,
         item_catalog=dict(repair_context.get("item_catalog") or {}),
         spell_catalog=spell_catalog,
         systems_service=repair_context.get("systems_service"),
@@ -2406,6 +2830,10 @@ def apply_imported_progression_repairs(
         resolved_subclass=selected_subclass,
         resolved_species=selected_species,
         resolved_background=selected_background,
+    )
+    definition.resource_templates = _retain_continuation_resource_templates(
+        list(current_definition.resource_templates or []), list(definition.resource_templates or []),
+        _continuation_pool_ids(definition.features),
     )
     import_metadata = CharacterImportMetadata(
         campaign_slug=campaign_slug,
@@ -2420,4 +2848,5 @@ def apply_imported_progression_repairs(
         import_status="managed",
         warnings=list(current_import_metadata.warnings or []),
     )
+    _require_preserved_continuation_resource_state(current_definition, definition, state)
     return definition, import_metadata

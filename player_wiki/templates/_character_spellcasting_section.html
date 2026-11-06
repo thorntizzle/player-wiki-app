@@ -39,6 +39,12 @@
           </div>
         {% endif %}
       </dl>
+      {% set variant = spell.spell_metric_presentation %}
+      {% if variant and variant.table_managed %}
+        <p class="meta">Item casting: level {{ variant.casting_level }} (highest owned spell-slot capacity), no spell slot spent. Uses one item use.</p>
+        <p class="meta">Each affected target makes a {{ variant.save_ability | upper }} save, DC {{ variant.save_dc }}; {{ variant.damage }} {{ variant.damage_type }} damage{% if variant.half_on_save %}, half on success{% endif %}.{% if not variant.damage_ends_spell %} This damage does not end the spell's effect.{% endif %}</p>
+        <p class="meta">Targets, rolls, damage and spell effects are table managed. {% if not variant.available %}{{ variant.availability_reason }}{% endif %}</p>
+      {% endif %}
       {% if spell.source or spell.reference or spell.href %}
         <p class="meta">
           {% if spell.source %}{{ spell.source }}{% endif %}
@@ -48,8 +54,44 @@
           {% if spell.href %}<a href="{{ spell.href }}">Open source entry</a>{% endif %}
         </p>
       {% endif %}
-      {% if spell.management_note %}
+      {% for note in spell.spell_property_notes or [] %}
+        <p class="meta">{{ note }}</p>
+      {% endfor %}
+      {% if spell.wizard_ritual_note %}<p class="meta">{{ spell.wizard_ritual_note }}</p>{% endif %}
+      {% if spell.management_note and not spell.casting_path_details and not spell.grant_unknown_observations %}
         <p class="meta">{{ spell.management_note }}</p>
+      {% elif spell.authority_note %}
+        <p class="meta">{{ spell.authority_note }}</p>
+      {% endif %}
+      {% if spell.grant_origin_details %}
+        <h4>Spell grants</h4>
+        <ul>
+          {% for origin in spell.grant_origin_details %}
+            <li>{{ origin.label }} (occurrence {{ origin.occurrence }}): {{ origin.status }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if spell.casting_path_details %}
+        <h4>Casting options</h4>
+        <ol>
+          {% for path in spell.casting_path_details %}
+            <li>
+              {{ path.label }}: {{ path.ability }}. {{ path.resource }}.
+              {% if path.conditions %}Conditions: {{ path.conditions | join('; ') }}.{% endif %}
+            </li>
+          {% endfor %}
+        </ol>
+      {% endif %}
+      {% if spell.grant_unknown_observations %}
+        <h4>Historical observations: UNKNOWN origin</h4>
+        <p class="meta">These saved observations remain in history. They grant no additional benefit and do not prove that another origin was absent.</p>
+        {% if spell.historical_grant_observations %}
+          <dl>
+            {% for observation in spell.historical_grant_observations %}
+              <div><dt>{{ observation.label }}</dt><dd>{{ observation.value }} (historical)</dd></div>
+            {% endfor %}
+          </dl>
+        {% endif %}
       {% endif %}
       {% if spell.description_html %}
         <div class="article-body article-body--compact">{{ spell.description_html | safe_rich_html }}</div>
@@ -59,7 +101,7 @@
     </div>
   {% endmacro %}
   {% macro character_spell_fallback_details(spell) %}
-    {% if spell.description_html or spell.href or spell.authority_note %}
+    {% if spell.description_html or spell.href or spell.authority_note or spell.grant_origins or spell.grant_unknown_observations %}
       <details class="item-description-detail spell-card__fallback" data-character-spell-fallback>
         <summary>Spell details</summary>
         <div class="item-description-detail__body">
@@ -71,6 +113,8 @@
   <div class="section-heading">
     <h2>{{ spell_section_title | default("Spellcasting", true) }}</h2>
   </div>
+  {% from "_character_flexible_casting.html" import totals with context %}
+  {{ totals(character.spellcasting.slot_totals) }}
   {% if has_session_spell_workspace %}
     <div class="session-spellcasting-workspace">
       {% for slot_pool in character.spellcasting.slot_pools %}
@@ -135,7 +179,7 @@
                 {% for slot in slot_pool.slots %}
                   <li>
                     <span>{{ slot.label }}</span>
-                    <strong>{{ slot.available }} available / {{ slot.max }}</strong>
+                    <strong>{% if slot.can_edit %}{{ slot.available }} available / {{ slot.max }}{% else %}Raw {{ slot.used }} used / {{ slot.raw_max }} — {{ slot.authority_status }}{% endif %}</strong>
                   </li>
                 {% endfor %}
               </ul>
@@ -191,6 +235,7 @@
           {% for note in character.spellcasting.spell_metric_notes or [] %}<p class="meta">{{ note }}</p>{% endfor %}
         </article>
       {% endif %}
+      {% for note in character.spellcasting.current_rule_notes or [] %}<p class="meta">{{ note }}</p>{% endfor %}
       {% if not (show_spell_list and (character_inline_state_controls_enabled | default(false))) %}
         {% for slot_pool in character.spellcasting.slot_pools %}
           {% if slot_pool.slots %}
@@ -202,7 +247,7 @@
                 {% for slot in slot_pool.slots %}
                   <li>
                     <span>{{ slot.label }}</span>
-                    <strong>{{ slot.available }} available / {{ slot.max }}</strong>
+                    <strong>{% if slot.can_edit %}{{ slot.available }} available / {{ slot.max }}{% else %}Raw {{ slot.used }} used / {{ slot.raw_max }} - {{ slot.authority_status }}{% endif %}</strong>
                   </li>
                 {% endfor %}
               </ul>
@@ -824,5 +869,14 @@
         {% endif %}
       </section>
     </section>
+  {% endif %}
+  {% if character.spellcasting and character.spellcasting.spell_modifier_legacy_observations %}
+    <details class="read-subsection">
+      <summary>Historical item-spell entries</summary>
+      <p class="meta">These entries are kept as history, rather than additional spell grants. Current conditional item effects appear with eligible spells.</p>
+      <ul>{% for entry in character.spellcasting.spell_modifier_legacy_observations %}
+        <li>{{ entry.observation.name or 'Spell' }}: historical observation retained.</li>
+      {% endfor %}</ul>
+    </details>
   {% endif %}
 </section>

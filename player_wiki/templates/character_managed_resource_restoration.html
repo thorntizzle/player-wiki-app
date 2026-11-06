@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Restore missing tracker | {{ character.name }}{% endblock %}
+{% block content %}
+<div class="page-stack">
+  <header class="card">
+    <h1>Restore a missing tracker for {{ character.name }}</h1>
+    <p>Choose an existing feature and enter its current remaining uses. Its current source and owning class must establish the tracker and maximum.</p>
+    <a href="{{ url_for('character_source_repair_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Back to source repair</a>
+  </header>
+  {% if outcome %}<section class="callout" role="status"><p>{{ outcome }}</p></section>{% endif %}
+  {% if review %}
+  <section class="card">
+    <h2>Review missing tracker</h2>
+    <p>{{ review.label }}: {{ review.current }} / {{ review.max }}. Add this missing tracker with the entered current amount. Existing resources, history and all other play state are preserved.</p>
+    <form method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="intent" value="apply">
+      <input type="hidden" name="review_token" value="{{ review.token }}">
+      <button type="submit">Apply tracker restoration</button>
+    </form>
+  </section>
+  {% endif %}
+  <section class="card">
+    <h2>Choose existing feature</h2>
+    {% if features %}
+    <form method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="intent" value="review">
+      <label>Feature <select name="feature_id" required>{% for row in features %}<option value="{{ row.id }}">{{ row.name or row.title or row.id }}</option>{% endfor %}</select></label>
+      <label>Current remaining uses <input type="number" name="current" min="0" max="2147483647" step="1" required></label>
+      <button type="submit">Review tracker restoration</button>
+    </form>
+    {% else %}<p>No source-linked feature with an existing class association and missing tracker is available.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

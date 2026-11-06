@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .character_ability_inputs import AbilityInputRecoveryRequired, require_resolved_ability_inputs
+from .character_equipment_activation import ActivationPrerequisiteError
 
 from collections import Counter
 from copy import deepcopy
@@ -63,6 +64,8 @@ _CHOICE_GROUP_LABELS = {
 }
 
 _OPERATION_LABELS = {
+    OperationKind.NATIVE_RECONSTRUCTION: "Reconstruct native build on this Character",
+    OperationKind.NATIVE_LANGUAGE_ELECTIVE_DECISION: "Review a source-owned language elective decision",
     OperationKind.CAMPAIGN_FEATURE_GRANT: "Grant campaign feature or boon",
     OperationKind.CAMPAIGN_EQUIPMENT_ADD: "Add campaign equipment",
     OperationKind.SYSTEMS_ITEM_ADD: "Add Systems item",
@@ -111,10 +114,17 @@ _OUTCOME_PRESENTATION = {
         "tone": "error",
         "status_code": 500,
     },
+    CharacterUpdateApplyClassification.REFUSED_PREREQUISITE: {
+        "heading": "Equipment activation needs repair",
+        "message": "No update was applied because the existing equipment activation is incompatible with this reconstruction. Review its physical owners and activation state with a campaign manager.",
+        "scope_heading": "Reviewed scope",
+        "tone": "warning",
+        "status_code": 409,
+    },
     CharacterUpdateApplyClassification.UNCERTAIN: {
         "heading": "Outcome not confirmed",
         "message": (
-            "The app could not confirm the outcome after the publication boundary. "
+            "The app could not confirm whether publication completed. "
             "Inspect the current Character before doing anything else."
         ),
         "scope_heading": "Reviewed scope — not confirmed",
@@ -181,6 +191,7 @@ class CharacterUpdatePreviewRouteDependencies:
     plan_character_update: Callable[..., object]
     load_character_apply_context: Callable[..., tuple[object, object] | None]
     character_update_apply_engine: CharacterUpdateApplyEngine
+    prepare_campaign_systems_entry_access: Callable[..., Callable[[str], bool]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,6 +315,11 @@ def _build_source_foundation(
     campaign: object,
     record: object,
 ) -> _SourceFoundation:
+    prepare_access = dependencies.prepare_campaign_systems_entry_access
+    can_access_entry = (
+        prepare_access(campaign_slug, campaign) if prepare_access is not None
+        else lambda entry_slug: dependencies.can_access_campaign_systems_entry(campaign_slug, entry_slug)
+    )
     page_records = tuple(
         dependencies.list_builder_campaign_page_records(campaign_slug, campaign)
     )
@@ -374,9 +390,7 @@ def _build_source_foundation(
         if (
             not entry_key
             or not entry_slug
-            or not dependencies.can_access_campaign_systems_entry(
-                campaign_slug, entry_slug
-            )
+            or not can_access_entry(entry_slug)
             or not dependencies.systems_item_is_approved(entry)
         ):
             continue
@@ -1462,6 +1476,10 @@ def register_character_update_preview_route(
         can_manage = bool(dependencies.can_manage_campaign_session(campaign_slug))
         if not can_manage and not preview_only:
             abort(403)
+        if request.args.get("mode") == "reconstruction" or request.form.get("mode") == "reconstruction":
+            from .character_reconstruction_routes import reconstruction_view
+            return reconstruction_view(dependencies, campaign_slug, character_slug,
+                                       preview_only=preview_only)
 
         if request.method == "POST":
             intent = _single_value("intent")
@@ -1509,6 +1527,26 @@ def register_character_update_preview_route(
                     )
                 campaign, record = context
                 loaded_context[:] = [(campaign, record)]
+                if len(operations) == 1 and operations[0].get("kind") == "native_language_elective_decision":
+                    from .character_reconstruction_routes import prepare_language_elective_review
+                    from .character_source_repair import SourceRepairError
+                    try:
+                        result = prepare_language_elective_review(dependencies, campaign, record,
+                            dict(operations[0]), actor_user_id)
+                    except (SourceRepairError, ValueError) as exc:
+                        raise CharacterUpdateStaleError(str(exc)) from exc
+                    captured_apply_review[:] = [_project_plan(result.plan)]
+                    return result
+                if len(operations) == 1 and operations[0].get("kind") == "native_reconstruction":
+                    from .character_reconstruction_routes import prepare_reconstruction_review
+                    from .character_source_repair import SourceRepairError
+                    try:
+                        result = prepare_reconstruction_review(dependencies, campaign, record,
+                            dict(operations[0]["inputs"]), actor_user_id)
+                    except (SourceRepairError, ValueError) as exc:
+                        raise CharacterUpdateStaleError(str(exc)) from exc
+                    captured_apply_review[:] = [_project_plan(result.plan)]
+                    return result
                 if not (
                     dependencies.is_dnd_5e_system(getattr(campaign, "system", ""))
                     and dependencies.is_dnd_5e_system(
@@ -1683,7 +1721,7 @@ def register_character_update_preview_route(
                 review["review_token"] = None
                 review["apply_available"] = False
             status_code = 200
-        except AbilityInputRecoveryRequired as exc:
+        except (AbilityInputRecoveryRequired, ActivationPrerequisiteError) as exc:
             return _render_page(
                 campaign=campaign, record=record, choices=foundation.choices,
                 operation_count=operation_count, rows=rows,

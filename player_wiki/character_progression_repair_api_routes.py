@@ -129,12 +129,22 @@ def register_character_progression_repair_api_routes(
                 record,
                 form_values=form_values,
             )
+            from .committed_publication import active
+            from .character_source_repair import load_verified_manual_actions, load_verified_numeric_actions
+            from .character_page_records import list_visible_character_page_records
+            authority_pages = list_visible_character_page_records(
+                current_app.extensions["campaign_page_store"], campaign_slug, campaign,
+                excluded_sections={"Sessions"})
             definition, import_metadata = dependencies.apply_imported_progression_repairs(
                 campaign_slug,
                 record.definition,
                 record.import_metadata,
                 repair_context,
                 form_values,
+                state=record.state_record.state or {}, state_revision=record.state_record.revision,
+                authority_page_records=authority_pages,
+                verified_manual_actions=(load_verified_manual_actions(campaign_slug, character_slug) if active() else ()),
+                verified_numeric_actions=(load_verified_numeric_actions(campaign_slug, character_slug) if active() else ()),
             )
             definition = dependencies.finalize_character_definition_for_write(
                 campaign_slug,

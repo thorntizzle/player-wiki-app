@@ -23,6 +23,24 @@
       {{ csrf_input() }}
       <input type="hidden" name="expected_revision" value="{{ edit_context.state_revision }}">
 
+      {% if edit_context.background_choice_fields or edit_context.background_choice_message %}
+      <section class="read-section">
+        <h2>Background instrument proficiency</h2>
+        <p class="meta">Choose the instrument granted by the current background. This grants proficiency and does not add equipment or replay starting grants.</p>
+        {% if edit_context.background_choice_message %}<p role="status">{{ edit_context.background_choice_message }}</p>{% endif %}
+        {% for field in edit_context.background_choice_fields %}
+          <label class="field">
+            <span>{{ field.label }}</span>
+            <select name="{{ field.name }}" required>
+              <option value="">Choose an enabled musical instrument</option>
+              {% for option in field.options %}<option value="{{ option.value }}"{% if option.value == field.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+            </select>
+          </label>
+          <p class="meta">{{ field.help_text }}</p>
+        {% endfor %}
+      </section>
+      {% endif %}
+
       <section class="read-section">
         <div class="section-heading">
           <h2>Proficiencies</h2>

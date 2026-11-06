@@ -11,8 +11,14 @@ from typing import Any
 
 from .repository import normalize_lookup, slugify
 from .systems_service import SystemsService
-from .systems_store import SystemsStore
+from .systems_store import SystemsReplacementOwnershipError, SystemsStore
+from .systems_metadata_repair import add_dnd5e_item_spellcasting_metadata
 from .system_policy import DND_5E_SYSTEM_CODE
+from .systems_feature_values import (
+    FIELD as FEATURE_VALUES_FIELD, TABLE_FIELD as FEATURE_VALUE_TABLE_FIELD,
+    SOURCE_TABLE_FIELD as FEATURE_VALUE_SOURCE_TABLE_FIELD,
+    import_class_values, import_feature_values,
+)
 
 INLINE_TAG_PATTERN = re.compile(r"\{@([^{}]+)\}")
 MAGIC_VARIANT_PLACEHOLDER_PATTERN = re.compile(r"\{=([^{}]+)\}")
@@ -536,6 +542,10 @@ class Dnd5eSystemsImporter:
         if not self.data_root.exists():
             raise FileNotFoundError(f"DND 5E source data root not found: {self.data_root}")
 
+        # Seeding and run creation can commit before replacement begins. Refuse
+        # caller-owned transactions/savepoints before either side effect, outside
+        # the handler that records a failed run with its own standalone commit.
+        self.store.assert_import_ownership()
         self.systems_service.ensure_builtin_library_seeded(self.library_slug)
         source_record = self.store.get_source(self.library_slug, normalized_source_id)
         if source_record is None:
@@ -562,11 +572,15 @@ class Dnd5eSystemsImporter:
                 source_files=source_files,
                 imported_by_type=imported_by_type,
             )
+            # Store admission locks DND replacement and refuses any selected
+            # curated native_spell_grants container before deletion. Importing
+            # fresh source prose cannot implicitly rebase that approved basis.
             imported_count = self.store.replace_entries_for_source(
                 self.library_slug,
                 normalized_source_id,
                 entries=entries,
                 entry_types=selected_entry_types,
+                preserve_dnd5e_item_choices="item" in selected_entry_types,
             )
             summary = {
                 "entry_types": selected_entry_types,
@@ -583,6 +597,10 @@ class Dnd5eSystemsImporter:
                 imported_by_type=dict(imported_by_type),
                 source_files=source_files,
             )
+        except SystemsReplacementOwnershipError:
+            # Recording failure would commit the unexpected unowned transaction.
+            # Leave its data and this already-started run for explicit resolution.
+            raise
         except Exception as exc:
             self.store.fail_import_run(
                 import_run.id,
@@ -682,10 +700,128 @@ class Dnd5eSystemsImporter:
             if not isinstance(raw_entries, list):
                 return []
             return self._build_magicvariant_raw_entries(raw_entries, source_id)
+        if dataset.entry_type == "background":
+            rows = payload.get(dataset.json_key, [])
+            return self._build_background_raw_entries(rows if isinstance(rows, list) else [], source_id)
         if dataset.entry_type != "race":
             raw_entries = payload.get(dataset.json_key, [])
             return raw_entries if isinstance(raw_entries, list) else []
         return self._build_race_raw_entries(payload, source_id)
+
+    def _build_background_raw_entries(self, rows: list[dict[str, Any]], source_id: str) -> list[dict[str, Any]]:
+        """Resolve only exact background inheritance and bounded entries edits."""
+        lookup: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for row in rows:
+            if isinstance(row, dict):
+                identity = (str(row.get("name") or "").strip().casefold(), str(row.get("source") or "").strip().upper())
+                if all(identity):
+                    lookup.setdefault(identity, []).append(row)
+        resolved: dict[tuple[str, str], dict[str, Any]] = {}
+
+        def resolve(identity: tuple[str, str], trail: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+            if identity in trail or len(trail) >= 16:
+                raise ValueError("Background copy inheritance is cyclic or exceeds the supported depth.")
+            if identity in resolved:
+                return copy.deepcopy(resolved[identity])
+            matches = lookup.get(identity, [])
+            if len(matches) != 1:
+                raise ValueError("Background copy parent identity is missing or ambiguous.")
+            child = matches[0]
+            reference = child.get("_copy")
+            if reference is None:
+                result = copy.deepcopy(child)
+            else:
+                if (not isinstance(reference, dict) or set(reference) - {"name", "source", "_mod"}
+                        or not str(reference.get("name") or "").strip()
+                        or not str(reference.get("source") or "").strip()):
+                    raise ValueError("Background copy requires an exact parent name/source and supported controls.")
+                parent_id = (str(reference["name"]).strip().casefold(), str(reference["source"]).strip().upper())
+                result = resolve(parent_id, (*trail, identity))
+                parent_entries = copy.deepcopy(result.get("entries") or [])
+                modifiers = reference.get("_mod", {})
+                if not isinstance(modifiers, dict) or set(modifiers) - {"entries"}:
+                    raise ValueError("Unsupported background copy modification property.")
+                operations = modifiers.get("entries", [])
+                if isinstance(operations, dict):
+                    operations = [operations]
+                if not isinstance(operations, list) or len(operations) > 32:
+                    raise ValueError("Background copy entries modifications exceed the supported shape.")
+                entries = copy.deepcopy(result.get("entries") or [])
+                if not isinstance(entries, list):
+                    raise ValueError("Background copy parent entries must be a list.")
+                for operation in operations:
+                    if not isinstance(operation, dict):
+                        raise ValueError("Background copy modification must be structured.")
+                    mode = operation.get("mode")
+                    if mode in {"appendArr", "prependArr"} and set(operation) <= {"mode", "items"}:
+                        items = operation.get("items")
+                        items = copy.deepcopy(items if isinstance(items, list) else [items])
+                        if not items or any(item is None for item in items):
+                            raise ValueError("Background copy modification needs entries.")
+                        entries = entries + items if mode == "appendArr" else items + entries
+                    elif mode == "insertArr" and set(operation) == {"mode", "index", "items"}:
+                        index = operation["index"]
+                        items = operation["items"]
+                        items = copy.deepcopy(items if isinstance(items, list) else [items])
+                        if type(index) is not int or not 0 <= index <= len(entries) or not items or any(item is None for item in items):
+                            raise ValueError("Background copy insertion needs a valid index and entries.")
+                        entries[index:index] = items
+                    elif (mode == "replaceArr" and set(operation) <= {"mode", "replace", "items"}
+                          or mode == "removeArr" and set(operation) <= {"mode", "names"}):
+                        target = operation.get("replace") if mode == "replaceArr" else operation.get("names")
+                        if isinstance(target, dict):
+                            if (mode != "replaceArr" or set(target) != {"index"}
+                                    or type(target["index"]) is not int or not 0 <= target["index"] < len(entries)):
+                                raise ValueError("Background copy replacement index is invalid.")
+                            items = operation.get("items")
+                            items = copy.deepcopy(items if isinstance(items, list) else [items])
+                            if not items or any(item is None for item in items):
+                                raise ValueError("Background copy replacement needs entries.")
+                            entries[target["index"]:target["index"] + 1] = items
+                            continue
+                        names = [target] if isinstance(target, str) else target
+                        if not isinstance(names, list) or not names or any(not isinstance(name, str) or not name for name in names):
+                            raise ValueError("Background copy replacement needs exact named entries.")
+                        for name in names:
+                            positions = [index for index, entry in enumerate(entries)
+                                         if isinstance(entry, dict) and entry.get("name") == name]
+                            if len(positions) != 1:
+                                raise ValueError("Background copy modification target is missing or ambiguous.")
+                            index = positions[0]
+                            items = operation.get("items") if mode == "replaceArr" else []
+                            items = copy.deepcopy(items if isinstance(items, list) else [items])
+                            if mode == "replaceArr" and (not items or any(item is None for item in items)):
+                                raise ValueError("Background copy replacement needs entries.")
+                            entries[index:index + 1] = items
+                    else:
+                        raise ValueError("Unsupported background copy modification mode or controls.")
+                result["entries"] = entries
+                result.update(copy.deepcopy({key: value for key, value in child.items() if key != "_copy"}))
+                result["_background_copy"] = {"schema_version": 1, "name": reference["name"], "source": reference["source"]}
+                # A child can replace its Equipment rules while omitting a
+                # machine-readable grant. Do not inherit contradictory parent
+                # equipment or invent a grant by parsing prose.
+                def equipment_rules(value: Any) -> list[Any]:
+                    if isinstance(value, list):
+                        return [rule for item in value for rule in equipment_rules(item)]
+                    if isinstance(value, dict):
+                        if str(value.get("name") or "").strip().casefold().rstrip(":") == "equipment":
+                            return [value]
+                        return [rule for item in value.values() for rule in equipment_rules(item)]
+                    return []
+
+                if ("startingEquipment" not in child
+                        and equipment_rules(parent_entries) != equipment_rules(result.get("entries"))):
+                    result.pop("startingEquipment", None)
+                    result["_background_copy"]["equipment_note"] = (
+                        "The child overrides its equipment rules without structured starting grants. "
+                        "Review the source equipment text and use a supported selection or inventory operation."
+                    )
+            result.pop("_copy", None)
+            resolved[identity] = copy.deepcopy(result)
+            return result
+
+        return [resolve(identity, ()) for identity in lookup if identity[1] == str(source_id).strip().upper()]
 
     def _build_magicvariant_raw_entries(
         self,
@@ -1745,6 +1881,9 @@ class Dnd5eSystemsImporter:
 
     def _build_class_content(self, raw_entry: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], str]:
         spellcasting_progression = self._extract_class_spellcasting_progression(raw_entry)
+        value_tables, value_sources = import_class_values(raw_entry)
+        from .systems_feature_capacities import import_class_capacities, TABLE_FIELD as CAPACITY_TABLES, SOURCE_FIELD as CAPACITY_SOURCES
+        capacity_tables, capacity_sources = import_class_capacities(raw_entry)
         metadata = {
             "hit_die": self._clean_data(raw_entry.get("hd")),
             "proficiency": self._clean_data(raw_entry.get("proficiency")),
@@ -1766,6 +1905,12 @@ class Dnd5eSystemsImporter:
             ),
             "multiclassing": self._build_multiclassing_section(raw_entry.get("multiclassing")),
         }
+        if value_tables:
+            metadata[FEATURE_VALUE_TABLE_FIELD] = value_tables
+            body[FEATURE_VALUE_SOURCE_TABLE_FIELD] = value_sources
+        if capacity_tables:
+            metadata[CAPACITY_TABLES] = capacity_tables
+            body[CAPACITY_SOURCES] = capacity_sources
         metadata_pairs = [
             ("Hit Die", self._format_hit_die(raw_entry.get("hd"))),
             ("Saving Throw Proficiencies", self._format_ability_code_list(raw_entry.get("proficiency"))),
@@ -1845,6 +1990,11 @@ class Dnd5eSystemsImporter:
             "classes": self._clean_data(raw_entry.get("classes")),
             "class_lists": self._build_spell_class_lists(raw_entry),
         }
+        # Preserve declarations exactly, including present empty/malformed values.
+        # Missing fields stay missing; generic cleaning cannot establish no roll.
+        for field in ("savingThrow", "spellAttack"):
+            if field in raw_entry:
+                metadata[field] = copy.deepcopy(raw_entry[field])
         body = {
             "entries": self._clean_data(raw_entry.get("entries")),
             "entries_higher_level": self._clean_data(raw_entry.get("entriesHigherLevel")),
@@ -2177,6 +2327,32 @@ class Dnd5eSystemsImporter:
                 "stealth_disadvantage": bool(raw_entry.get("stealth")) if raw_entry.get("stealth") is not None else False,
                 "bonus_ac": self._clean_data(raw_entry.get("bonusAc")),
             }
+            # Retain present source fields exactly, including unsupported values:
+            # a later repair must not lose contradictory evidence and infer a bonus.
+            for field in ("bonusSpellAttack", "bonusSpellSaveDc"):
+                if field in raw_entry:
+                    metadata[field] = copy.deepcopy(raw_entry[field])
+            if "native_spellcasting_modifiers" in raw_entry:
+                metadata["native_spellcasting_modifiers"] = copy.deepcopy(raw_entry["native_spellcasting_modifiers"])
+            if "spellcasting_modifiers" in raw_entry:
+                # Raw source extensions are evidence, not already reviewed typed
+                # mechanics. Keep them inert, including explicit empty values.
+                if ("native_spellcasting_modifiers" in metadata
+                        and json.dumps(metadata["native_spellcasting_modifiers"], sort_keys=True, allow_nan=False)
+                        != json.dumps(raw_entry["spellcasting_modifiers"], sort_keys=True, allow_nan=False)):
+                    raise ValueError("Native spellcasting modifier extensions conflict; reconcile them before import.")
+                metadata["native_spellcasting_modifiers"] = copy.deepcopy(raw_entry["spellcasting_modifiers"])
+            inert_properties = "native_spell_property_modifiers"
+            for property_field in (inert_properties, "spell_property_modifiers"):
+                if property_field not in raw_entry:
+                    continue
+                if (inert_properties in metadata and json.dumps(metadata[inert_properties], sort_keys=True, allow_nan=False)
+                        != json.dumps(raw_entry[property_field], sort_keys=True, allow_nan=False)):
+                    raise ValueError("Native spell property extensions conflict; reconcile them before import.")
+                metadata[inert_properties] = copy.deepcopy(raw_entry[property_field])
+            metadata, _ = add_dnd5e_item_spellcasting_metadata(
+                metadata, entries=raw_entry.get("entries"), native_fields=raw_entry,
+            )
             ammunition = self._ammunition_metadata_for_entry(raw_entry)
             if ammunition is not None:
                 metadata["ammunition"] = ammunition
@@ -2202,16 +2378,21 @@ class Dnd5eSystemsImporter:
                 ("Weapon Properties", item_properties),
             ]
         elif entry_type == "background":
+            if raw_entry.get("_copy") is not None:
+                raise ValueError("Resolve background copy inheritance against its source dataset before import.")
             metadata = {
                 "skill_proficiencies": self._clean_data(raw_entry.get("skillProficiencies")),
                 "tool_proficiencies": self._clean_data(raw_entry.get("toolProficiencies")),
                 "language_proficiencies": self._clean_data(raw_entry.get("languageProficiencies")),
                 "starting_equipment": self._clean_data(raw_entry.get("startingEquipment")),
             }
+            if raw_entry.get("_background_copy"):
+                metadata["background_copy"] = self._clean_data(raw_entry["_background_copy"])
             metadata_pairs = [
                 ("Skill Proficiencies", self._format_compact_value(raw_entry.get("skillProficiencies"))),
                 ("Tool Proficiencies", self._format_compact_value(raw_entry.get("toolProficiencies"))),
                 ("Languages", self._format_compact_value(raw_entry.get("languageProficiencies"))),
+                ("Equipment Support", str(dict(raw_entry.get("_background_copy") or {}).get("equipment_note") or "")),
             ]
         elif entry_type == "classfeature":
             metadata = {
@@ -2310,6 +2491,23 @@ class Dnd5eSystemsImporter:
             metadata = {}
             metadata_pairs = []
 
+        if entry_type in {"classfeature", "subclassfeature"}:
+            from .character_feature_proficiency_grants import normalize_metadata
+            for native, imported in {
+                    "skill_proficiencies": "skillProficiencies", "tool_proficiencies": "toolProficiencies",
+                    "armor_proficiencies": "armorProficiencies", "weapon_proficiencies": "weaponProficiencies",
+                    "language_proficiencies": "languageProficiencies", "expertise": "expertise"}.items():
+                if imported in raw_entry:
+                    metadata[native] = self._clean_data(raw_entry[imported])
+            metadata = normalize_metadata(metadata)
+        if entry_type == "classfeature":
+            feature_values = import_feature_values(raw_entry)
+            if feature_values is not None:
+                metadata[FEATURE_VALUES_FIELD] = feature_values
+            from .systems_feature_capacities import import_feature_capacity, FIELD as CAPACITY_FIELD
+            capacity = import_feature_capacity(raw_entry)
+            if capacity is not None:
+                metadata[CAPACITY_FIELD] = capacity
         body = {"entries": self._clean_data(raw_entry.get("entries"))}
         rendered_html = self._render_entry_html(
             metadata_pairs=metadata_pairs,

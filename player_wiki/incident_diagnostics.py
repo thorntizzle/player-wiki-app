@@ -134,10 +134,12 @@ def diagnose_operation(operation: str) -> Callable:
                     "confirmed_applied": "confirmed",
                     "unchanged": "unchanged",
                     "refused_stale": "refused",
+                    "refused_prerequisite": "refused",
                     "failed": "failed",
                     "uncertain": "uncertain",
                 }.get(classification, "failed")
-                reason = "stale" if classification == "refused_stale" else "none"
+                reason = ("stale" if classification == "refused_stale" else
+                          "incomplete" if classification == "refused_prerequisite" else "none")
             else:
                 decision, reason = "confirmed", "none"
             emit_incident("operation_outcome", operation=operation, decision=decision, reason=reason)

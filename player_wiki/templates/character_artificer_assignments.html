@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Assignments | {{ character.name }}{% endblock %}
+{% macro transport(kind, operation) %}
+  {{ csrf_input() }}
+  <input type="hidden" name="expected_revision" value="{{ state_revision }}">
+  <input type="hidden" name="mode" value="character">
+  <input type="hidden" name="page" value="features">
+  <input type="hidden" name="kind" value="{{ kind }}">
+  <input type="hidden" name="operation" value="{{ operation }}">
+{% endmacro %}
+{% block content %}
+<div class="page-stack">
+  <header class="card">
+    <h1>Infusions and tinkered objects for {{ character.name }}</h1>
+    <p>{{ assignments.manual_note }}</p>
+    <p>Record individual physical objects and their recipient or location. This does not create inventory, change another character, spend charges or resolve an item effect. Known recipes and historical feature counters stay unchanged.</p>
+  </header>
+  <datalist id="assignment-inventory-ids">
+    {% for item in inventory_choices %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}
+  </datalist>
+  {% for kind, title in [('infusions', 'Infuse Item'), ('tinkering', 'Magical Tinkering')] %}
+  {% set view = assignments[kind] %}
+  <section class="card" id="{{ kind }}">
+    <h2>{{ title }}</h2>
+    {% if view.status == 'confirmed' %}<p><strong>{{ view.count }} assigned / {{ view.maximum }} maximum</strong></p>
+    {% elif view.status == 'unknown' %}<p><strong>Assignments not yet recorded.</strong> Maximum {{ view.maximum }}.</p>
+    {% else %}<p><strong>Assignment qualification unavailable.</strong></p>{% endif %}
+    {% if view.reason %}<p>{{ view.reason }}</p>{% endif %}
+    {% if view.rules %}<ul>{% for rule in view.rules %}<li>{{ rule }}</li>{% endfor %}</ul>{% endif %}
+    {% if view.entries %}
+      <h3>Recorded objects</h3>
+      {% for entry in view.entries %}
+      <article class="detail-card">
+        <h4>{{ entry.title }}: {{ entry.object.name }}</h4>
+        <p>{{ entry.object.recipient }} &middot; Physical ID {{ entry.object.id }} &middot; Attunement: {{ entry.attunement }}</p>
+        {% if entry.details.property_text %}<p>{{ entry.details.property_text }}</p>{% endif %}
+        {% if entry.details.visual_text %}<p>Displayed text: {{ entry.details.visual_text }}</p>{% endif %}
+        {% if view.available %}
+          {% if kind == 'tinkering' %}
+          <form method="post">
+            {{ transport(kind, 'end') }}
+            <input type="hidden" name="assignment_id" value="{{ entry.assignment_id }}">
+            <input type="hidden" name="reason" value="action_touch">
+            <label><input type="checkbox" name="action" value="1" required> I used an action to end this property.</label>
+            <label><input type="checkbox" name="touch" value="1" required> I touched this object.</label>
+            <label><input type="checkbox" name="confirm" value="1" required> Record this actual ending.</label>
+            <button type="submit">Record ended property</button>
+          </form>
+          {% else %}
+          <details><summary>Record an actual ending</summary>
+            <p>Record destruction or the documented end after the artificer's death. Changes to recipe knowledge need source reconciliation.{% if view.can_deactivate %} This campaign also permits deactivating an infusion.{% else %} This campaign has no enabled deactivation ruling.{% endif %}</p>
+            {% if view.can_deactivate %}
+            <form method="post">
+              {{ transport(kind, 'end') }}
+              <input type="hidden" name="assignment_id" value="{{ entry.assignment_id }}">
+              <input type="hidden" name="reason" value="campaign_deactivation">
+              <input type="hidden" name="policy_revision" value="{{ view.deactivation_policy.revision }}">
+              <input type="hidden" name="policy_sha256" value="{{ view.deactivation_policy.sha256 }}">
+              <label><input type="checkbox" name="confirm" value="1" required> This infusion was deactivated under the campaign ruling.</label>
+              <button type="submit">Record deactivated infusion</button>
+            </form>
+            {% endif %}
+            <form method="post">
+              {{ transport(kind, 'end') }}
+              <input type="hidden" name="assignment_id" value="{{ entry.assignment_id }}">
+              <input type="hidden" name="reason" value="item_destroyed">
+              <label><input type="checkbox" name="confirm" value="1" required> This physical object was destroyed.</label>
+              <button type="submit">Record destroyed object</button>
+            </form>
+            <form method="post">
+              {{ transport(kind, 'end') }}
+              <input type="hidden" name="assignment_id" value="{{ entry.assignment_id }}">
+              <input type="hidden" name="reason" value="death_duration">
+              <label>Days since the artificer's death <input type="number" name="days_elapsed" min="1" max="100000" required></label>
+              <label><input type="checkbox" name="confirm" value="1" required> The artificer died and the required number of days has elapsed.</label>
+              <button type="submit">Record expired infusion</button>
+            </form>
+          </details>
+          {% endif %}
+        {% endif %}
+      </article>
+      {% endfor %}
+    {% endif %}
+    {% if view.can_confirm_empty %}
+      <form method="post">
+        {{ transport(kind, 'confirm_empty') }}
+        <label><input type="checkbox" name="confirm" value="1" required> I confirm there are currently no {{ 'infused items' if kind == 'infusions' else 'tinkered objects' }}.</label>
+        <button type="submit">Record confirmed empty</button>
+      </form>
+    {% endif %}
+    {% if view.available and view.status == 'confirmed' %}
+      <h3>Record a new assignment</h3>
+      {% if inventory_choices %}<p>Inventory targets must identify one existing physical item. For an object elsewhere, choose External object and give it a unique, stable tag.</p>{% endif %}
+      {% for option in view.options %}
+      <details class="detail-card">
+        <summary>{{ option.title }}</summary>
+        <ul>{% for rule in option.rules %}<li>{{ rule }}</li>{% endfor %}</ul>
+        <form method="post" class="form-grid">
+          {{ transport(kind, 'assign') }}
+          <input type="hidden" name="choice_id" value="{{ option.id }}">
+          <label>Object location
+            <select name="object_mode" required><option value="">Choose</option>{% if inventory_choices %}<option value="inventory">Existing single inventory item</option>{% endif %}<option value="external">External physical object</option></select>
+          </label>
+          <label>Physical item ID or unique external tag <input name="object_id" list="assignment-inventory-ids" maxlength="160" required></label>
+          <label>Object name <input name="object_name" maxlength="160" required></label>
+          <label>Recipient or location <input name="recipient" maxlength="240" required></label>
+          <label>Observed object kind <select name="object_kind" required><option value="">Choose</option>{% for value in option.object_kinds %}<option value="{{ value }}">{{ value | replace('_', ' ') }}</option>{% endfor %}</select></label>
+          {% if option.minimum_value_gp %}<label>Object value in gp <input type="number" name="value_gp" min="{{ option.minimum_value_gp }}" max="1000000" required></label>{% endif %}
+          <label>Attunement observation
+            <select name="attunement"><option value="unknown">Not recorded</option><option value="none">Not attuned</option>{% if option.requires_attunement %}<option value="self">Attuned by this artificer</option><option value="other">Attuned by another creature</option>{% endif %}</select>
+          </label>
+          <label><input type="checkbox" name="nonmagical" value="1" required> The target was nonmagical before this assignment.</label>
+          <label><input type="checkbox" name="touch" value="1" required> I touched the actual object.</label>
+          {% if kind == 'infusions' %}
+            <label><input type="checkbox" name="long_rest" value="1" required> This infusion was applied when finishing a long rest.</label>
+          {% else %}
+            <label><input type="checkbox" name="tools" value="1" required> I held thieves' tools or artisan's tools.</label>
+            <label><input type="checkbox" name="action" value="1" required> I used an action.</label>
+            <label><input type="checkbox" name="tiny" value="1" required> This is a Tiny object.</label>
+            <label>Property description <textarea name="property_text" maxlength="500" {% if option.id != 'light' %}required{% endif %}></textarea></label>
+            {% if option.id == 'message' %}<label>Recording length in seconds <input type="number" name="message_seconds" min="1" max="6" required></label>
+            {% else %}<input type="hidden" name="message_seconds" value="0">{% endif %}
+            {% if option.id == 'visual' %}
+              <label>Visual property <select name="visual_type" required><option value="">Choose</option><option value="text">Text</option><option value="picture">Picture</option><option value="shapes">Shapes</option><option value="mixed">Combined image and text</option></select></label>
+              <label>Actual displayed text, if any (up to 25 words) <textarea name="visual_text" maxlength="500"></textarea></label>
+            {% endif %}
+          {% endif %}
+          {% if view.count == view.maximum %}
+            <label><input type="checkbox" name="replace_oldest" value="{{ view.oldest_id }}" required> End the oldest recorded assignment ({{ view.entries[0].object.name }}) before applying this one.</label>
+          {% else %}<input type="hidden" name="replace_oldest" value="">{% endif %}
+          <label><input type="checkbox" name="confirm" value="1" required> Record this actual assignment and its stated conditions.</label>
+          <button type="submit">Record assignment</button>
+        </form>
+      </details>
+      {% endfor %}
+    {% endif %}
+    {% if view.unsupported %}<p>Some known recipes need additional assignment support. Their knowledge is preserved.</p>{% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

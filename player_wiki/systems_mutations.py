@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+import json
 from typing import Any
 
 from .db import get_db
@@ -145,31 +146,119 @@ def _changed_fields(before, after):
     return [field for field in fields if value(before, field) != value(after, field)]
 
 
+def _save_shared_core_entry(prepared, auth_store, entry_slug, actor_user_id, values):
+    service, campaign_slug = prepared.service, prepared.campaign_slug
+    before = service.store.get_entry_by_slug(prepared.library.library_slug, entry_slug)
+    entry = service.update_shared_core_entry(
+        campaign_slug, entry_slug, **values, commit=False, prepared=prepared,
+    )
+    original_identity = _original_source_identity(before)
+    edited_fields = _changed_fields(before, entry)
+    metadata = {
+        "campaign_slug": campaign_slug, "library_slug": entry.library_slug,
+        "source_id": entry.source_id, "entry_key": entry.entry_key,
+        "entry_slug": entry.slug, "source": "campaign_systems_shared_entry_editor",
+        "original_source_identity": original_identity, "edited_fields": edited_fields,
+    }
+    service.store.record_shared_entry_edit_event(
+        campaign_slug=campaign_slug, library_slug=entry.library_slug,
+        source_id=entry.source_id, entry_key=entry.entry_key, entry_slug=entry.slug,
+        original_source_identity=original_identity, edited_fields=edited_fields,
+        actor_user_id=actor_user_id, audit_event_type="campaign_systems_shared_entry_updated",
+        audit_metadata=metadata, commit=False,
+    )
+    auth_store.insert_audit_event(
+        event_type="campaign_systems_shared_entry_updated", actor_user_id=actor_user_id,
+        campaign_slug=campaign_slug, metadata=metadata, commit=False,
+    )
+    return entry
+
+
 def save_shared_core_entry(service, auth_store, campaign_slug, entry_slug, *, actor_user_id, **values):
     prepared = prepare_systems_mutation(service, campaign_slug)
     with systems_transaction():
-        before = service.store.get_entry_by_slug(prepared.library.library_slug, entry_slug)
-        entry = service.update_shared_core_entry(
-            campaign_slug, entry_slug, **values, commit=False, prepared=prepared,
-        )
-        original_identity = _original_source_identity(before)
-        edited_fields = _changed_fields(before, entry)
-        metadata = {
-            "campaign_slug": campaign_slug, "library_slug": entry.library_slug,
-            "source_id": entry.source_id, "entry_key": entry.entry_key,
-            "entry_slug": entry.slug, "source": "campaign_systems_shared_entry_editor",
-            "original_source_identity": original_identity, "edited_fields": edited_fields,
-        }
-        service.store.record_shared_entry_edit_event(
-            campaign_slug=campaign_slug, library_slug=entry.library_slug,
-            source_id=entry.source_id, entry_key=entry.entry_key, entry_slug=entry.slug,
-            original_source_identity=original_identity, edited_fields=edited_fields,
-            actor_user_id=actor_user_id, audit_event_type="campaign_systems_shared_entry_updated",
-            audit_metadata=metadata, commit=False,
-        )
-        auth_store.insert_audit_event(
-            event_type="campaign_systems_shared_entry_updated", actor_user_id=actor_user_id,
-            campaign_slug=campaign_slug, metadata=metadata, commit=False,
-        )
+        entry = _save_shared_core_entry(prepared, auth_store, entry_slug, actor_user_id, values)
     _finish_mutation()
     return entry
+
+
+def save_shared_core_entries(service, auth_store, campaign_slug, *, actor_user_id,
+                             expected_revision, updates):
+    """Admin-only atomic CAS batch; callers qualify the returned commit separately.
+
+    Each update contains the complete stored row as ``expected`` and the normal
+    editor's nine ``values``. No entry identity can be changed. Catalog preparation
+    retains the existing single-save contract and precedes business ownership.
+    """
+    from .systems_service import SystemsPolicyValidationError
+
+    def refuse(message):
+        raise SystemsPolicyValidationError(message)
+
+    fields = {"title", "source_page", "source_path", "search_text", "player_safe_default",
+              "dm_heavy", "metadata", "body", "rendered_html"}
+    if (type(actor_user_id) is not int or not isinstance(expected_revision, str)
+            or len(expected_revision) != 64 or type(updates) is not list
+            or not 1 <= len(updates) <= 100):
+        refuse("Supply an actor, expected Systems revision and 1–100 entry updates.")
+    # Detach the request from mutable caller-owned dictionaries; reject non-JSON values.
+    updates = json.loads(json.dumps(updates, allow_nan=False))
+    seen = set()
+    for update in updates:
+        if (type(update) is not dict or set(update) != {"expected", "values"}
+                or type(update["expected"]) is not dict or type(update["values"]) is not dict
+                or set(update["values"]) != fields):
+            refuse("Each update needs a complete expected row and all editor values.")
+        expected, values = update["expected"], update["values"]
+        slug = expected.get("slug")
+        if not isinstance(slug, str) or not slug or slug in seen:
+            refuse("Choose distinct existing entry slugs.")
+        seen.add(slug)
+        if (any(type(values[k]) is not str for k in fields - {"metadata", "body", "player_safe_default", "dm_heavy"})
+                or any(type(values[k]) is not dict for k in ("metadata", "body"))
+                or any(type(values[k]) is not bool for k in ("player_safe_default", "dm_heavy"))):
+            refuse("Editor values have invalid JSON types.")
+    from .committed_publication import active, config
+    if not active():
+        refuse("Atomic shared-entry batches require committed campaign settings.")
+    user = auth_store.get_user_by_id(actor_user_id)
+    if user is None or not user.is_active or not user.is_admin:
+        refuse("Atomic shared-entry batches require an active app admin.")
+    policy = dict(config(campaign_slug)[0])
+    prepared = prepare_systems_mutation(service, campaign_slug)
+    if prepared.library.status != "active":
+        refuse("Choose an active Systems library.")
+    with systems_transaction():
+        user = auth_store.get_user_by_id(actor_user_id)
+        if user is None or not user.is_active or not user.is_admin:
+            refuse("Atomic shared-entry batches require an active app admin.")
+        current_policy = dict(config(campaign_slug, connection=prepared.connection)[0])
+        if (current_policy != policy
+                or service.store.get_durable_revision() != expected_revision):
+            refuse("Systems or campaign policy changed; obtain a fresh preview.")
+        states = {state.source.source_id: state for state in prepared.source_states}
+        for update in updates:
+            expected = update["expected"]
+            actual = service.store.get_entry_preimage(prepared.library.library_slug, expected["slug"])
+            if (actual is None or json.dumps(actual, sort_keys=True) != json.dumps(expected, sort_keys=True)):
+                refuse("An entry changed; obtain a fresh preview.")
+            state = states.get(actual["source_id"])
+            override = service.store.get_campaign_entry_override(
+                campaign_slug, actual["entry_key"],
+            )
+            if (state is None or not state.is_enabled or state.source.status != "active"
+                    or (override is not None and override.is_enabled_override is False)):
+                refuse("A selected entry is not currently enabled.")
+        entries = [_save_shared_core_entry(prepared, auth_store, update["expected"]["slug"],
+                                           actor_user_id, update["values"]) for update in updates]
+        # Capture the final token before commit; later readback is not part of saving.
+        revision = service.store.get_durable_revision()
+    warning = None
+    try:
+        _finish_mutation()
+    except Exception as error:
+        warning = type(error).__name__
+    return {"committed": True, "systems_revision": revision,
+            "campaign_slug": campaign_slug, "actor_user_id": actor_user_id,
+            "entry_keys": [entry.entry_key for entry in entries],
+            "postcommit_cache_error": warning}

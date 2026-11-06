@@ -30,6 +30,7 @@ def _resolve_managed_resource_formula_value(
     *,
     ability_scores: dict[str, int],
     current_level: int,
+    total_character_level: int | None = None,
 ) -> int:
     kind = str(formula.get("kind") or "").strip().lower()
     minimum_value = formula.get("minimum")
@@ -38,8 +39,16 @@ def _resolve_managed_resource_formula_value(
         value = int(formula.get("value") or 0)
     elif kind == "level":
         value = int(current_level) * int(formula.get("multiplier") or 1) + int(formula.get("bonus") or 0)
+    elif kind == "total_half_level":
+        if type(total_character_level) is not int or not 1 <= total_character_level <= 20:
+            raise ValueError("Total character level is required for this resource formula.")
+        # Same positive half/down rule as campaign resource scaling. Zero at
+        # level one is a valid capacity, not a fallback to an imported value.
+        value = total_character_level // 2
     elif kind == "proficiency_bonus":
-        value = _proficiency_bonus_for_level(current_level) * int(formula.get("multiplier") or 1) + int(formula.get("bonus") or 0)
+        value = _proficiency_bonus_for_level(
+            current_level if total_character_level is None else total_character_level
+        ) * int(formula.get("multiplier") or 1) + int(formula.get("bonus") or 0)
     elif kind == "ability_modifier":
         ability_key = str(formula.get("ability") or "").strip().lower()
         value = _ability_modifier(ability_scores.get(ability_key, DEFAULT_ABILITY_SCORE)) + int(formula.get("bonus") or 0)
@@ -54,6 +63,7 @@ def _resolve_managed_resource_formula_value(
                 dict(part or {}),
                 ability_scores=ability_scores,
                 current_level=current_level,
+                total_character_level=total_character_level,
             )
             for part in list(formula.get("parts") or [])
             if isinstance(part, dict)
@@ -84,6 +94,7 @@ def build_managed_resource_tracker_template(
     ability_scores: dict[str, int],
     current_level: int,
     display_order: int,
+    total_character_level: int | None = None,
 ) -> dict[str, Any] | None:
     tracker = dict(member.get("tracker") or {})
     if not tracker:
@@ -92,14 +103,19 @@ def build_managed_resource_tracker_template(
         dict(tracker.get("max_formula") or {}),
         ability_scores=ability_scores,
         current_level=current_level,
+        total_character_level=total_character_level,
     )
-    if max_value <= 0:
+    if max_value < 0 or max_value == 0 and dict(tracker.get("max_formula") or {}).get("kind") != "total_half_level":
         return None
     reset_on = str(tracker.get("reset_on") or "manual").strip() or "manual"
     reset_to = tracker.get("reset_to", "max" if reset_on in {"short_rest", "long_rest"} else "unchanged")
     rest_behavior = str(tracker.get("rest_behavior") or "").strip()
     if not rest_behavior:
         rest_behavior = "confirm_before_reset" if reset_on in {"short_rest", "long_rest"} else "manual_only"
+    notes = str(tracker.get("notes") or feature_payload.get("name") or "").strip()
+    for minimum_level, level_notes in sorted(tuple(tracker.get("notes_by_level") or ())):
+        if current_level >= minimum_level:
+            notes = str(level_notes or "").strip()
     return {
         "id": str(tracker.get("id") or "").strip(),
         "label": str(tracker.get("label") or feature_payload.get("name") or "").strip(),
@@ -109,7 +125,7 @@ def build_managed_resource_tracker_template(
         "reset_on": reset_on,
         "reset_to": reset_to,
         "rest_behavior": rest_behavior,
-        "notes": str(tracker.get("notes") or feature_payload.get("name") or "").strip(),
+        "notes": notes,
         "display_order": display_order,
         "activation_type": str(tracker.get("activation_type") or member.get("activation_type") or "passive").strip() or "passive",
     }
@@ -127,6 +143,7 @@ def build_feature_tracker_template(
     display_order: int,
     managed_resource_member: dict[str, Any] | None = None,
     feat_effect_keys_for_feature: Callable[[dict[str, Any]], list[str]],
+    total_character_level: int | None = None,
 ) -> dict[str, Any] | None:
     if blocks_page_companion_heuristics(feature_payload):
         return None
@@ -137,6 +154,7 @@ def build_feature_tracker_template(
             ability_scores=ability_scores,
             current_level=current_level,
             display_order=display_order,
+            total_character_level=total_character_level,
         )
         if managed_template is not None:
             if normalize_lookup(str(feature_payload.get("name") or "").strip()) == normalize_lookup("Bardic Inspiration") and current_level >= 5:

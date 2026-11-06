@@ -654,11 +654,16 @@ def _inventory(connection: sqlite3.Connection, campaigns_dir: Path, *,
                         origins = load_verified_numeric_actions(slug,ref,connection=connection,
                                                                 strict=True,include_origin=True)
                         reconciled,_ = effective_definition(definition,state)
+                        # This snapshot proves historical owner custody for
+                        # source transitions; it does not expose current
+                        # managed capacities or run the Character normalizer.
                         closed_authority = build_source_authority(
                             definition=reconciled,state=state,state_revision=state_row["revision"],
                             systems_service=systems,campaign_page_records=pages,
                             verified_manual_actions=manual,verified_numeric_actions=numeric,
-                        ).bind_projected_numbers(reconciled)
+                        ).bind_projected_numbers(reconciled,
+                            systems_service=systems,campaign_page_records=pages,
+                            historical_resource_custody=True)
                         projected_authorities = []
                         identity_inputs = {
                             "generation": (row["revision"],row["primary_sha256"]),
@@ -689,7 +694,9 @@ def _inventory(connection: sqlite3.Connection, campaigns_dir: Path, *,
                                 systems_service=projected_system,campaign_page_records=pages,
                                 verified_manual_actions=manual,
                                 verified_numeric_actions=(*numeric,*transitioned),
-                            ).bind_projected_numbers(reconciled)
+                            ).bind_projected_numbers(reconciled,
+                                systems_service=projected_system,campaign_page_records=pages,
+                                historical_resource_custody=True)
                             projected_authorities.append(effective)
                         authority = projected_authorities[-1]
                         authority_evidence.append((slug,ref,hashlib.sha256(json.dumps({

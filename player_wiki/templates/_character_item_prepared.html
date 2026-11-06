@@ -1,0 +1,60 @@
+{% if item.prepared_ammunition | default(none) %}
+  {% set ammunition = item.prepared_ammunition %}
+  {% macro action_fields(operation) -%}
+    {{ csrf_input() }}
+    <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+    <input type="hidden" name="operation" value="{{ operation }}">
+    <input type="hidden" name="mode" value="{{ session_character_form_mode | default('read') }}">
+    <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
+    {% if session_return_view | default('') %}<input type="hidden" name="return_view" value="{{ session_return_view }}">{% endif %}
+  {%- endmacro %}
+  {% macro choice_rules(choice, level=none) -%}
+    <p>{{ choice.title }}: extra {% if level is not none %}{{ choice.damage.dice_per_slot * level }}d{{ choice.damage.die_faces }}{% else %}{{ choice.damage.dice_per_slot }}d{{ choice.damage.die_faces }} per paid slot level{% endif %} {{ choice.damage.type }} damage.</p>
+    {% if choice.save %}
+      <p class="meta">{{ choice.save.ability | upper }} save against current bearer DC {% if choice.save_dc is not none %}{{ choice.save_dc }}{% else %}unavailable (unqualified or ambiguous){% endif %};
+      {% if choice.save.target == 'nearby_creatures' %}creatures within {{ choice.save.radius_feet }} feet of the target{% else %}the target{% endif %}.
+      On failure: {% for effect in choice.save.on_failure %}{{ effect.effect | replace('_', ' ') }}{% if effect.duration_seconds %} for {{ effect.duration_seconds }} seconds{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}.</p>
+    {% endif %}
+    {% if choice.attack_advantage == 'metal_armor' %}<p class="meta">Advantage on the attack against a target wearing metal armor.</p>{% endif %}
+    {% if choice.hit_rider %}<p class="meta">On hit, a second enemy within {{ choice.hit_rider.range_feet }} feet takes {{ choice.hit_rider.damage_type }} damage equal to the bearer's current {{ choice.hit_rider.ability_modifier | upper }} modifier: {% if choice.rider_modifier is not none %}{{ '%+d' | format(choice.rider_modifier) }}{% else %}unavailable{% endif %}.</p>{% endif %}
+  {%- endmacro %}
+  <div class="subtle-panel">
+    <strong>Prepared ammunition</strong>
+    {% if not ammunition.known %}<p class="meta">{{ ammunition.reason }}</p>
+    {% elif ammunition.payload is none %}<p>Current load: empty.</p>
+    {% elif ammunition.payload.kind == 'mundane' %}<p>Current load: mundane ammunition.</p>
+    {% else %}<p>Current load: {{ ammunition.loaded_choice.title }}, paid slot level {{ ammunition.payload.slot_level }}.</p>{{ choice_rules(ammunition.loaded_choice, ammunition.payload.slot_level) }}{% endif %}
+    {% if ammunition.activation_note %}<p class="meta">{{ ammunition.activation_note }} Reload timing, ammunition, attack rolls, hits and target effects are resolved at the table.</p>{% endif %}
+    {% if ammunition.choices %}<details><summary>Developed ammunition rules</summary>{% for choice in ammunition.choices %}{{ choice_rules(choice) }}{% endfor %}</details>{% endif %}
+    {% if item_uses_editable | default(false) %}
+      {% if ammunition.can_load %}
+        <form class="session-inline-form" method="post" action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}">
+          {{ action_fields('prepared_load') }}
+          <label>Ammunition<select name="choice_id" required>{% for choice in ammunition.choices %}<option value="{{ choice.id }}">{{ choice.title }}</option>{% endfor %}</select></label>
+          <label>Slot to spend<select name="slot_selection" required>{% for option in ammunition.slot_options %}<option value="{{ option.selection }}">{{ option.label }} ({{ option.available }} available)</option>{% endfor %}</select></label>
+          <label><input type="checkbox" name="confirm_reload" value="yes" required>I am reloading this empty item with the selected ammunition and spending this slot now.</label>
+          <button type="submit" class="ghost-button">Spend slot and load</button>
+        </form>
+      {% elif ammunition.known and ammunition.payload is none %}<p class="meta">No qualified load action is currently available. Check class, attunement and available slots.</p>{% endif %}
+      {% if ammunition.can_discharge %}
+        <form class="session-inline-form" method="post" action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}">
+          {{ action_fields('prepared_discharge') }}
+          <label><input type="checkbox" name="confirm_discharge" value="yes" required>I fired the recorded load. Resolve the attack and effects at the table.</label>
+          <button type="submit" class="ghost-button">Record discharge (no slot cost)</button>
+        </form>
+      {% endif %}
+      {% if ammunition.can_observe and can_repair_equipment_activation | default(false) %}
+        <details><summary>Record the actual current load</summary>
+          <form class="session-inline-form" method="post" action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}">
+            {{ action_fields('prepared_observe') }}
+            <label>Actual load<select name="load_kind" required><option value="">Choose the known fact</option><option value="empty">Empty</option><option value="mundane">Mundane ammunition</option><option value="enchanted">Enchanted ammunition</option></select></label>
+            <label>Enchanted choice only<select name="choice_id"><option value="">Not enchanted</option>{% for choice in ammunition.choices %}<option value="{{ choice.id }}">{{ choice.title }}</option>{% endfor %}</select></label>
+            <label>Previously paid slot level (enchanted only)<input type="number" name="slot_level" min="1" max="9" step="1"></label>
+            <label><input type="checkbox" name="confirm_observation" value="yes" required>I confirm this actual current load and, if enchanted, its already-paid level. No slot will be spent now.</label>
+            <button type="submit" class="ghost-button">Record current load</button>
+          </form>
+        </details>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endif %}

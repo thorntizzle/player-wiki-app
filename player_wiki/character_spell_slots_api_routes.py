@@ -37,6 +37,16 @@ def register_character_spell_slots_api_route(
             ),
         )
 
+    def character_flexible_casting(campaign_slug: str, character_slug: str):
+        return dependencies.run_character_mutation(campaign_slug, character_slug,
+            lambda record, payload, user_id: dependencies.get_character_state_service().flexible_casting(
+                record, direction=str(payload.get("direction") or ""), slot_level=payload.get("level"),
+                slot_lane_id=str(payload.get("slot_lane_id") or ""),
+                expected_revision=int(payload.get("expected_revision")), updated_by_user_id=user_id))
+
+    api.add_url_rule("/campaigns/<campaign_slug>/characters/<character_slug>/session/flexible-casting",
+        endpoint="character_flexible_casting", view_func=dependencies.api_login_required(character_flexible_casting),
+        methods=("POST",))
     api.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/session/spell-slots/<int:level>",
         endpoint="character_spell_slots_update",

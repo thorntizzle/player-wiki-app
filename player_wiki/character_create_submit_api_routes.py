@@ -7,6 +7,10 @@ from flask import Blueprint, current_app, jsonify, url_for
 
 from .character_builder import CharacterBuildError
 from .character_service import CharacterStateValidationError
+from .character_spell_grants import (
+    ACQUISITION_FIELD, TRUSTED_ACQUISITION_KEY, GrantContractError,
+    resolve_acquisition_intent,
+)
 from .character_source_repair import (
     SourceRepairError,
     prepare_native_creation_authorizations,
@@ -60,17 +64,34 @@ def register_character_create_submit_api_route(
             payload = dependencies.load_json_object()
         except ValueError as exc:
             return dependencies.json_error(str(exc), 400, code="invalid_json")
-        values = dependencies.normalize_character_authoring_values(payload)
         lane = dependencies.native_character_create_lane(
             getattr(campaign, "system", "")
         )
         actor_id = None
+        acquisition_context = None
+        acquisition_token = None
         if lane == CHARACTER_ROUTE_LANE_DND5E:
             if dependencies.get_current_auth_source() == "view_as":
                 return dependencies.json_error("View As cannot create a Character.", 403, code="forbidden")
             actor_id = getattr(dependencies.get_authenticated_user(), "id", None)
             if type(actor_id) is not int or actor_id < 1:
                 return dependencies.json_error("Authentication required.", 403, code="forbidden")
+            raw_values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
+            try:
+                from .committed_publication import active
+                if active():
+                    acquisition_token, acquisition_context = resolve_acquisition_intent(
+                        raw_values, campaign_slug=campaign_slug, actor_id=actor_id,
+                        mode="create",
+                    )
+            except GrantContractError as exc:
+                return dependencies.json_error(str(exc), 400, code="acquisition_validation_failed")
+        values = dependencies.normalize_character_authoring_values(payload)
+        values.pop(ACQUISITION_FIELD, None)
+        values.pop(TRUSTED_ACQUISITION_KEY, None)
+        if acquisition_context is not None:
+            values[ACQUISITION_FIELD] = acquisition_token
+            values[TRUSTED_ACQUISITION_KEY] = acquisition_context
         markers = ()
         source_basis_digests = {}
         source_snapshot_digest = ""
@@ -130,6 +151,7 @@ def register_character_create_submit_api_route(
                         campaign_page_records=dependencies.list_visible_character_page_records(
                             campaign_slug, campaign
                         ),
+                        acquisition_context=acquisition_context,
                     )
                 except SourceRepairError:
                     from .committed_publication import active
@@ -184,6 +206,7 @@ def register_character_create_submit_api_route(
                         load_current_source_context=load_current_source_context,
                         actor_id=actor_id,
                         auth_store=dependencies.get_auth_store(),
+                        acquisition_context=acquisition_context,
                     )
                 except Exception:
                     # Creation succeeded; a failed audit must not suggest retry.

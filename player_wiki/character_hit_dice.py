@@ -110,14 +110,16 @@ def normalize_verified_hit_dice_state_payload(
 
 def recover_verified_hit_dice_pools(
     definition: Any, state: dict[str, Any], verified_faces: set[int],
-    *, verified_total_level: int,
+    *, verified_total_level: int, recovery_bonus: int = 0,
 ) -> dict[str, Any]:
     payload = normalize_verified_hit_dice_state_payload(definition, state, verified_faces)
     pools = list(dict(payload.get(HIT_DICE_STATE_KEY) or {}).get("pools") or [])
     verified = [pool for pool in pools if isinstance(pool, dict) and pool.get("faces") in verified_faces]
     # The long-rest allowance is half the verified character level, even
     # when one class's Hit Die pool itself needs repair.
-    remaining = max(1, verified_total_level // 2) if verified_total_level else 0
+    if type(recovery_bonus) is not int or recovery_bonus < 0:
+        raise ValueError("Hit Die recovery needs a nonnegative qualified allowance.")
+    remaining = (max(1, verified_total_level // 2) + recovery_bonus) if verified_total_level else 0
     for pool in sorted(verified, key=lambda row: int(row["faces"]), reverse=True):
         missing = max(0, int(pool.get("max") or 0) - int(pool.get("current") or 0))
         regained = min(missing, remaining)

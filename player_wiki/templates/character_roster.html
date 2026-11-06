@@ -68,39 +68,6 @@
             {% if character.species %}{{ character.species }}{% endif %}
             {% if character.background %}{% if character.species %} · {% endif %}{{ character.background }}{% endif %}
           </p>
-          <div class="character-card__stats">
-            <div>
-              <span class="meta">HP</span>
-              <strong>{{ character.current_hp }} / {{ character.max_hp }}</strong>
-            </div>
-            <div>
-              <span class="meta">Temp HP</span>
-              <strong>{{ character.temp_hp }}</strong>
-            </div>
-            {% if character.hit_dice and character.hit_dice.pools %}
-              <div>
-                <span class="meta">Hit Dice</span>
-                <strong>{{ character.hit_dice.value }}</strong>
-              </div>
-            {% endif %}
-          </div>
-          {% if character.resource_preview %}
-            <ul class="plain-list resource-preview-list">
-              {% for resource in character.resource_preview %}
-                <li>
-                  <span>{{ resource.label }}</span>
-                  <strong>{{ resource.value }}</strong>
-                </li>
-              {% endfor %}
-            </ul>
-          {% endif %}
-          {% if character.projection_warnings %}
-            <div class="notice notice--warning" role="status">
-              {% for warning in character.projection_warnings %}
-                <p>{{ warning.message }}</p>
-              {% endfor %}
-            </div>
-          {% endif %}
           <a class="button-link" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.slug) }}">
             Open sheet
           </a>

@@ -194,3 +194,9 @@ def sync_profile_class_summary(profile: dict[str, Any] | None, *, default: str =
         normalized_profile["subclass_ref"] = primary_subclass_ref
 
     return normalized_profile
+
+
+# Finite ordinary callback surface omitted by invocation-owned current inputs.
+_CURRENT_INPUT_RECIPE = tuple((name, globals()[name]) for name in (
+    'profile_class_rows',
+))

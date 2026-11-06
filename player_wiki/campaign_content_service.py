@@ -44,6 +44,7 @@ CAMPAIGN_CONFIG_EDITABLE_KEYS = {
     "current_session",
     "source_wiki_root",
     "systems_library",
+    "allow_artificer_infusion_deactivation",
 }
 
 CHARACTER_RICH_MARKDOWN_FIELDS = frozenset(
@@ -213,6 +214,11 @@ def _normalize_campaign_config_updates(updates: dict[str, Any]) -> dict[str, Any
 
     normalized: dict[str, Any] = {}
     for key, value in updates.items():
+        if key == "allow_artificer_infusion_deactivation":
+            if type(value) is not bool:
+                raise CampaignContentError(f"{key} must be a boolean.")
+            normalized[key] = value
+            continue
         if key == "current_session":
             try:
                 normalized_value = int(value)

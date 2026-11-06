@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from .character_source_reads import source_active
+from .systems_feature_semantics import FeatureSemantics
+
 from html import escape
 from hashlib import sha256
 import json
@@ -21,6 +24,7 @@ from .campaign_item_mechanics import (
     campaign_item_review_for_metadata,
     interpret_campaign_item_mechanics,
     normalize_explicit_campaign_item_mechanics,
+    retained_curated_campaign_item_mechanics,
     normalize_campaign_item_review_status,
     _extract_supported_page_metadata,
 )
@@ -629,6 +633,13 @@ def _systems_service_cache_get(
     cache_key: tuple[object, ...], build_value, *, systems_service, campaign_slug=None,
     entry_types: tuple[str, ...] = (),
 ):
+    phase = getattr(systems_service, "source_read_phase", None)
+    if phase is not None:
+        # No HTTP cache or live revision/policy probe precedes phase dispatch.
+        phase.require_open()
+        context = (systems_service.get_cache_context(campaign_slug, entry_types=entry_types)
+                   if campaign_slug is not None else None)
+        return phase.resolve("systems-service", (cache_key, context), build_value)
     revision = systems_service.get_durable_revision()
     context = systems_service.get_cache_context(campaign_slug, entry_types=entry_types) if campaign_slug is not None else None
     cache = _systems_service_request_cache()
@@ -637,9 +648,10 @@ def _systems_service_cache_get(
     # The uncached token catches writes through other stores/raw connections in
     # this request as well as commits made by another worker.
     identity = (id(systems_service), context, revision)
-    if cache.get(("revision", id(systems_service))) != revision:
+    revision_key = ("revision", id(systems_service))
+    if revision_key in cache and cache[revision_key] != revision:
         cache.clear()
-        cache[("revision", id(systems_service))] = revision
+    cache[revision_key] = revision
     key = (identity, cache_key)
     if key in cache:
         return cache[key]
@@ -648,6 +660,47 @@ def _systems_service_cache_get(
             and (campaign_slug is None or systems_service.get_cache_context(campaign_slug, entry_types=entry_types) == context)):
         cache[key] = value
     return value
+
+
+def _systems_service_cache_bucket(
+    cache_key: tuple[object, ...], identity: tuple[str, ...], build_value, *,
+    systems_service, campaign_slug: str, entry_types: tuple[str, ...],
+):
+    """Detach only a selected bucket while retaining the complete producer."""
+    return _systems_service_cache_selection(
+        cache_key, identity, build_value, missing=[], namespace="systems-service-bucket",
+        systems_service=systems_service, campaign_slug=campaign_slug, entry_types=entry_types,
+    )
+
+
+def _systems_service_cache_record(
+    cache_key: tuple[object, ...], identity: str, build_value, *,
+    systems_service, campaign_slug: str,
+):
+    """Detach one optional record; absence is distinct from a disabled record."""
+    return _systems_service_cache_selection(
+        cache_key, identity, build_value, missing=None, namespace="systems-service-record",
+        systems_service=systems_service, campaign_slug=campaign_slug, entry_types=(),
+    )
+
+
+def _systems_service_cache_selection(
+    cache_key, identity, build_value, *, missing, namespace,
+    systems_service, campaign_slug, entry_types,
+):
+    def load_selection():
+        lookup = _systems_service_cache_get(
+            cache_key, build_value, systems_service=systems_service,
+            campaign_slug=campaign_slug, entry_types=entry_types,
+        )
+        return (lookup or {}).get(identity, missing)
+
+    phase = getattr(systems_service, "source_read_phase", None)
+    if phase is None:
+        return load_selection()
+    phase.require_open()
+    context = systems_service.get_cache_context(campaign_slug, entry_types=entry_types)
+    return phase.resolve(namespace, (cache_key, context, identity), load_selection)
 
 
 def _systems_service_cache_clear() -> None:
@@ -889,7 +942,7 @@ def _normalize_mechanics_impact_entry_type(value: object) -> str:
     return normalize_lookup(str(value or "").strip())
 
 
-class SystemsService:
+class SystemsService(FeatureSemantics):
     def __init__(self, store: SystemsStore, repository_store: RepositoryStore) -> None:
         self.store = store
         self.repository_store = repository_store
@@ -965,16 +1018,38 @@ class SystemsService:
         self._ensure_xianxia_systems_entries_seeded(library.library_slug)
         return library
 
-    def get_cache_context(self, campaign_slug: str, *, entry_types: tuple[str, ...] | None = None) -> tuple[object, ...]:
-        """Cheap non-database policy inputs, using the request's pinned campaign."""
+    def _campaign_policy_inputs(self, campaign_slug: str):
+        """Read policy and its receipt together without loading campaign pages."""
+        from .committed_publication import CommittedSourceConflict, active, config
+        if source_active(self):
+            try:
+                source, settings = config(campaign_slug)
+            except CommittedSourceConflict:
+                # RepositoryStore's committed config loader skips these invalid
+                # campaigns. Preserve its absent-policy result, never stale data.
+                return None
+            return (
+                normalize_system_code(settings.get("system", "")),
+                default_systems_library_slug(settings.get("systems_library", "")),
+                list(settings.get("systems_sources") or []),
+                source,
+            )
         campaign = self._get_campaign(campaign_slug)
         if campaign is None:
+            return None
+        return (campaign.system, campaign.systems_library_slug, campaign.systems_source_defaults, None)
+
+    def get_cache_context(self, campaign_slug: str, *, entry_types: tuple[str, ...] | None = None) -> tuple[object, ...]:
+        """Current config policy and durable tokens used by Systems read caches."""
+        policy = self._campaign_policy_inputs(campaign_slug)
+        if policy is None:
             return ("", ())
+        system, library_slug, source_defaults, source = policy
         # Match the last-wins source seed map. Database overrides are already
         # covered by the durable token; retaining overridden defaults is a safe
         # conservative invalidation without another policy query.
         defaults = {}
-        for item in campaign.systems_source_defaults:
+        for item in source_defaults:
             if not isinstance(item, dict):
                 continue
             source_id = str(item.get("source_id", "") or "").strip()
@@ -984,22 +1059,19 @@ class SystemsService:
                     self._normalize_or_default_visibility(item.get("default_visibility"), fallback=""),
                 )
         context = (
-            default_systems_library_slug(campaign.systems_library_slug or campaign.system),
+            default_systems_library_slug(library_slug or system),
             tuple(sorted((source_id, *values) for source_id, values in defaults.items())),
         )
-        from .committed_publication import active, config
-        if active():
-            source, _ = config(campaign_slug)
+        if source is not None:
             return (*context, source["revision"], source["primary_sha256"], self.store.get_durable_revision())
         return context
 
     def get_campaign_library_slug(self, campaign_slug: str) -> str:
-        campaign = self._get_campaign(campaign_slug)
-        if campaign is None:
+        policy = self._campaign_policy_inputs(campaign_slug)
+        if policy is None:
             return ""
-        if campaign.systems_library_slug:
-            return default_systems_library_slug(campaign.systems_library_slug)
-        return default_systems_library_slug(campaign.system)
+        system, library_slug, _, _ = policy
+        return default_systems_library_slug(library_slug or system)
 
     def build_source_health_access_context(
         self,
@@ -1077,7 +1149,17 @@ class SystemsService:
         library_slug = self.get_campaign_library_slug(campaign_slug)
         if not library_slug:
             return None
-        return self.ensure_builtin_library_seeded(library_slug)
+        if not has_request_context() or getattr(self, "source_read_phase", None) is not None:
+            return self.ensure_builtin_library_seeded(library_slug)
+        # Selection remains a fresh config read. Preparation depends only on
+        # this library and the uncached durable Systems revision, not a user
+        # permission. A seed that changes the revision cannot populate reuse.
+        library = _systems_service_cache_get(
+            ("prepared-campaign-library", id(self.store), library_slug),
+            lambda: self.ensure_builtin_library_seeded(library_slug),
+            systems_service=self,
+        )
+        return deepcopy(library)
 
     def get_campaign_library_for_character_read(
         self,
@@ -1177,11 +1259,19 @@ class SystemsService:
         campaign_slug: str,
         entry_slug: str,
     ) -> SystemsEntryRecord | None:
-        library = self.get_campaign_library(campaign_slug)
+        # Looking up an existing custom row is not catalog/source preparation.
+        library_slug = self.get_campaign_library_slug(campaign_slug)
+        library = self.store.get_library(library_slug)
         if library is None:
             return None
         entry = self.store.get_entry_by_slug(library.library_slug, str(entry_slug or "").strip())
-        if entry is None or not self.is_campaign_custom_entry(campaign_slug, entry):
+        if entry is None:
+            return None
+        source = self.store.get_source(library.library_slug, entry.source_id)
+        owner = str(dict(entry.metadata or {}).get("custom_campaign_slug") or "").strip()
+        if (source is None or source.license_class != "custom_campaign"
+                or source.library_slug != library.library_slug
+                or owner not in ("", campaign_slug)):
             return None
         return entry
 
@@ -1324,9 +1414,20 @@ class SystemsService:
         source_page_ref: str = "",
         item_mechanics_review_status: object = "",
         item_mechanics: dict[str, object] | None = None,
+        spell_profile: dict[str, object] | None = None,
+        spell_higher_level_markdown: str | None = None,
         actor_user_id: int,
         can_set_private: bool,
     ) -> SystemsEntryRecord:
+        from .systems_spell_authoring import normalize_spell_profile
+        normalize_spell_profile(spell_profile)
+        target_type = re.sub(r"[^a-z0-9_]+", "", str(entry_type or "").strip().lower())
+        if spell_profile is not None and (target_type != "spell" or self.get_campaign_library_slug(campaign_slug).lower() != "dnd-5e"):
+            raise SystemsPolicyValidationError("Spell details require a DND-5E spell entry.")
+        if spell_higher_level_markdown is not None and (
+                type(spell_higher_level_markdown) is not str or len(spell_higher_level_markdown) > 30000
+                or spell_higher_level_markdown and target_type != "spell"):
+            raise SystemsPolicyValidationError("Higher-level rules require bounded spell text.")
         if re.sub(r"[^a-z0-9_]+", "", str(entry_type or "").strip().lower()) == "item":
             page = self._get_campaign_item_page_record(campaign_slug, source_page_ref) if source_page_ref else None
             preflight_body = str(body_markdown or "").strip()
@@ -1367,6 +1468,7 @@ class SystemsService:
             source_page_ref=source_page_ref,
             item_mechanics_review_status=item_mechanics_review_status,
             item_mechanics=item_mechanics,
+            spell_profile=spell_profile, spell_higher_level_markdown=spell_higher_level_markdown,
             actor_user_id=actor_user_id,
             can_set_private=can_set_private,
             is_enabled_override=None,
@@ -1380,18 +1482,61 @@ class SystemsService:
         title: str,
         entry_type: str,
         provenance: str = "",
-        visibility: str = VISIBILITY_PLAYERS,
+        visibility: str = "",
         search_metadata: str = "",
         body_markdown: str = "",
         source_page_ref: str = "",
         item_mechanics_review_status: object = "",
         item_mechanics: dict[str, object] | None = None,
+        spell_profile: dict[str, object] | None = None,
+        spell_higher_level_markdown: str | None = None,
         actor_user_id: int,
         can_set_private: bool,
     ) -> SystemsEntryRecord:
         existing = self.get_custom_campaign_entry_by_slug(campaign_slug, entry_slug)
         if existing is None:
             raise SystemsPolicyValidationError("Choose a valid custom Systems entry before saving.")
+        from .systems_spell_authoring import (
+            normalize_spell_profile, save_custom_spell_edit,
+        )
+        normalize_spell_profile(spell_profile)
+        target_type = re.sub(r"[^a-z0-9_]+", "", str(entry_type or "").strip().lower())
+        if spell_profile is not None and (target_type != "spell" or existing.library_slug.lower() != "dnd-5e"):
+            raise SystemsPolicyValidationError("Spell details require a DND-5E spell entry.")
+        if spell_higher_level_markdown is not None and (
+                type(spell_higher_level_markdown) is not str or len(spell_higher_level_markdown) > 30000
+                or spell_higher_level_markdown and target_type != "spell"):
+            raise SystemsPolicyValidationError("Higher-level rules require bounded spell text.")
+        if existing.library_slug.lower() == "dnd-5e" and existing.entry_type == "spell":
+            return save_custom_spell_edit(
+                self, campaign_slug, entry_slug, expected_entry=existing,
+                title=title, entry_type=entry_type, provenance=provenance,
+                visibility=visibility, search_metadata=search_metadata,
+                body_markdown=body_markdown, source_page_ref=source_page_ref,
+                item_mechanics_review_status=item_mechanics_review_status,
+                item_mechanics=item_mechanics, spell_profile=spell_profile,
+                spell_higher_level_markdown=spell_higher_level_markdown,
+                actor_user_id=actor_user_id, can_set_private=can_set_private,
+            )
+        if existing.entry_type == "feature":
+            from .systems_feature_authoring import save_custom_feature_edit, structured_feature_metadata
+            target_type = re.sub(r"[^a-z0-9_]+", "", str(entry_type or "").strip().lower())
+            if target_type == "feature":
+                return save_custom_feature_edit(
+                    self, campaign_slug, entry_slug, expected_entry=existing,
+                    title=title, entry_type=entry_type,
+                    provenance=provenance, visibility=visibility,
+                    search_metadata=search_metadata, body_markdown=body_markdown,
+                    source_page_ref=source_page_ref,
+                    item_mechanics_review_status=item_mechanics_review_status,
+                    item_mechanics=item_mechanics, actor_user_id=actor_user_id,
+                    can_set_private=can_set_private,
+                )
+            if structured_feature_metadata(dict(existing.metadata or {})):
+                raise SystemsPolicyValidationError(
+                    "Structured feature mechanics cannot be moved to another entry type by editing prose.")
+            # Unstructured conversions keep their existing item/page preparation
+            # outside the new feature write owner, including legacy refresh.
         source_state = self.get_campaign_source_state(campaign_slug, existing.source_id)
         if source_state is None:
             raise SystemsPolicyValidationError("The custom Systems source is no longer available.")
@@ -1410,6 +1555,7 @@ class SystemsService:
             source_page_ref=source_page_ref,
             item_mechanics_review_status=item_mechanics_review_status,
             item_mechanics=item_mechanics,
+            spell_profile=spell_profile, spell_higher_level_markdown=spell_higher_level_markdown,
             actor_user_id=actor_user_id,
             can_set_private=can_set_private,
             is_enabled_override=override.is_enabled_override if override is not None else None,
@@ -1631,6 +1777,13 @@ class SystemsService:
                 origin="shared_body",
             )
 
+        if existing.entry_type in {"classfeature", "subclassfeature"}:
+            from .character_feature_proficiency_grants import normalize_metadata
+            try:
+                metadata = normalize_metadata(dict(metadata or {}))
+            except (ValueError, TypeError) as exc:
+                raise SystemsPolicyValidationError(str(exc)) from exc
+
         normalized_title = str(title or "").strip()
         if not normalized_title:
             raise SystemsPolicyValidationError("Shared/core Systems entries need a title.")
@@ -1688,11 +1841,28 @@ class SystemsService:
         source_page_ref: str = "",
         item_mechanics_review_status: object = "",
         item_mechanics: dict[str, object] | None = None,
+        spell_profile: dict[str, object] | None = None,
+        spell_higher_level_markdown: str | None = None,
         actor_user_id: int,
         can_set_private: bool,
         is_enabled_override: bool | None,
+        _feature_write=None,
+        _spell_write=None,
     ) -> SystemsEntryRecord:
-        library = self.get_campaign_library(campaign_slug)
+        if _feature_write is not None and _spell_write is not None:
+            raise RuntimeError("Choose one custom-entry write owner.")
+        write_context = _feature_write or _spell_write
+        if write_context is None:
+            library = self.get_campaign_library(campaign_slug)
+            previous_entry = None
+        elif _feature_write is not None:
+            from .systems_feature_authoring import feature_write_library
+            library = feature_write_library(_feature_write, self, campaign_slug, source, entry_key, slug)
+            previous_entry = _feature_write.previous
+        else:
+            from .systems_spell_authoring import spell_write_library
+            library = spell_write_library(_spell_write, self, campaign_slug, source, entry_key, slug)
+            previous_entry = _spell_write.previous
         if library is None:
             raise SystemsPolicyValidationError("That campaign does not have a systems library configured.")
         normalized_title = str(title or "").strip()
@@ -1703,6 +1873,17 @@ class SystemsService:
         normalized_entry_type = re.sub(r"[^a-z0-9_]+", "", str(entry_type or "").strip().lower())
         if not normalized_entry_type:
             raise SystemsPolicyValidationError("Choose an entry type before saving this custom Systems entry.")
+        if _feature_write is not None and previous_entry is not None and normalized_entry_type != "feature":
+            from .systems_feature_authoring import structured_feature_metadata
+            if structured_feature_metadata(dict(previous_entry.metadata or {})):
+                raise SystemsPolicyValidationError(
+                    "Structured feature mechanics cannot be moved to another entry type by editing prose.")
+        from .systems_spell_authoring import normalize_spell_profile, spell_narrative, render_spell_summary, PROFILE_FIELDS
+        normalized_profile = normalize_spell_profile(spell_profile)
+        if normalized_profile is not None and (normalized_entry_type != "spell" or library.library_slug.lower() != "dnd-5e"):
+            raise SystemsPolicyValidationError("Structured spell details require a DND-5E spell entry.")
+        if spell_higher_level_markdown not in (None, "") and normalized_entry_type != "spell":
+            raise SystemsPolicyValidationError("Higher-level spell rules require entry type spell.")
         normalized_visibility = self._normalize_or_default_visibility(
             visibility,
             fallback=VISIBILITY_PLAYERS,
@@ -1727,7 +1908,12 @@ class SystemsService:
                 raise SystemsPolicyValidationError("Linked item page references must stay under 500 characters.")
             if normalized_entry_type != "item":
                 raise SystemsPolicyValidationError("Only item custom Systems entries can link item mechanics pages.")
-            linked_item_page = self._get_campaign_item_page_record(campaign_slug, normalized_source_page_ref)
+            if _spell_write is not None:
+                if _spell_write.prepared_item_page_ref != normalized_source_page_ref:
+                    raise RuntimeError("The owned spell conversion has no matching prepared item page.")
+                linked_item_page = _spell_write.prepared_item_page
+            else:
+                linked_item_page = self._get_campaign_item_page_record(campaign_slug, normalized_source_page_ref)
             if linked_item_page is None:
                 raise SystemsPolicyValidationError("Choose a valid published item page before saving item mechanics.")
             normalized_source_page_ref = str(getattr(linked_item_page, "page_ref", "") or "").strip()
@@ -1758,17 +1944,25 @@ class SystemsService:
             )
             if part
         ).lower()
-        metadata = {
+        # Preserve server-owned feature/spell metadata from the same locked identity.
+        # Omitting a profile never normalizes or invents mechanical fields.
+        metadata = (deepcopy(dict(previous_entry.metadata or {}))
+                    if previous_entry is not None and normalized_entry_type in {"feature", "spell"} else {})
+        metadata.update({
             "custom_campaign_slug": campaign_slug,
             "provenance": normalized_provenance,
             "search_metadata": normalized_search_metadata,
             "body_format": "markdown",
             "body_markdown": normalized_body_markdown,
             "updated_by_user_id": actor_user_id,
-        }
-        body = {
-            "markdown": normalized_body_markdown,
-        }
+        })
+        if _feature_write is not None and _feature_write.effects is not None:
+            if normalized_entry_type != "feature" or previous_entry is not None:
+                raise SystemsPolicyValidationError("Registered grants are create-only.")
+            metadata["mechanic_effects"] = deepcopy(_feature_write.effects)
+        body = (deepcopy(dict(previous_entry.body or {}))
+                if previous_entry is not None and normalized_entry_type in {"feature", "spell"} else {})
+        body["markdown"] = normalized_body_markdown
         if normalized_entry_type == "item":
             source_page_metadata = (
                 dict(getattr(linked_item_page, "metadata", {}) or {})
@@ -1776,12 +1970,18 @@ class SystemsService:
                 else {}
             )
             previous = self.store.get_entry(library.library_slug, entry_key)
+            old_metadata = dict(getattr(previous, "metadata", {}) or {})
+            retained_mechanics = None
+            if item_mechanics is None:
+                item_mechanics = retained_curated_campaign_item_mechanics(old_metadata)
+                retained_mechanics = item_mechanics
+                if not str(item_mechanics_review_status or "").strip():
+                    item_mechanics_review_status = old_metadata.get("campaign_item_mechanics_review_status", "draft")
             self._validate_new_item_spell_support(
                 title=normalized_title, body_markdown=normalized_body_markdown,
                 explicit_mechanics=item_mechanics, source_page_metadata=source_page_metadata,
                 previous=previous, review_status=item_mechanics_review_status,
             )
-            old_metadata = dict(getattr(previous, "metadata", {}) or {})
             old_rule = old_metadata.get("spell_support")
             draft_metadata = build_campaign_item_mechanics_metadata(
                 title=normalized_title, body_markdown=normalized_body_markdown,
@@ -1814,12 +2014,34 @@ class SystemsService:
                     review_status=item_mechanics_review_status,
                     intake_mode="published_page" if normalized_source_page_ref else "direct",
                 )
+            if retained_mechanics:
+                old_provenance = {
+                    **dict(dict(old_metadata.get("campaign_item_mechanics") or {}).get("field_provenance") or {}),
+                    **dict(old_metadata.get("campaign_item_mechanics_field_provenance") or {}),
+                }
+                current_provenance = dict(item_mechanics_metadata.get("campaign_item_mechanics_field_provenance") or {})
+                for key in retained_mechanics:
+                    if key in old_provenance:
+                        current_provenance[key] = deepcopy(old_provenance[key])
+                item_mechanics_metadata["campaign_item_mechanics_field_provenance"] = current_provenance
+                item_mechanics_metadata["campaign_item_mechanics"]["field_provenance"] = deepcopy(current_provenance)
             self._validate_saved_item_spell_support(
                 item_mechanics_metadata.get("spell_support"),
                 previous=old_rule, origin="saved",
             )
             metadata.update(item_mechanics_metadata)
             body["item_mechanics"] = dict(item_mechanics_metadata.get("campaign_item_mechanics") or {})
+        has_spell_profile = normalized_profile is not None or any(key in metadata for key in PROFILE_FIELDS)
+        if spell_higher_level_markdown not in (None, "") and not (
+                normalized_entry_type == "spell" and library.library_slug.lower() == "dnd-5e" and has_spell_profile):
+            raise SystemsPolicyValidationError("Add structured spell details before saving separate higher-level rules.")
+        if normalized_entry_type == "spell" and library.library_slug.lower() == "dnd-5e" and has_spell_profile:
+            if normalized_profile is not None:
+                metadata.update(normalized_profile)
+                metadata["custom_spell_profile_version"] = 1
+            current_rules = spell_narrative(metadata, body, normalized_body_markdown, spell_higher_level_markdown)
+            rendered_html = sanitize_rich_html(render_spell_summary(metadata) + markdown.Markdown(
+                extensions=["fenced_code", "tables", "sane_lists"]).convert(current_rules))
         if library.library_slug.lower() == XIANXIA_SYSTEM_CODE.lower():
             self._stamp_xianxia_custom_entry_metadata(
                 metadata=metadata,
@@ -1840,21 +2062,35 @@ class SystemsService:
             title=normalized_title,
             source_path=normalized_provenance,
             search_text=search_text,
-            player_safe_default=normalized_visibility in {VISIBILITY_PUBLIC, VISIBILITY_PLAYERS},
-            dm_heavy=normalized_visibility in {VISIBILITY_DM, VISIBILITY_PRIVATE},
+            player_safe_default=(previous_entry.player_safe_default
+                if write_context is not None and write_context.retain_visibility
+                else normalized_visibility in {VISIBILITY_PUBLIC, VISIBILITY_PLAYERS}),
+            dm_heavy=(previous_entry.dm_heavy
+                if write_context is not None and write_context.retain_visibility
+                else normalized_visibility in {VISIBILITY_DM, VISIBILITY_PRIVATE}),
             metadata=metadata,
             body=body,
+            source_page=(previous_entry.source_page if previous_entry is not None else ""),
             rendered_html=rendered_html,
+            commit=write_context is None,
         )
-        self.update_campaign_entry_override(
-            campaign_slug,
-            entry_key=entry.entry_key,
-            visibility_override=normalized_visibility,
-            is_enabled_override=is_enabled_override,
-            actor_user_id=actor_user_id,
-            can_set_private=can_set_private,
-        )
-        _systems_service_cache_clear()
+        if write_context is None:
+            self.update_campaign_entry_override(
+                campaign_slug, entry_key=entry.entry_key,
+                visibility_override=normalized_visibility,
+                is_enabled_override=is_enabled_override,
+                actor_user_id=actor_user_id, can_set_private=can_set_private,
+            )
+            _systems_service_cache_clear()
+        elif not (write_context.retain_visibility and write_context.previous_override is None):
+            self.store.upsert_campaign_entry_override(
+                campaign_slug, library_slug=library.library_slug,
+                entry_key=entry.entry_key,
+                visibility_override=(write_context.previous_override.visibility_override
+                    if write_context.retain_visibility else normalized_visibility),
+                is_enabled_override=is_enabled_override,
+                updated_by_user_id=actor_user_id, commit=False,
+            )
         refreshed_entry = self.store.get_entry(library.library_slug, entry.entry_key)
         if refreshed_entry is None:
             raise RuntimeError("Failed to reload custom Systems entry.")
@@ -2142,21 +2378,29 @@ class SystemsService:
     def _campaign_source_state_map_for_character_read(
         self,
         campaign_slug: str,
-    ) -> dict[str, CampaignSourceState]:
+        *,
+        source_id: str | None = None,
+    ) -> dict[str, CampaignSourceState] | CampaignSourceState | None:
+        cache_key = ("character-read-campaign-source-state-map", id(self.store), campaign_slug)
+
+        def load_state_map():
+            return {
+                row.source.source_id: row
+                for row in self.list_campaign_source_states_for_character_read(campaign_slug)
+                if row.source.source_id
+            }
+
+        if source_id is not None:
+            if getattr(self, "source_read_phase", None) is None:
+                return self._campaign_source_state_map_for_character_read(campaign_slug).get(source_id)
+            return _systems_service_cache_record(
+                cache_key, source_id, load_state_map,
+                systems_service=self, campaign_slug=campaign_slug,
+            )
         return dict(
             _systems_service_cache_get(
-                (
-                    "character-read-campaign-source-state-map",
-                    id(self.store),
-                    campaign_slug,
-                ),
-                lambda: {
-                    row.source.source_id: row
-                    for row in self.list_campaign_source_states_for_character_read(
-                        campaign_slug
-                    )
-                    if row.source.source_id
-                },
+                cache_key,
+                load_state_map,
                 systems_service=self,
                 campaign_slug=campaign_slug,
             )
@@ -2249,8 +2493,8 @@ class SystemsService:
         normalized_source_id = source_id.strip()
         if not normalized_source_id:
             return None
-        return self._campaign_source_state_map_for_character_read(campaign_slug).get(
-            normalized_source_id
+        return self._campaign_source_state_map_for_character_read(
+            campaign_slug, source_id=normalized_source_id
         )
 
     def list_entry_type_counts_for_campaign_source(
@@ -2433,7 +2677,8 @@ class SystemsService:
     def _class_feature_entries_by_class_identity(
         self,
         campaign_slug: str,
-    ) -> dict[tuple[str, str], list[SystemsEntryRecord]]:
+        *, identity: tuple[str, str] | None = None,
+    ) -> dict[tuple[str, str], list[SystemsEntryRecord]] | list[SystemsEntryRecord]:
         def _load_lookup() -> dict[tuple[str, str], list[SystemsEntryRecord]]:
             lookup: dict[tuple[str, str], list[SystemsEntryRecord]] = defaultdict(list)
             for candidate in self.list_enabled_entries_for_campaign(
@@ -2447,13 +2692,17 @@ class SystemsService:
                     lookup[(class_name, class_source)].append(candidate)
             return dict(lookup)
 
+        cache_key = (
+            "class-feature-entries-by-class", self._policy_read_cache_namespace(), campaign_slug,
+        )
+        if identity is not None:
+            return _systems_service_cache_bucket(
+                cache_key, identity, _load_lookup, systems_service=self,
+                campaign_slug=campaign_slug, entry_types=("classfeature",),
+            )
         return dict(
             _systems_service_cache_get(
-                (
-                    "class-feature-entries-by-class",
-                    self._policy_read_cache_namespace(),
-                    campaign_slug,
-                ),
+                cache_key,
                 _load_lookup,
                 systems_service=self,
                 campaign_slug=campaign_slug,
@@ -2465,7 +2714,8 @@ class SystemsService:
     def _subclass_feature_entries_by_class_and_source(
         self,
         campaign_slug: str,
-    ) -> dict[tuple[str, str, str], list[SystemsEntryRecord]]:
+        *, identity: tuple[str, str, str] | None = None,
+    ) -> dict[tuple[str, str, str], list[SystemsEntryRecord]] | list[SystemsEntryRecord]:
         def _load_lookup() -> dict[tuple[str, str, str], list[SystemsEntryRecord]]:
             lookup: dict[tuple[str, str, str], list[SystemsEntryRecord]] = defaultdict(list)
             for candidate in self.list_enabled_entries_for_campaign(
@@ -2480,13 +2730,17 @@ class SystemsService:
                     lookup[(class_name, class_source, subclass_source)].append(candidate)
             return dict(lookup)
 
+        cache_key = (
+            "subclass-feature-entries-by-class-source", self._policy_read_cache_namespace(), campaign_slug,
+        )
+        if identity is not None:
+            return _systems_service_cache_bucket(
+                cache_key, identity, _load_lookup, systems_service=self,
+                campaign_slug=campaign_slug, entry_types=("subclassfeature",),
+            )
         return dict(
             _systems_service_cache_get(
-                (
-                    "subclass-feature-entries-by-class-source",
-                    self._policy_read_cache_namespace(),
-                    campaign_slug,
-                ),
+                cache_key,
                 _load_lookup,
                 systems_service=self,
                 campaign_slug=campaign_slug,
@@ -2495,80 +2749,12 @@ class SystemsService:
             or {}
         )
 
-    def build_class_feature_progression_for_class_entry(
-        self,
-        campaign_slug: str,
-        entry: SystemsEntryRecord,
-    ) -> list[dict[str, object]]:
-        if entry.entry_type != "class":
-            return []
-        matching_entries = list(
-            self._class_feature_entries_by_class_identity(campaign_slug).get(
-                (
-                    str(entry.title or "").strip(),
-                    str(entry.source_id or "").strip().upper(),
-                ),
-                [],
-            )
-        )
 
-        progression_rows = entry.body.get("feature_progression")
-        matching_entries.extend(
-            self._campaign_progression_entries_for_class_entry(campaign_slug, entry)
-        )
-        return self._build_feature_progression_groups(
-            campaign_slug,
-            matching_entries=matching_entries,
-            progression_rows=progression_rows,
-        )
 
-    def build_subclass_feature_progression_for_subclass_entry(
-        self,
-        campaign_slug: str,
-        entry: SystemsEntryRecord,
-    ) -> list[dict[str, object]]:
-        if entry.entry_type != "subclass":
-            return []
-        class_name = str(entry.metadata.get("class_name", "") or "").strip()
-        class_source = str(entry.metadata.get("class_source", "") or "").strip().upper()
-        matching_entries = [
-            candidate
-            for candidate in self._subclass_feature_entries_by_class_and_source(campaign_slug).get(
-                (
-                    class_name,
-                    class_source,
-                    str(entry.source_id or "").strip().upper(),
-                ),
-                [],
-            )
-            if self._subclass_entry_matches_feature(entry, candidate)
-        ]
 
-        progression_rows = entry.body.get("feature_progression")
-        matching_entries.extend(
-            self._campaign_progression_entries_for_subclass_entry(campaign_slug, entry)
-        )
-        return self._build_feature_progression_groups(
-            campaign_slug,
-            matching_entries=matching_entries,
-            progression_rows=progression_rows,
-        )
 
-    def _subclass_entry_matches_feature(
-        self,
-        subclass_entry: SystemsEntryRecord,
-        subclass_feature_entry: SystemsEntryRecord,
-    ) -> bool:
-        subclass_title_variants = self._build_optionalfeature_title_variants(subclass_entry.title)
-        feature_subclass_name = str(subclass_feature_entry.metadata.get("subclass_name", "") or "").strip()
-        feature_title_variants = self._build_optionalfeature_title_variants(feature_subclass_name)
-        return self._optionalfeature_titles_exactly_match(
-            subclass_title_variants,
-            feature_title_variants,
-        ) or self._optionalfeature_titles_loosely_match(
-            subclass_title_variants,
-            feature_title_variants,
-        )
+
+
 
     def build_class_starting_proficiency_rows(
         self,
@@ -4612,7 +4798,9 @@ class SystemsService:
         self,
         campaign_slug: str,
         library_slug: str,
-    ) -> dict[str, CampaignEntryOverrideRecord]:
+        *,
+        entry_key: str | None = None,
+    ) -> dict[str, CampaignEntryOverrideRecord] | CampaignEntryOverrideRecord | None:
         def _load_override_map() -> dict[str, CampaignEntryOverrideRecord]:
             return {
                 override.entry_key: override
@@ -4623,9 +4811,17 @@ class SystemsService:
                 if override.entry_key
             }
 
+        cache_key = ("campaign-entry-override-map", campaign_slug, library_slug)
+        if entry_key is not None:
+            if getattr(self, "source_read_phase", None) is None:
+                return self._campaign_entry_override_map(campaign_slug, library_slug).get(entry_key)
+            return _systems_service_cache_record(
+                cache_key, entry_key, _load_override_map,
+                systems_service=self, campaign_slug=campaign_slug,
+            )
         return dict(
             _systems_service_cache_get(
-                ("campaign-entry-override-map", campaign_slug, library_slug),
+                cache_key,
                 _load_override_map,
                 systems_service=self,
                 campaign_slug=campaign_slug,
@@ -4642,7 +4838,8 @@ class SystemsService:
         override = self._campaign_entry_override_map(
             campaign_slug,
             source_state.source.library_slug,
-        ).get(str(entry.entry_key or "").strip())
+            entry_key=str(entry.entry_key or "").strip(),
+        )
         if override is not None and override.is_enabled_override is False:
             return False
         return True
@@ -4657,8 +4854,8 @@ class SystemsService:
                 or entry.library_slug != library.library_slug):
             return False
         source_state = self._campaign_source_state_map_for_character_read(
-            campaign_slug
-        ).get(str(entry.source_id or "").strip())
+            campaign_slug, source_id=str(entry.source_id or "").strip()
+        )
         if (source_state is None or not source_state.is_enabled
                 or source_state.source.status != "active"
                 or source_state.source.library_slug != library.library_slug
@@ -4667,7 +4864,8 @@ class SystemsService:
         override = self._campaign_entry_override_map(
             campaign_slug,
             source_state.source.library_slug,
-        ).get(str(entry.entry_key or "").strip())
+            entry_key=str(entry.entry_key or "").strip(),
+        )
         if override is not None and override.is_enabled_override is False:
             return False
         return True
@@ -4829,6 +5027,10 @@ class SystemsService:
             return VISIBILITY_PLAYERS
         return normalized
 
+    def campaign_exists_for_read(self, campaign_slug: str) -> bool:
+        """Preserve ordinary virtual lookup semantics without exposing its graph."""
+        return self._get_campaign(campaign_slug) is not None
+
     def _get_campaign(self, campaign_slug: str):
         return self.repository_store.get().get_campaign(campaign_slug)
 
@@ -4898,11 +5100,11 @@ class SystemsService:
         return entries_by_page
 
     def _campaign_source_seed_map(self, campaign_slug: str) -> dict[str, dict[str, object]]:
-        campaign = self._get_campaign(campaign_slug)
-        if campaign is None:
+        policy = self._campaign_policy_inputs(campaign_slug)
+        if policy is None:
             return {}
         seed_map: dict[str, dict[str, object]] = {}
-        for item in campaign.systems_source_defaults:
+        for item in policy[2]:
             if not isinstance(item, dict):
                 continue
             source_id = str(item.get("source_id", "") or "").strip()
@@ -5055,152 +5257,7 @@ class SystemsService:
             )
         return dict(lookup)
 
-    def _build_feature_progression_groups(
-        self,
-        campaign_slug: str,
-        *,
-        matching_entries: list[SystemsEntryRecord],
-        progression_rows: object,
-    ) -> list[dict[str, object]]:
-        if not matching_entries:
-            return []
-        if not isinstance(progression_rows, list):
-            return []
 
-        optionalfeature_lookup = self._build_optionalfeature_entry_lookup(campaign_slug)
-        grouped_entries: dict[int, list[SystemsEntryRecord]] = defaultdict(list)
-        for candidate in matching_entries:
-            grouped_entries[self._coerce_int(candidate.metadata.get("level"), default=0)].append(candidate)
-
-        rows: list[dict[str, object]] = []
-        rendered_levels: set[int] = set()
-        for group in progression_rows:
-            if not isinstance(group, dict):
-                continue
-            level_label = str(group.get("name", "") or "").strip()
-            level = self._extract_level_from_progression_label(level_label)
-            if level > 0:
-                rendered_levels.add(level)
-            entries_for_level = sorted(
-                grouped_entries.get(level, []),
-                key=lambda item: (
-                    item.title.lower(),
-                    item.source_id,
-                    item.id,
-                ),
-            )
-            unmatched_entries = list(entries_for_level)
-            feature_rows: list[dict[str, object]] = []
-            raw_labels = group.get("entries")
-            if isinstance(raw_labels, list):
-                for raw_label in raw_labels:
-                    label = str(raw_label or "").strip()
-                    if not label:
-                        continue
-                    matched_entry = self._pop_matching_class_feature_entry(unmatched_entries, label)
-                    feature_rows.append(
-                        {
-                            "label": label,
-                            "entry": matched_entry,
-                            "embedded_card": self._build_embedded_feature_card(
-                                campaign_slug,
-                                matched_entry,
-                                optionalfeature_lookup=optionalfeature_lookup,
-                            )
-                            if matched_entry is not None
-                            else None,
-                        }
-                    )
-            for extra_entry in unmatched_entries:
-                feature_rows.append(
-                    {
-                        "label": extra_entry.title,
-                        "entry": extra_entry,
-                        "embedded_card": self._build_embedded_feature_card(
-                            campaign_slug,
-                            extra_entry,
-                            optionalfeature_lookup=optionalfeature_lookup,
-                        ),
-                    }
-                )
-            if not feature_rows:
-                continue
-            rows.append({"level": level, "level_label": level_label or f"Level {level}", "feature_rows": feature_rows})
-        for level in sorted(level_key for level_key in grouped_entries if level_key > 0 and level_key not in rendered_levels):
-            extra_entries = sorted(
-                grouped_entries.get(level, []),
-                key=lambda item: (
-                    item.title.lower(),
-                    item.source_id,
-                    item.id,
-                ),
-            )
-            if not extra_entries:
-                continue
-            rows.append(
-                {
-                    "level": level,
-                    "level_label": f"Level {level}",
-                    "feature_rows": [
-                        {
-                            "label": extra_entry.title,
-                            "entry": extra_entry,
-                            "embedded_card": self._build_embedded_feature_card(
-                                campaign_slug,
-                                extra_entry,
-                                optionalfeature_lookup=optionalfeature_lookup,
-                            ),
-                        }
-                        for extra_entry in extra_entries
-                    ],
-                }
-            )
-        return rows
-
-    def _build_embedded_feature_card(
-        self,
-        campaign_slug: str,
-        entry: SystemsEntryRecord,
-        *,
-        optionalfeature_lookup: dict[str, list[SystemsEntryRecord]],
-    ) -> dict[str, object]:
-        campaign_option = dict(entry.metadata.get("campaign_option") or {})
-        base_rule_refs = self.build_base_rule_refs_for_campaign_option(campaign_slug, campaign_option)
-        overlay_support = self.build_overlay_support_for_campaign_option(
-            campaign_option,
-            base_rule_refs=base_rule_refs,
-        )
-        base_rule_modification_summary = (
-            dict(campaign_option.get("base_rule_modification_summary") or {})
-            if isinstance(campaign_option.get("base_rule_modification_summary"), dict)
-            else None
-        )
-        page_ref = str(entry.metadata.get("page_ref") or "").strip()
-        if page_ref:
-            return {
-                "meta_badges": self._build_embedded_feature_badges(entry),
-                "base_rule_refs": base_rule_refs,
-                "overlay_support": overlay_support,
-                "base_rule_modification_summary": base_rule_modification_summary,
-                "body_html": self._build_campaign_page_body_html(campaign_slug, page_ref),
-                "option_groups": [],
-            }
-        body_html, option_groups = self._render_embedded_content(
-            campaign_slug,
-            entry.body.get("entries"),
-            heading_level=5,
-            extract_option_groups=True,
-            optionalfeature_lookup=optionalfeature_lookup,
-            preferred_source_id=entry.source_id,
-        )
-        return {
-            "meta_badges": self._build_embedded_feature_badges(entry),
-            "base_rule_refs": base_rule_refs,
-            "overlay_support": overlay_support,
-            "base_rule_modification_summary": base_rule_modification_summary,
-            "body_html": body_html,
-            "option_groups": option_groups,
-        }
 
     def _build_embedded_feature_badges(self, entry: SystemsEntryRecord) -> list[str]:
         entry_type_labels = {
@@ -5288,7 +5345,7 @@ class SystemsService:
         if campaign is None or page_store is None:
             return []
         from .committed_publication import active
-        if active():
+        if source_active(self):
             return [
                 record for record in list_visible_character_page_records(
                     page_store, campaign_slug, campaign, include_body=True,
@@ -5322,7 +5379,7 @@ class SystemsService:
             return []
         page_title = str(getattr(page, "title", "") or "").strip() or page_ref
         from .committed_publication import active, CommittedSourceConflict
-        if active():
+        if source_active(self):
             campaign = self._get_campaign(campaign_slug)
             page_store = getattr(self.repository_store, "page_store", None)
             if campaign is None or page_store is None:
@@ -5553,70 +5610,7 @@ class SystemsService:
             flags=re.IGNORECASE | re.DOTALL,
         ).strip()
 
-    def _build_embedded_optionalfeature_option(
-        self,
-        campaign_slug: str,
-        entry: SystemsEntryRecord,
-        *,
-        optionalfeature_lookup: dict[str, list[SystemsEntryRecord]],
-    ) -> dict[str, object]:
-        return {
-            "label": entry.title,
-            "slug": entry.slug,
-            "meta_badges": self._build_embedded_feature_badges(entry),
-            "body_html": self._render_embedded_content(
-                campaign_slug,
-                entry.body.get("entries"),
-                heading_level=6,
-                extract_option_groups=False,
-                optionalfeature_lookup=optionalfeature_lookup,
-                preferred_source_id=entry.source_id,
-            )[0],
-        }
 
-    def _build_embedded_option_group(
-        self,
-        campaign_slug: str,
-        value: dict[str, object],
-        *,
-        optionalfeature_lookup: dict[str, list[SystemsEntryRecord]],
-        preferred_source_id: str,
-    ) -> dict[str, object]:
-        count = self._coerce_int(value.get("count"), default=1)
-        options: list[dict[str, object]] = []
-        raw_entries = value.get("entries")
-        if isinstance(raw_entries, list):
-            for raw_option in raw_entries:
-                resolved_entry = self._resolve_optionalfeature_entry(
-                    raw_option,
-                    optionalfeature_lookup,
-                    preferred_source_id=preferred_source_id,
-                )
-                label = self._format_feature_reference(raw_option)
-                if resolved_entry is None:
-                    if not label:
-                        label = self._clean_embedded_text(str(raw_option or ""))
-                    options.append(
-                        {
-                            "label": label,
-                            "slug": None,
-                            "meta_badges": [],
-                            "body_html": "",
-                        }
-                    )
-                    continue
-                options.append(
-                    self._build_embedded_optionalfeature_option(
-                        campaign_slug,
-                        resolved_entry,
-                        optionalfeature_lookup=optionalfeature_lookup,
-                    )
-                )
-
-        return {
-            "summary_label": f"Choose {count} option{'s' if count != 1 else ''}",
-            "options": options,
-        }
 
     def _build_class_optionalfeature_section(
         self,
@@ -5838,185 +5832,8 @@ class SystemsService:
             return ", ".join(parts)
         return ""
 
-    def _render_embedded_content(
-        self,
-        campaign_slug: str,
-        value: object,
-        *,
-        heading_level: int,
-        extract_option_groups: bool,
-        optionalfeature_lookup: dict[str, list[SystemsEntryRecord]],
-        preferred_source_id: str,
-    ) -> tuple[str, list[dict[str, object]]]:
-        if value is None:
-            return "", []
-        if isinstance(value, str):
-            text = self._clean_embedded_text(value)
-            return (f"<p>{escape(text)}</p>" if text else ""), []
-        if isinstance(value, (int, float)):
-            return f"<p>{escape(str(value))}</p>", []
-        if isinstance(value, list):
-            html_parts: list[str] = []
-            option_groups: list[dict[str, object]] = []
-            for item in value:
-                rendered_html, nested_option_groups = self._render_embedded_content(
-                    campaign_slug,
-                    item,
-                    heading_level=heading_level,
-                    extract_option_groups=extract_option_groups,
-                    optionalfeature_lookup=optionalfeature_lookup,
-                    preferred_source_id=preferred_source_id,
-                )
-                if rendered_html:
-                    html_parts.append(rendered_html)
-                option_groups.extend(nested_option_groups)
-            return "\n".join(html_parts), option_groups
-        if isinstance(value, dict):
-            value_type = str(value.get("type", "") or "").strip().lower()
-            if self._looks_like_ability_block(value):
-                return self._render_embedded_ability_scores(value), []
-            if value_type == "list":
-                items = value.get("items")
-                if not isinstance(items, list):
-                    return "", []
-                list_items: list[str] = []
-                option_groups: list[dict[str, object]] = []
-                for item in items:
-                    rendered_item, nested_option_groups = self._render_embedded_list_item(
-                        campaign_slug,
-                        item,
-                        heading_level=heading_level,
-                        extract_option_groups=extract_option_groups,
-                        optionalfeature_lookup=optionalfeature_lookup,
-                        preferred_source_id=preferred_source_id,
-                    )
-                    if rendered_item:
-                        list_items.append(rendered_item)
-                    option_groups.extend(nested_option_groups)
-                if not list_items:
-                    return "", option_groups
-                return "<ul>" + "".join(f"<li>{item}</li>" for item in list_items) + "</ul>", option_groups
-            if value_type == "options":
-                if extract_option_groups:
-                    option_group = self._build_embedded_option_group(
-                        campaign_slug,
-                        value,
-                        optionalfeature_lookup=optionalfeature_lookup,
-                        preferred_source_id=preferred_source_id,
-                    )
-                    return "", ([option_group] if option_group["options"] else [])
-                return self._render_embedded_option_list(
-                    campaign_slug,
-                    value,
-                    heading_level=heading_level,
-                    optionalfeature_lookup=optionalfeature_lookup,
-                    preferred_source_id=preferred_source_id,
-                )
-            if value_type == "table":
-                return self._render_embedded_table(value), []
-            if value_type in {"abilitydc", "abilityattackmod"}:
-                return self._render_embedded_ability_formula(value), []
-            if value_type in {"refclassfeature", "refoptionalfeature", "refsubclassfeature"}:
-                return (
-                    self._render_embedded_reference(
-                        campaign_slug,
-                        value,
-                        optionalfeature_lookup=optionalfeature_lookup,
-                        preferred_source_id=preferred_source_id,
-                    ),
-                    [],
-                )
 
-            name = self._clean_embedded_text(str(value.get("name", "") or ""))
-            entries = value.get("entries")
-            entry_value = entries if entries is not None else value.get("entry")
-            rendered_entries, option_groups = self._render_embedded_content(
-                campaign_slug,
-                entry_value,
-                heading_level=min(heading_level + 1, 6),
-                extract_option_groups=extract_option_groups,
-                optionalfeature_lookup=optionalfeature_lookup,
-                preferred_source_id=preferred_source_id,
-            )
-            if name and rendered_entries:
-                heading_tag = f"h{heading_level}"
-                return f"<section><{heading_tag}>{escape(name)}</{heading_tag}>{rendered_entries}</section>", option_groups
-            if name:
-                return f"<p><strong>{escape(name)}.</strong></p>", option_groups
-            return rendered_entries, option_groups
-        text = self._clean_embedded_text(str(value or ""))
-        return (f"<p>{escape(text)}</p>" if text else ""), []
 
-    def _render_embedded_list_item(
-        self,
-        campaign_slug: str,
-        item: object,
-        *,
-        heading_level: int,
-        extract_option_groups: bool,
-        optionalfeature_lookup: dict[str, list[SystemsEntryRecord]],
-        preferred_source_id: str,
-    ) -> tuple[str, list[dict[str, object]]]:
-        if isinstance(item, dict) and str(item.get("type", "") or "").strip().lower() == "item":
-            name = self._clean_embedded_text(str(item.get("name", "") or ""))
-            entry_value = item.get("entry", item.get("entries"))
-            entry_text, option_groups = self._render_embedded_content(
-                campaign_slug,
-                entry_value,
-                heading_level=heading_level,
-                extract_option_groups=extract_option_groups,
-                optionalfeature_lookup=optionalfeature_lookup,
-                preferred_source_id=preferred_source_id,
-            )
-            stripped_entry_text = self._strip_outer_paragraph(entry_text)
-            if name and stripped_entry_text:
-                return f"<strong>{escape(name)}</strong> {stripped_entry_text}", option_groups
-            if name:
-                return f"<strong>{escape(name)}</strong>", option_groups
-            return stripped_entry_text, option_groups
-        rendered_html, option_groups = self._render_embedded_content(
-            campaign_slug,
-            item,
-            heading_level=heading_level,
-            extract_option_groups=extract_option_groups,
-            optionalfeature_lookup=optionalfeature_lookup,
-            preferred_source_id=preferred_source_id,
-        )
-        return self._strip_outer_paragraph(rendered_html), option_groups
-
-    def _render_embedded_option_list(
-        self,
-        campaign_slug: str,
-        value: dict[str, object],
-        *,
-        heading_level: int,
-        optionalfeature_lookup: dict[str, list[SystemsEntryRecord]],
-        preferred_source_id: str,
-    ) -> tuple[str, list[dict[str, object]]]:
-        parts: list[str] = []
-        count = value.get("count")
-        if count not in (None, ""):
-            count_text = str(count).strip()
-            if count_text:
-                parts.append(f"<p>Choose {escape(count_text)} option{'s' if count_text != '1' else ''}:</p>")
-        option_entries = value.get("entries")
-        if not isinstance(option_entries, list):
-            return "".join(parts), []
-        list_items: list[str] = []
-        for item in option_entries:
-            rendered_item, _ = self._render_embedded_list_item(
-                campaign_slug,
-                item,
-                heading_level=heading_level,
-                extract_option_groups=False,
-                optionalfeature_lookup=optionalfeature_lookup,
-                preferred_source_id=preferred_source_id,
-            )
-            if rendered_item:
-                list_items.append(rendered_item)
-        if list_items:
-            parts.append("<ul>" + "".join(f"<li>{item}</li>" for item in list_items) + "</ul>")
-        return "".join(parts), []
 
     def _render_embedded_table(self, value: dict[str, object]) -> str:
         rows = value.get("rows")
@@ -6539,7 +6356,7 @@ class CharacterReadSystemsService(SystemsService):
         if campaign is None or page_store is None:
             return []
         from .committed_publication import active
-        if active():
+        if source_active(self):
             return [
                 record for record in list_visible_character_page_records(
                     page_store, campaign_slug, campaign, include_body=True,
@@ -6740,3 +6557,249 @@ class CharacterReadSystemsService(SystemsService):
             limit=limit,
             visible_to=visible_to,
         )
+
+
+class PhaseCharacterReadSystemsService(CharacterReadSystemsService):
+    """Detached source snapshot; none of the HTTP g hooks participate."""
+
+    def __init__(self, service, phase):
+        self.source_read_phase = phase
+        self._ordinary_feature_source = ((type(service) is SystemsService or type(service) is CharacterReadSystemsService)
+            and all(getattr(type(service), name) is expected[type(service)]
+                    for name, expected in _FEATURE_PROVIDER_METHODS.items())
+            and not any(name in object.__getattribute__(service, "__dict__")
+                        for name in _FEATURE_PROVIDER_METHODS))
+        self._ordinary_current_input_source = (
+            (type(service) is SystemsService or type(service) is CharacterReadSystemsService)
+            and all(getattr(type(service), name) is expected[type(service)]
+                    for name, expected in _CURRENT_INPUT_PROVIDER_METHODS.items())
+            and not any(name in object.__getattribute__(service, "__dict__")
+                        for name in _CURRENT_INPUT_PROVIDER_METHODS))
+        self.store = phase.store
+        from .character_source_reads import PhaseRepositoryStore
+        self.repository_store = PhaseRepositoryStore(phase)
+        self._character_read_view = self
+        self._phase_subsets = {}
+        self._feature_read_model = None
+
+    def _supports_current_inputs(self):
+        """Finite stock read-provider boundary; unknown callbacks keep legacy."""
+        from .systems_store import ordinary_current_input_store
+        source = self.source_read_phase._service
+        return (PhaseCharacterReadSystemsService is _CURRENT_INPUT_PHASE_CLASS
+            and type(self) is _CURRENT_INPUT_PHASE_CLASS
+            and self._ordinary_feature_source and self._ordinary_current_input_source
+            and (type(source) is SystemsService or type(source) is CharacterReadSystemsService)
+            and all(getattr(type(source), name) is expected[type(source)]
+                    for recipe in (_FEATURE_PROVIDER_METHODS, _CURRENT_INPUT_PROVIDER_METHODS)
+                    for name, expected in recipe.items())
+            and not any(name in vars(source)
+                        for recipe in (_FEATURE_PROVIDER_METHODS, _CURRENT_INPUT_PROVIDER_METHODS)
+                        for name in recipe)
+            and not any(name in vars(self) for name, _original in _CURRENT_INPUT_PHASE_METHODS)
+            and all(getattr(type(self), name) is original for name, original in _CURRENT_INPUT_PHASE_METHODS)
+            and ordinary_current_input_store(self.store))
+
+    def _feature_engine(self, campaign_slug):
+        self._check_campaign(campaign_slug)
+        if not self._ordinary_feature_source or not self.store._supports_feature_facts():
+            return None  # Decline before any native producer has entered.
+        if self._feature_read_model is None:
+            from .systems_feature_read_model import PhaseFeatureReadModel
+            self._feature_read_model = PhaseFeatureReadModel(self)
+        return self._feature_read_model
+
+    def _read_catalog_observation(self, campaign_slug, kind):
+        """Complete policy-selected row observations for a private read input."""
+        self._check_campaign(campaign_slug)
+        if kind not in {"item", "spell"} or not self.store._supports_feature_facts():
+            raise ValueError("Unsupported private read catalog.")
+        library = self.get_campaign_library(campaign_slug)
+        if library is None:
+            return ("sequence", list, ()), True
+        source_ids = [str(row.source.source_id or "").strip()
+            for row in self.list_campaign_source_states(campaign_slug)
+            if row.is_enabled and str(row.source.source_id or "").strip()]
+        if not source_ids:
+            return ("sequence", list, ()), True
+        return self.store._feature_catalog_facts(campaign_slug, library.library_slug,
+            source_ids, entry_type=kind, query="", limit=None)
+
+    def build_class_feature_progression_for_class_entry(self, campaign_slug, entry, *, include_embedded_cards=True):
+        engine = self._feature_engine(campaign_slug)
+        if engine is None:
+            return super().build_class_feature_progression_for_class_entry(campaign_slug, entry,
+                include_embedded_cards=include_embedded_cards)
+        return engine.result_for("build_class_feature_progression_for_class_entry",
+            campaign_slug, entry, include_embedded_cards=include_embedded_cards)
+
+    def build_subclass_feature_progression_for_subclass_entry(self, campaign_slug, entry, *, include_embedded_cards=True):
+        engine = self._feature_engine(campaign_slug)
+        if engine is None:
+            return super().build_subclass_feature_progression_for_subclass_entry(campaign_slug, entry,
+                include_embedded_cards=include_embedded_cards)
+        return engine.result_for("build_subclass_feature_progression_for_subclass_entry",
+            campaign_slug, entry, include_embedded_cards=include_embedded_cards)
+
+    def collect_attained_deterministic_feature_entries(self, campaign_slug, entry, *, attained_level,
+                                                       selected_feature_branches=None):
+        engine = self._feature_engine(campaign_slug)
+        if engine is None:
+            return super().collect_attained_deterministic_feature_entries(campaign_slug, entry,
+                attained_level=attained_level, selected_feature_branches=selected_feature_branches)
+        return engine.result_for("collect_attained_deterministic_feature_entries",
+            campaign_slug, entry, attained_level=attained_level,
+            selected_feature_branches=selected_feature_branches)
+
+    def _check_campaign(self, campaign_slug):
+        self.source_read_phase.require_open()
+        if campaign_slug != self.source_read_phase.owner.campaign_slug:
+            from .character_source_reads import SourceReadConflict
+            raise SourceReadConflict("Cross-campaign source view.")
+
+    def campaign_exists_for_read(self, campaign_slug):
+        """Presence in this open snapshot needs settings, not a page/link graph."""
+        self._check_campaign(campaign_slug)
+        _, settings = self.source_read_phase.fact("config")
+        if type(settings) is not dict or settings.get("slug") != campaign_slug:
+            from .character_source_reads import SourceReadConflict
+            raise SourceReadConflict("Captured campaign settings do not prove this campaign.")
+        return True
+
+    def _combat_detail_preparation(self, campaign_slug):
+        self._check_campaign(campaign_slug)
+        return None
+
+    def _campaign_policy_inputs(self, campaign_slug):
+        self._check_campaign(campaign_slug)
+        def load():
+            source, settings = self.source_read_phase.fact("config")
+            return (normalize_system_code(settings.get("system", "")),
+                    default_systems_library_slug(settings.get("systems_library", "")),
+                    list(settings.get("systems_sources") or []), source)
+        return self.source_read_phase.resolve("normalized-campaign-policy", campaign_slug, load)
+
+    def bind_campaign_for_request(self, campaign_slug, campaign):
+        self._check_campaign(campaign_slug)
+        captured = self.source_read_phase.campaign()
+        if any(getattr(campaign, key) != getattr(captured, key) for key in (
+                "slug", "system", "systems_library_slug", "systems_source_defaults", "current_session")):
+            from .character_source_reads import SourceReadConflict
+            raise SourceReadConflict("Supplied campaign differs from captured settings.")
+
+    def _bound_campaign_for_request(self, campaign_slug):
+        return self._get_campaign(campaign_slug)
+
+    def _get_campaign(self, campaign_slug):
+        self._check_campaign(campaign_slug)
+        return self.source_read_phase.campaign()
+
+    def get_durable_revision(self):
+        self.source_read_phase.require_open()
+        return self.store.get_durable_revision()
+
+    def _expire_entry_subsets_for_revision(self, revision):
+        self.source_read_phase.require_open()
+        if revision != self.get_durable_revision():
+            self._phase_subsets.clear()
+
+    def _enabled_entry_subset_for_request(self, campaign_slug, entry_type):
+        self._check_campaign(campaign_slug)
+        from .character_source_reads import thaw
+        value = self._phase_subsets.get(str(entry_type or "").strip())
+        return thaw(value[1]) if value is not None else None
+
+    def set_enabled_entry_subset_for_request(self, campaign_slug, *, entry_type, entries,
+                                            source_generation=None):
+        self._check_campaign(campaign_slug)
+        from .character_source_reads import freeze
+        kind = str(entry_type or "").strip()
+        expected_generation = (self.get_durable_revision(), self.get_cache_context(campaign_slug, entry_types=()))
+        if source_generation != expected_generation:
+            self._phase_subsets.pop(kind, None)
+            return
+        # Admit only a full authoritative same-phase list, never an HTTP receipt.
+        actual = self.list_enabled_entries_for_character_read(campaign_slug, entry_type=kind)
+        if freeze(list(entries or [])) != freeze(actual):
+            self._phase_subsets.pop(kind, None)
+            return
+        detached = tuple(actual)
+        fingerprint = sha256(json.dumps([asdict(entry) for entry in detached],
+            sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
+        self._phase_subsets[kind] = (fingerprint, freeze(detached), source_generation)
+
+    def get_cache_context(self, campaign_slug, *, entry_types=None):
+        self._check_campaign(campaign_slug)
+        # Base policy/revision facts cannot change inside this read-only phase.
+        # Selected-entry subsets remain a separate dynamic suffix below.
+        context = self.source_read_phase.resolve("campaign-policy-context", campaign_slug,
+            lambda: SystemsService.get_cache_context(self, campaign_slug, entry_types=()))
+        identities = tuple(sorted((kind, value[0], value[2])
+            for kind, value in self._phase_subsets.items()
+            if entry_types is None or kind in entry_types))
+        return (*context, identities)
+
+    def ensure_builtin_library_seeded(self, library_slug):
+        library = self.store.get_library(library_slug)
+        if library is None:
+            self.source_read_phase.owner._failed = True
+            from .character_source_reads import SourceReadConflict
+            raise SourceReadConflict("No Systems bootstrap is allowed in a source phase.")
+        return library
+
+    def _list_visible_campaign_mechanics_page_records(self, campaign_slug):
+        self._check_campaign(campaign_slug)
+        return [record for record in self.source_read_phase.page_records(include_body=True)
+                if str(record.page.section or "").strip() == "Mechanics"]
+
+    def _build_campaign_page_body_html(self, campaign_slug, page_ref):
+        self._check_campaign(campaign_slug)
+        phase = self.source_read_phase
+        campaign = phase.campaign()
+        record = phase.page_store().get_page_record(campaign_slug, page_ref, include_body=True)
+        if record is None or not campaign.is_page_visible(record.page):
+            return ""
+        return str(render_page_content(campaign, record.page, phase.page_store()) or "").strip()
+
+
+# Positive ordinary-provider boundary; custom dispatch remains on the legacy
+# phase facade before any private catalog producer is entered.
+_FEATURE_PROVIDER_METHODS = {name: {
+    kind: getattr(kind, name) for kind in (SystemsService, CharacterReadSystemsService)
+} for name in (
+    "__getattribute__", "list_enabled_entries_for_campaign", "list_enabled_entries_for_character_read",
+    "_list_enabled_entries_for_campaign_library", "get_campaign_library",
+    "get_campaign_library_for_character_read", "list_campaign_source_states",
+    "list_campaign_source_states_for_character_read",
+    "_class_feature_entries_by_class_identity", "_subclass_feature_entries_by_class_and_source",
+)}
+
+
+_CURRENT_INPUT_PROVIDER_METHODS = {name: {
+    kind: getattr(kind, name) for kind in (SystemsService, CharacterReadSystemsService)
+} for name in (
+    "get_entry_for_campaign", "get_entry_for_character_read", "get_entry_by_slug_for_campaign",
+    "get_entry_by_slug_for_character_read", "is_entry_enabled_for_campaign", "is_entry_enabled_for_character_read",
+    "build_class_feature_progression_for_class_entry",
+    "_campaign_source_state_map_for_character_read", "_campaign_entry_override_map",
+)}
+_CURRENT_INPUT_PHASE_CLASS = PhaseCharacterReadSystemsService
+_CURRENT_INPUT_PHASE_METHODS = tuple((name, getattr(PhaseCharacterReadSystemsService, name))
+    for name in dict.fromkeys((*_FEATURE_PROVIDER_METHODS, *_CURRENT_INPUT_PROVIDER_METHODS,
+        "__getattribute__", "_supports_current_inputs", "get_entry_for_campaign",
+        "get_entry_for_character_read", "get_entry_by_slug_for_campaign", "get_entry_by_slug_for_character_read",
+        "is_entry_enabled_for_campaign", "is_entry_enabled_for_character_read",
+        "build_class_feature_progression_for_class_entry")))
+_CURRENT_INPUT_PHASE_SUPPORT = PhaseCharacterReadSystemsService._supports_current_inputs
+
+
+def ordinary_current_input_service(service):
+    """Identity-only predispatch check; never probe an overridden callback."""
+    if (type(service) is not _CURRENT_INPUT_PHASE_CLASS
+            or PhaseCharacterReadSystemsService is not _CURRENT_INPUT_PHASE_CLASS
+            or any(getattr(_CURRENT_INPUT_PHASE_CLASS, name) is not original
+                   for name, original in _CURRENT_INPUT_PHASE_METHODS)
+            or any(name in object.__getattribute__(service, "__dict__")
+                   for name, _original in _CURRENT_INPUT_PHASE_METHODS)):
+        return False
+    return _CURRENT_INPUT_PHASE_SUPPORT(service)

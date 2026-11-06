@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 from flask import Blueprint, current_app
 
-from .character_editor import CharacterEditValidationError
+from .character_editor import CharacterEditValidationError, prepare_native_editor_inventory_note_overrides
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError
 from .character_reconciliation import CharacterPublicationConflict
@@ -84,6 +84,9 @@ def register_character_advanced_editor_api_routes(
             payload = dependencies.load_json_object()
             expected_revision = int(payload.get("expected_revision"))
             form_values = dependencies.normalize_character_editor_values(payload)
+            note_overrides = prepare_native_editor_inventory_note_overrides(
+                record.definition, record.state_record.state or {}, form_values,
+            )
             (
                 _edit_context,
                 campaign_page_records,
@@ -115,6 +118,7 @@ def register_character_advanced_editor_api_routes(
                                              if active() else ()),
                     verified_numeric_actions=(load_verified_numeric_actions(campaign_slug, character_slug)
                                               if active() else ()),
+                    inventory_note_overrides=note_overrides,
                 )
             )
             definition = dependencies.finalize_character_definition_for_write(
@@ -149,6 +153,7 @@ def register_character_advanced_editor_api_routes(
                 record.state_record.state,
                 source_authority=prospective_authority,
                 inventory_quantity_overrides=inventory_quantity_overrides,
+                inventory_state_overrides=note_overrides,
                 removed_resource_ids=removed_resource_ids,
             )
             if (
@@ -163,6 +168,8 @@ def register_character_advanced_editor_api_routes(
                     form_values.get("background_markdown") or ""
                 )
                 merged_state["notes"] = notes_payload
+            native_edit = (record.definition.system == "DND-5E"
+                           and record.definition.source.get("source_type") == "native_character_builder")
             dependencies.character_publication_coordinator.update(
                 record,
                 definition,
@@ -170,6 +177,9 @@ def register_character_advanced_editor_api_routes(
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
+                audit_event_type="character_native_edited" if native_edit else None,
+                audit_actor_user_id=user.id if native_edit else None,
+                audit_metadata={"source": "native_edit_confirmed"} if native_edit else None,
             )
         except CharacterPublicationConflict:
             return dependencies.json_error(

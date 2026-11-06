@@ -29,6 +29,134 @@ class SystemsMetadataRepairResult:
     changes: list[SystemsMetadataRepairChange] = field(default_factory=list)
 
 
+_SPELL_BONUS_CLASSES = {
+    name.casefold(): name for name in (
+        "Artificer", "Barbarian", "Bard", "Cleric", "Druid", "Fighter", "Monk",
+        "Paladin", "Ranger", "Rogue", "Sorcerer", "Warlock", "Wizard",
+    )
+}
+_PAIRED_SPELL_BONUS = re.compile(
+    r"(?:You can use (?:the|this) (?P<focus_item>[a-z]{1,40}) as a spellcasting focus "
+    r"for your spells while wearing or holding it, and you gain|"
+    r"While wearing or holding (?:the|this) (?P<held_item>[a-z]{1,40}), you gain) "
+    r"a \+(?P<bonus>[1-9][0-9]?) bonus to spell attack rolls and to the saving throw DCs "
+    r"of your (?P<class_name>[a-z]+) spells\.", re.IGNORECASE,
+)
+_RESOURCE_REFERENCE = re.compile(
+    r"In addition, when you roll any Hit Dice to recover hit points while you are carrying "
+    r"(?:the|this) (?P<item>[a-z]{1,40}), you can regain [1-9][0-9]? [a-z]{1,40} points\. "
+    r"This property of (?:the|this) (?P=item) can't be used again until the next dawn\.",
+    re.IGNORECASE,
+)
+
+
+def _native_item_requires_attunement(value: Any) -> bool:
+    # Keep the native reqAttune value contract shared with equipment semantics;
+    # this Systems layer must not import character derivation to interpret it.
+    if value in (None, "", False, [], {}):
+        return False
+    if isinstance(value, str) and value.strip().casefold() in {
+        "", "false", "none", "no", "not required",
+    }:
+        return False
+    return True
+
+
+def _literal_item_spell_bonus(entries: Any) -> tuple[int, str, bool] | None:
+    """Account for the complete supported flat source form, or infer nothing.
+
+    This is a finite grammar, not a prose-condition classifier. A standalone
+    bonus paragraph, or that paragraph preceded by the complete supported blood
+    attunement procedure, may have one separate recovery paragraph. All other
+    sentences, paragraphs and structures withhold extraction regardless of words.
+    The recovery paragraph remains reference-only; it grants no resource rules.
+    """
+    if (type(entries) is not list or not 1 <= len(entries) <= 2
+            or any(type(value) is not str or not value or len(value) > 8192 for value in entries)):
+        return None
+    matched = None
+    attunement_context = False
+    references: list[str] = []
+    for paragraph in entries:
+        sentences = re.split(r"(?<=[.!?])\s+", paragraph.strip())
+        match = _PAIRED_SPELL_BONUS.fullmatch(sentences[-1])
+        if match is not None:
+            if matched is not None:
+                return None
+            item = (match["focus_item"] or match["held_item"]).casefold()
+            setup = [
+                f"to attune to this {item}, you must place a few drops of your blood into it.",
+                f"the {item} can't be opened while your attunement to it lasts.",
+                f"if your attunement to the {item} ends, the contained blood turns to ash.",
+            ]
+            if sentences[:-1] and [sentence.casefold() for sentence in sentences[:-1]] != setup:
+                return None
+            attunement_context = bool(sentences[:-1])
+            matched = match
+        else:
+            references.append(" ".join(sentences))
+    if matched is None:
+        return None
+    item = (matched["focus_item"] or matched["held_item"]).casefold()
+    for paragraph in references:
+        reference = _RESOURCE_REFERENCE.fullmatch(paragraph)
+        if reference is None or reference["item"].casefold() != item:
+            return None
+    class_name = _SPELL_BONUS_CLASSES.get(matched["class_name"].casefold())
+    return (int(matched["bonus"]), class_name, attunement_context) if class_name is not None else None
+
+
+def add_dnd5e_item_spellcasting_metadata(
+    metadata: dict[str, Any], *, entries: Any,
+    native_fields: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Pure additive metadata repair; existing typed choices require review.
+
+    Native bonuses corroborate a literal clause, never supply its target scope.
+    An absent raw field is allowed; null, bool, expressions and disagreement are
+    unsupported. No item title, rarity, attunement eligibility or character ID
+    participates in spell value/scope extraction.
+    """
+    result = dict(metadata)
+    fields: list[str] = []
+    if ("requires_attunement" not in result
+            and _native_item_requires_attunement(result.get("attunement"))):
+        result["requires_attunement"] = True
+        fields.append("requires_attunement")
+    source = native_fields if native_fields is not None else metadata
+    if ("spellcasting_modifiers" in result or "spellcasting_modifiers" in source
+            or "native_spellcasting_modifiers" in result or "native_spellcasting_modifiers" in source):
+        return result, fields
+    literal = _literal_item_spell_bonus(entries)
+    if literal is None:
+        return result, fields
+    bonus, class_name, attunement_context = literal
+    native_attunement = result.get("attunement")
+    if attunement_context and (
+        type(native_attunement) not in (bool, str)
+        or not _native_item_requires_attunement(native_attunement)
+    ):
+        # The procedure cannot invent an absent native requirement or contradict
+        # explicit nonattunement; a normalized flag alone is not that source fact.
+        return result, fields
+    for key in ("bonusSpellAttack", "bonusSpellSaveDc"):
+        if key not in source:
+            continue
+        value = source[key]
+        if type(value) is str and len(value) <= 8 and re.fullmatch(r"\+?[1-9][0-9]?", value):
+            value = int(value)
+        if type(value) is not int or value != bonus:
+            return result, fields
+    result["spellcasting_modifiers"] = [{
+        "effect_id": f"spellcasting-bonus:{class_name.casefold()}",
+        "spell_attack_bonus": bonus,
+        "spell_save_dc": bonus,
+        "class_selector": {"class_name": class_name},
+    }]
+    fields.append("spellcasting_modifiers")
+    return result, fields
+
+
 def repair_dnd5e_item_metadata(
     store: SystemsStore,
     *,
@@ -95,8 +223,10 @@ def repair_dnd5e_item_metadata(
 
 
 def repair_dnd5e_item_metadata_payload(entry: SystemsEntryRecord) -> tuple[dict[str, Any], list[str]]:
-    metadata = dict(entry.metadata or {})
-    fields: list[str] = []
+    body = entry.body if isinstance(entry.body, dict) else {}
+    metadata, fields = add_dnd5e_item_spellcasting_metadata(
+        dict(entry.metadata or {}), entries=body.get("entries"),
+    )
 
     def set_if_missing(key: str, value: Any) -> None:
         if _metadata_value_present(metadata.get(key)):
@@ -137,7 +267,7 @@ def repair_dnd5e_item_metadata_payload(entry: SystemsEntryRecord) -> tuple[dict[
 
     profile = _resolve_weapon_profile_for_entry(entry, metadata)
     if profile is None:
-        return metadata, []
+        return metadata, fields
 
     set_if_missing("type", profile["type"])
     set_profile_value("weapon_category", profile["weapon_category"])

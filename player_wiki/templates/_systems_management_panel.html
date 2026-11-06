@@ -271,6 +271,20 @@
       <span>Rendered body</span>
       <textarea name="custom_entry_body_markdown" rows="10" required>{{ custom_systems_entry_form.body_markdown }}</textarea>
     </label>
+    <details class="feature-detail" {% if custom_systems_entry_form.entry_type == 'spell' %}open{% endif %}>
+      <summary>Spell details</summary>
+      <p class="meta">For DND-5E spells, enter the source's level, school, casting time, range, components, duration and class lists. Leave details blank to preserve an existing profile. Rules that need a DM decision stay in the rules text.</p>
+      <label class="field">
+        <span>Spell profile (JSON)</span>
+        <textarea name="custom_entry_spell_profile" rows="10" maxlength="16000">{{ custom_systems_entry_form.spell_profile_json }}</textarea>
+        <small>Use level 0-9; school A, C, D, E, V, I, N or T; casting_time, range, components, duration and classes. Optional ritual, savingThrow and spellAttack describe only explicit source rules. Material cost is in copper pieces.</small>
+      </label>
+      <label class="field">
+        <span>At Higher Levels</span>
+        <textarea name="custom_entry_spell_higher_level_markdown" rows="4" maxlength="30000">{{ custom_systems_entry_form.spell_higher_level_markdown }}</textarea>
+        <small>Keep higher-level rules here separately from the main body. Clear this field to remove previously authored higher-level text.</small>
+      </label>
+    </details>
     <div class="badge-list">
       <button type="submit">{% if custom_systems_edit_entry %}Update custom entry{% else %}Create custom entry{% endif %}</button>
       {% if custom_systems_edit_entry %}

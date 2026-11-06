@@ -62,7 +62,7 @@ from .csrf import enforce_csrf
 from .models import Campaign
 from .login_throttle import LoginThrottle, account_digest, canonical_client_key
 from .repository import Repository
-from .repository_store import RepositoryStore
+from .repository_store import CampaignAccessFacts, RepositoryStore
 from .committed_publication import CommittedSourceConflict
 from .themes import ThemePreset, get_theme_preset, is_valid_theme_key, list_theme_presets, normalize_theme_key
 
@@ -435,6 +435,10 @@ def get_repository() -> Repository:
     return get_repository_store().get()
 
 
+def get_campaign_access_facts(campaign_slug: str) -> CampaignAccessFacts | None:
+    return get_repository_store().get_campaign_access_facts(campaign_slug)
+
+
 def campaign_integrity_unavailable_response():
     """A campaign-independent response when trusted activation proof fails."""
     response = make_response("", 503)
@@ -534,7 +538,7 @@ def get_campaign_visibility_settings(campaign_slug: str) -> dict[str, str]:
 
 
 def get_campaign_default_visibility_settings(campaign_slug: str) -> dict[str, str]:
-    campaign = get_repository().get_campaign(campaign_slug)
+    campaign = get_campaign_access_facts(campaign_slug)
     system_code = campaign.system if campaign is not None else ""
     return build_default_campaign_visibility_by_scope(system_code)
 
@@ -563,10 +567,10 @@ def get_campaign_scope_visibility(campaign_slug: str, scope: str) -> str:
     normalized_scope = scope.strip().lower()
     if not is_valid_visibility_scope(normalized_scope):
         return VISIBILITY_PRIVATE
-    return get_campaign_visibility_settings(campaign_slug).get(
-        normalized_scope,
-        get_campaign_default_scope_visibility(campaign_slug, normalized_scope),
-    )
+    settings = get_campaign_visibility_settings(campaign_slug)
+    if normalized_scope in settings:
+        return settings[normalized_scope]
+    return get_campaign_default_scope_visibility(campaign_slug, normalized_scope)
 
 
 def get_effective_campaign_visibility(campaign_slug: str, scope: str) -> str:
@@ -631,7 +635,7 @@ def has_campaign_membership_access(campaign_slug: str) -> bool:
     if user is None:
         return False
     if user.is_admin:
-        return get_repository().get_campaign(campaign_slug) is not None
+        return get_campaign_access_facts(campaign_slug) is not None
     return any(
         membership.campaign_slug == campaign_slug and membership.status == "active"
         for membership in get_current_memberships()
@@ -643,7 +647,7 @@ def can_access_campaign(campaign_slug: str) -> bool:
 
 
 def can_access_campaign_scope(campaign_slug: str, scope: str) -> bool:
-    if get_repository().get_campaign(campaign_slug) is None:
+    if get_campaign_access_facts(campaign_slug) is None:
         return False
 
     user = get_current_user()
@@ -745,7 +749,7 @@ def can_edit_shared_systems_entries(campaign_slug: str) -> bool:
     user = get_current_user()
     if user is None:
         return False
-    if get_repository().get_campaign(campaign_slug) is None:
+    if get_campaign_access_facts(campaign_slug) is None:
         return False
     if user.is_admin:
         return True
@@ -762,7 +766,7 @@ def can_manage_campaign_content(campaign_slug: str) -> bool:
     if user is None:
         return False
     if user.is_admin:
-        return get_repository().get_campaign(campaign_slug) is not None
+        return get_campaign_access_facts(campaign_slug) is not None
     return get_campaign_role(campaign_slug) == "dm" and can_access_campaign_scope(campaign_slug, "campaign")
 
 
@@ -778,7 +782,7 @@ def get_effective_campaign_systems_source_visibility(campaign_slug: str, source_
 
 
 def can_access_campaign_systems_source(campaign_slug: str, source_id: str) -> bool:
-    if get_repository().get_campaign(campaign_slug) is None:
+    if get_campaign_access_facts(campaign_slug) is None:
         return False
     user = get_current_user()
     if user is not None and user.is_admin:
@@ -789,16 +793,24 @@ def can_access_campaign_systems_source(campaign_slug: str, source_id: str) -> bo
     return role_satisfies_visibility(get_campaign_role(campaign_slug), effective_visibility)
 
 
-def get_effective_campaign_systems_entry_visibility(campaign_slug: str, entry_slug: str) -> str:
-    service = get_systems_service()
+def get_effective_campaign_systems_entry_visibility(
+    campaign_slug: str, entry_slug: str, *, systems_service=None,
+    campaign_visibility: str | None = None,
+) -> str:
+    service = systems_service if systems_service is not None else get_systems_service()
     entry = service.get_entry_by_slug_for_campaign(campaign_slug, entry_slug)
     if entry is None:
         return VISIBILITY_PRIVATE
-    if not service.is_entry_enabled_for_campaign(campaign_slug, entry):
+    if systems_service is None and not service.is_entry_enabled_for_campaign(campaign_slug, entry):
         return VISIBILITY_PRIVATE
     override = service.store.get_campaign_entry_override(campaign_slug, entry.entry_key)
     source_state = service.get_campaign_source_state(campaign_slug, entry.source_id)
     if source_state is None or not source_state.is_enabled:
+        return VISIBILITY_PRIVATE
+    # The Character read view has stricter authoring enablement checks. Entry
+    # visibility retains the base predicate: enabled source and no disabling
+    # entry override. Reuse these current records without changing that policy.
+    if systems_service is not None and override is not None and override.is_enabled_override is False:
         return VISIBILITY_PRIVATE
     entry_visibility = (
         override.visibility_override
@@ -807,18 +819,51 @@ def get_effective_campaign_systems_entry_visibility(campaign_slug: str, entry_sl
     )
     entry_visibility = service.clamp_visibility_for_source(source_state.source, entry_visibility)
     return most_private_visibility(
-        get_effective_campaign_visibility(campaign_slug, "systems"),
+        (get_effective_campaign_visibility(campaign_slug, "systems")
+         if campaign_visibility is None else campaign_visibility),
         entry_visibility,
     )
 
 
-def can_access_campaign_systems_entry(campaign_slug: str, entry_slug: str) -> bool:
-    if get_repository().get_campaign(campaign_slug) is None:
+def prepare_campaign_systems_entry_access(campaign_slug: str, campaign: Campaign | None):
+    """Reuse this catalog's loaded campaign and actor; keep base entry policy."""
+    if campaign is None or campaign.slug != campaign_slug:
+        return lambda entry_slug: False
+    user = get_current_user()
+    if user is not None and user.is_admin:
+        return lambda entry_slug: True
+    # Read the floor once from this campaign and current policy, without either
+    # reloading the repository or inheriting an earlier request-cache value.
+    settings = build_default_campaign_visibility_by_scope(campaign.system)
+    for setting in get_auth_store().list_campaign_visibility_settings(campaign_slug):
+        if setting.scope in CAMPAIGN_VISIBILITY_SCOPES:
+            settings[setting.scope] = setting.visibility
+    floor = most_private_visibility(settings["campaign"], settings["systems"])
+    role = get_campaign_role(campaign_slug)
+
+    def can_access(entry_slug: str) -> bool:
+        visibility = get_effective_campaign_systems_entry_visibility(
+            campaign_slug, entry_slug, campaign_visibility=floor,
+        )
+        return role_satisfies_visibility(role, visibility)
+
+    return can_access
+
+
+def can_access_campaign_systems_entry(
+    campaign_slug: str, entry_slug: str, *, systems_service=None,
+) -> bool:
+    if systems_service is not None:
+        if not systems_service.campaign_exists_for_read(campaign_slug):
+            return False
+    elif get_campaign_access_facts(campaign_slug) is None:
         return False
     user = get_current_user()
     if user is not None and user.is_admin:
         return True
-    effective_visibility = get_effective_campaign_systems_entry_visibility(campaign_slug, entry_slug)
+    effective_visibility = get_effective_campaign_systems_entry_visibility(
+        campaign_slug, entry_slug, systems_service=systems_service,
+    )
     if effective_visibility == VISIBILITY_PUBLIC:
         return True
     return role_satisfies_visibility(get_campaign_role(campaign_slug), effective_visibility)
@@ -826,7 +871,7 @@ def can_access_campaign_systems_entry(campaign_slug: str, entry_slug: str) -> bo
 
 def campaign_systems_search_visibilities(campaign_slug: str) -> tuple[str, ...]:
     """Entry visibilities this effective actor can read after the campaign floor."""
-    if get_repository().get_campaign(campaign_slug) is None:
+    if get_campaign_access_facts(campaign_slug) is None:
         return ()
     user = get_current_user()
     if user is not None and user.is_admin:
@@ -868,7 +913,7 @@ def can_manage_campaign_visibility(campaign_slug: str) -> bool:
     if user is None:
         return False
     if user.is_admin:
-        return get_repository().get_campaign(campaign_slug) is not None
+        return get_campaign_access_facts(campaign_slug) is not None
     return get_campaign_role(campaign_slug) == "dm" and can_access_campaign_scope(campaign_slug, "campaign")
 
 
@@ -910,7 +955,7 @@ def campaign_scope_access_required(scope: str, *, own_character: bool = False):
         def wrapped(*args, **kwargs):
             try:
                 campaign_slug = kwargs.get("campaign_slug")
-                if not isinstance(campaign_slug, str) or get_repository().get_campaign(campaign_slug) is None:
+                if not isinstance(campaign_slug, str) or get_campaign_access_facts(campaign_slug) is None:
                     access_decision("deny", "missing", scope=normalized_scope)
                     abort(404)
 

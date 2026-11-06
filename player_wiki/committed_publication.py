@@ -12,6 +12,7 @@ import os
 import sqlite3
 import stat
 from contextlib import closing
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -19,13 +20,31 @@ from functools import lru_cache, wraps
 from contextvars import ContextVar
 
 import yaml
-from flask import has_app_context
+from flask import has_app_context, has_request_context, request
 
-from .db import get_db
+from .db import get_db, _InstrumentedConnection, _InstrumentedCursor
+from . import db as _page_mapper_db
 from .campaign_content_service import CampaignContentError
+from ._native_read_policy import _capture_class_recipe, _class_recipe_matches
 
 
 _projection_payload = ContextVar("committed_page_projection", default=None)
+_read_snapshot_owner = ContextVar("committed_read_snapshot_owner", default=None)
+
+
+class _ReadSnapshotOwner:
+    """Lexical ownership, not admission or a reusable positive health verdict."""
+
+    __slots__ = ("connection", "changes", "active")
+
+    def __init__(self, connection):
+        self.connection = connection
+        self.changes = connection.total_changes
+        self.active = True
+
+    def current(self, connection):
+        return (self.active and self.connection is connection
+                and connection.in_transaction and self.changes == connection.total_changes)
 
 
 class CommittedSourceConflict(CampaignContentError):
@@ -188,11 +207,22 @@ def read_snapshot(function):
         owned = not connection.in_transaction
         if owned:
             connection.execute("BEGIN")
+        owner = token = None
         try:
+            if owned:
+                if _snapshot_owner_supported() and _snapshot_connection_supported(connection):
+                    owner = _MAPPER_OWNER_TYPE(connection)
+                token = _read_snapshot_owner.set(owner)
             return function(*args, **kwargs)
         finally:
             if owned:
-                connection.rollback()
+                try:
+                    if owner is not None:
+                        _MAPPER_OWNER_ACTIVE.__set__(owner, False)
+                    if token is not None:
+                        _read_snapshot_owner.reset(token)
+                finally:
+                    connection.rollback()
     return wrapped
 
 
@@ -205,6 +235,10 @@ def current(campaign_slug, kind, ref="", *, connection=None, allow_tombstone=Fal
         WHERE c.campaign_slug=? AND c.object_kind=? AND c.object_ref=?
           AND a.status='admitted' AND a.revision=c.revision""", (campaign_slug, kind, ref)
     ).fetchone()
+    return _prove_current_row(row, allow_tombstone=allow_tombstone)
+
+
+def _prove_current_row(row, *, allow_tombstone=False):
     if row is None:
         return None
     row = dict(row)
@@ -215,51 +249,157 @@ def current(campaign_slug, kind, ref="", *, connection=None, allow_tombstone=Fal
     return row
 
 
+def _config_content_entry(primary_bytes):
+    """Private parsed content and copy-compatible shape, never a proof result."""
+    from .committed_source_store import _decode_mapping, _yaml_mapping_cache_charge
+
+    cache = getattr(request, "_cpw_committed_config_mapping_cache", None)
+    if cache is None:
+        cache = request._cpw_committed_config_mapping_cache = {}
+    if primary_bytes not in cache:
+        if len(cache) >= 8:
+            del cache[next(iter(cache))]
+        value = _decode_mapping(primary_bytes)
+        eligible = (type(value) is dict
+                    and _yaml_mapping_cache_charge(primary_bytes, value) is not None)
+        cache[primary_bytes] = (value, eligible)
+    return cache[primary_bytes]
+
+
+def _decode_config_mapping(primary_bytes):
+    """Return a detached mapping; private content never escapes this API."""
+    from .committed_source_store import _decode_mapping
+
+    if not has_request_context() or len(primary_bytes) > 64 * 1024:
+        return _decode_mapping(primary_bytes)
+    value, _eligible = _config_content_entry(primary_bytes)
+    try:
+        # Callers can normalize nested settings without changing another read.
+        return deepcopy(value)
+    except RecursionError:
+        # Preserve decoding behavior for unusually deep, otherwise valid YAML.
+        del request._cpw_committed_config_mapping_cache[primary_bytes]
+        return _decode_mapping(primary_bytes)
+
+
 def config(campaign_slug, *, connection=None):
-    from .committed_source_store import _decode_mapping, _validate_config_payload
+    return _read_validated_config(campaign_slug, connection=connection, system_only=False)
+
+
+def _config_system_code(campaign_slug, *, connection=None):
+    return _read_validated_config(campaign_slug, connection=connection, system_only=True)
+
+
+def _read_validated_config(campaign_slug, *, connection, system_only):
+    row, value, system_code = _validated_config_parts(
+        campaign_slug, connection=connection, system_only=system_only,
+    )
+    return system_code if system_only else (row, value)
+
+
+def _validated_config_parts(campaign_slug, *, connection, system_only):
+    from .committed_source_store import _validate_config_payload
     row = current(campaign_slug, "config", connection=connection)
     if row is None:
         raise CommittedSourceConflict("Campaign settings need committed-source repair.")
-    value = _decode_mapping(row["primary_bytes"])
-    error, _ = _validate_config_payload(value, campaign_slug)
+    primary_bytes = row["primary_bytes"]
+    if system_only and has_request_context() and len(primary_bytes) <= 64 * 1024:
+        value, eligible = _config_content_entry(primary_bytes)
+        if not eligible:
+            value = _decode_config_mapping(primary_bytes)
+    else:
+        value = _decode_config_mapping(primary_bytes)
+    error, validated = _validate_config_payload(value, campaign_slug)
     if error:
         raise CommittedSourceConflict("Campaign settings proof is invalid; repair required.")
-    return row, value
+    return row, value, validated.system_code if system_only else None
+
+
+def _expected_page_payload(campaign_slug, ref, primary_bytes, updated_at):
+    """Reuse pure construction only; callers still prove each current row."""
+    from .campaign_page_refresh import build_page_payload
+    from .repository import parse_frontmatter
+
+    def build():
+        metadata, body = parse_frontmatter(primary_bytes.decode("utf-8"))
+        return build_page_payload(campaign_slug, ref, metadata=metadata,
+                                  body_markdown=body, updated_at=updated_at)
+
+    if not has_request_context() or len(primary_bytes) > 128 * 1024:
+        return build()
+    cache = getattr(request, "_cpw_expected_page_payloads", None)
+    if cache is None:
+        cache = request._cpw_expected_page_payloads = {}
+        request._cpw_expected_page_payload_bytes = 0
+    key = (campaign_slug, ref, primary_bytes, updated_at)
+    if key in cache:
+        return deepcopy(cache[key][0])
+    value = build()
+    # Charge text conservatively at four bytes per character, plus bounded
+    # container overhead. Never retain a parser, source row or proof verdict.
+    charge = len(primary_bytes) + 4 * (len(campaign_slug) + len(ref)) + 256
+    charge += sum(4 * len(item) if isinstance(item, str) else
+                  len(item) if isinstance(item, bytes) else 32
+                  for item in value.values()) + 64 * len(value)
+    if charge <= 16 * 1024 * 1024:
+        while cache and (len(cache) >= 512 or
+                request._cpw_expected_page_payload_bytes + charge > 16 * 1024 * 1024):
+            _old, old_charge = cache.pop(next(iter(cache)))
+            request._cpw_expected_page_payload_bytes -= old_charge
+        cache[key] = (value, charge)
+        request._cpw_expected_page_payload_bytes += charge
+    return deepcopy(value)
 
 
 @read_snapshot
 def page_row(campaign_slug, ref, *, connection=None):
     """Prove the full projection against the exact immutable generation."""
-    from .campaign_page_refresh import build_page_payload
-    from .repository import parse_frontmatter
     connection = connection or get_db()
-    _, settings = config(campaign_slug, connection=connection)
+    system_code = _config_system_code(campaign_slug, connection=connection)
     generation = current(campaign_slug, "page", ref, connection=connection)
-    if generation is None:
+    if not _page_generation_matches(generation, system_code):
         return None
-    from .system_policy import normalize_system_code
-    if normalize_system_code(generation["system_code"]) != normalize_system_code(settings["system"]):
-        raise CommittedSourceConflict("Page and campaign system proof differ; manager repair required.")
     row = connection.execute("SELECT * FROM campaign_pages WHERE campaign_slug=? AND page_ref=?",
                              (campaign_slug, ref)).fetchone()
+    return _prove_page_projection(campaign_slug, ref, generation, row)
+
+
+def _page_generation_matches(generation, system_code):
+    if generation is None:
+        return False
+    from .system_policy import normalize_system_code
+    if normalize_system_code(generation["system_code"]) != system_code:
+        raise CommittedSourceConflict("Page and campaign system proof differ; manager repair required.")
+    return True
+
+
+def _prove_page_projection(campaign_slug, ref, generation, row):
     if row is None:
         raise CommittedSourceConflict("Committed page projection is missing; repair required.")
-    metadata, body = parse_frontmatter(generation["primary_bytes"].decode("utf-8"))
-    expected = build_page_payload(campaign_slug, ref, metadata=metadata, body_markdown=body,
-                                  updated_at=row["updated_at"])
+    expected = _expected_page_payload(campaign_slug, ref, generation["primary_bytes"],
+                                      row["updated_at"])
     if any(row[key] != value for key, value in expected.items()):
         raise CommittedSourceConflict("Committed page projection differs; repair required.")
     return row
 
 
 @read_snapshot
-def page_rows(campaign_slug):
-    rows = get_db().execute("SELECT object_ref FROM committed_source_current WHERE campaign_slug=? AND object_kind='page'",
+def page_rows(campaign_slug, *, connection=None):
+    connection = connection if connection is not None else get_db()
+    rows = connection.execute("SELECT object_ref FROM committed_source_current WHERE campaign_slug=? AND object_kind='page'",
                             (campaign_slug,)).fetchall()
+    if _page_batch_supported(campaign_slug, connection):
+        facts = _batch_page_facts(campaign_slug, connection, rows, include_sources=False)
+        if facts is not None:
+            return facts
+    return _singular_page_rows(campaign_slug, connection, rows)
+
+
+def _singular_page_rows(campaign_slug, connection, rows):
     result = []
     for row in rows:
         try:
-            proved = page_row(campaign_slug, row[0])
+            proved = page_row(campaign_slug, row[0], connection=connection)
         except (CommittedSourceConflict, ValueError, TypeError, UnicodeError, yaml.YAMLError, OverflowError, RecursionError):
             continue  # One unhealthy object cannot expose itself or suppress others.
         if proved is not None:
@@ -267,8 +407,341 @@ def page_rows(campaign_slug):
     return result
 
 
-def revision(campaign_slug, kind, ref=""):
-    row = current(campaign_slug, kind, ref, allow_tombstone=True)
+@read_snapshot
+def _page_row_facts(campaign_slug, *, connection=None):
+    """Complete facts for one existing snapshot; never a reusable proof token."""
+    connection = connection if connection is not None else get_db()
+    if _page_batch_supported(campaign_slug, connection):
+        refs = connection.execute("SELECT object_ref FROM committed_source_current WHERE campaign_slug=? AND object_kind='page'",
+                                  (campaign_slug,)).fetchall()
+        facts = _batch_page_facts(campaign_slug, connection, refs, include_sources=True)
+        if facts is not None:
+            return facts
+    # Keep custom public providers and their original call/error ordering.
+    rows = [dict(row) for row in page_rows(campaign_slug, connection=connection)]
+    return [(row, current(campaign_slug, "page", row["page_ref"], connection=connection))
+            for row in rows]
+
+
+def _page_batch_supported(campaign_slug, connection):
+    if (not has_request_context() or request.method not in {"GET", "HEAD"}
+            or type(campaign_slug) is not str
+            or any(globals()[name] is not provider for name, provider in _PAGE_BATCH_PROVIDERS)
+            or any(getattr(module, name) is not provider
+                   for module, name, provider in _PAGE_BATCH_EXTERNAL_PROVIDERS)
+            or not _page_batch_yaml_policy_matches()
+            or not _page_batch_ordinary_config_cache()):
+        return False
+    return _page_batch_connection_supported(connection)
+
+
+def _page_batch_connection_supported(connection):
+    if type(connection) is _InstrumentedConnection:
+        if (set(vars(connection)) != {"_connection"}
+                or any(getattr(_InstrumentedConnection, name) is not provider
+                       for name, provider in _PAGE_BATCH_CONNECTION_PROVIDERS)):
+            return False
+        raw = connection._connection
+    else:
+        raw = connection
+    return (type(raw) is sqlite3.Connection and raw.row_factory is sqlite3.Row
+            and raw.text_factory is str)
+
+
+def _snapshot_connection_supported(connection):
+    # Check original types and the factory actually reached by cursor() before
+    # inspecting any class attributes. Unknown constructors retain point reads.
+    if (_InstrumentedConnection is not _MAPPER_CONNECTION_TYPE
+            or _InstrumentedCursor is not _MAPPER_CURSOR_TYPE
+            or _page_mapper_db._InstrumentedConnection is not _MAPPER_CONNECTION_TYPE
+            or _page_mapper_db._InstrumentedCursor is not _MAPPER_CURSOR_TYPE):
+        return False
+    if (not _class_recipe_matches(_MAPPER_CONNECTION_RECIPE)
+            or not _class_recipe_matches(_MAPPER_CURSOR_RECIPE)):
+        return False
+    if type(connection) is _MAPPER_CONNECTION_TYPE:
+        state = object.__getattribute__(connection, "__dict__")
+        if (type(state) is not dict or len(state) != 1
+                or any(type(name) is not str for name in state)
+                or "_connection" not in state):
+            return False
+    if (type(sqlite3.adapters) is not dict or len(sqlite3.adapters) != len(_PAGE_BATCH_SQLITE_ADAPTERS)
+            or any(key is not old_key or value is not old_value
+                   for (key, value), (old_key, old_value)
+                   in zip(sqlite3.adapters.items(), _PAGE_BATCH_SQLITE_ADAPTERS))):
+        return False
+    if (type(sqlite3.converters) is not dict or len(sqlite3.converters) != len(_PAGE_BATCH_SQLITE_CONVERTERS)
+            or any(key is not old_key or value is not old_value
+                   for (key, value), (old_key, old_value)
+                   in zip(sqlite3.converters.items(), _PAGE_BATCH_SQLITE_CONVERTERS))):
+        return False
+    return _page_batch_connection_supported(connection)
+
+
+def _snapshot_owner_supported():
+    return (_ReadSnapshotOwner is _MAPPER_OWNER_TYPE
+            and _class_recipe_matches(_MAPPER_OWNER_RECIPE))
+
+
+def _snapshot_owner_current(owner, connection):
+    if (type(owner) is not _MAPPER_OWNER_TYPE or not _snapshot_owner_supported()
+            or not _snapshot_connection_supported(connection)):
+        return False
+    return _MAPPER_OWNER_CURRENT(owner, connection)
+
+
+def _page_batch_ordinary_config_cache():
+    """Inspect existing content only; unknown objects must reach no protocol."""
+    cache = getattr(request, "_cpw_committed_config_mapping_cache", None)
+    if type(cache) is not dict or not 0 < len(cache) <= 8:
+        return False
+    pending, entries = [], []
+    remaining = 32768
+    for raw, entry in cache.items():
+        if (type(raw) is not bytes or len(raw) > 64 * 1024
+                or type(entry) is not tuple or len(entry) != 2
+                or type(entry[0]) is not dict or entry[1] is not True):
+            return False
+        remaining -= 3  # Raw key, entry envelope and the exact True flag.
+        entries.append((raw, entry[0]))
+        pending.append((entry[0], 0))
+    seen = set()
+    while pending:
+        value, depth = pending.pop()
+        remaining -= 1  # Count edges even when a container was already seen.
+        if remaining < 0 or depth > 64:
+            return False
+        kind = type(value)
+        if any(kind is scalar for scalar in (type(None), bool, int, float, str, bytes)):
+            continue
+        if kind is not dict and kind is not list:
+            return False
+        identity = id(value)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        width = len(value) * 2 if kind is dict else len(value)
+        if width > remaining - len(pending):
+            return False
+        if kind is dict:
+            for key, child in value.items():
+                pending.append((key, depth + 1))
+                pending.append((child, depth + 1))
+        else:
+            pending.extend((child, depth + 1) for child in value)
+    # Only proven built-in graphs may reach this helper's sizeof/type checks.
+    return all(_page_batch_source_store._yaml_mapping_cache_charge(raw, value) is not None
+               for raw, value in entries)
+
+
+def _batch_page_facts(campaign_slug, connection, refs, *, include_sources, mapper=None):
+    """Prove shared config once; retain ordered point reads for every page."""
+    ordered = [row[0] for row in refs]
+    if any(type(ref) is not str for ref in ordered) or len(set(ordered)) != len(ordered):
+        return None
+    if not ordered:
+        return []  # The singular reader does not inspect config for an empty list.
+    try:
+        if mapper is None:
+            system_code = _config_system_code(campaign_slug, connection=connection)
+        else:
+            settings, _value, system_code = _validated_config_parts(
+                campaign_slug, connection=connection, system_only=True,
+            )
+            mapper.retain_config(settings)
+    except (CommittedSourceConflict, ValueError, TypeError, UnicodeError, yaml.YAMLError, OverflowError, RecursionError):
+        return []  # Same invalid config would omit every row in this snapshot.
+    result = []
+    for ref in ordered:
+        try:
+            # Keep point reads in original ref order: eagerly fetching a later
+            # corrupt SQLite row must not mask an earlier payload exception.
+            generation = current(campaign_slug, "page", ref, connection=connection)
+            if not _page_generation_matches(generation, system_code):
+                continue
+            row = connection.execute("SELECT * FROM campaign_pages WHERE campaign_slug=? AND page_ref=?",
+                                     (campaign_slug, ref)).fetchone()
+            row = _prove_page_projection(campaign_slug, ref, generation, row)
+        except (CommittedSourceConflict, ValueError, TypeError, UnicodeError, yaml.YAMLError, OverflowError, RecursionError):
+            continue
+        result.append((row, generation) if include_sources else row)
+        if mapper is not None:
+            mapper.retain_page(generation)
+    return result
+
+
+def _mapper_row_charge(row):
+    """Bound only native scalar rows; never invoke a custom value protocol."""
+    if type(row) is not dict or len(row) > 32:
+        return None
+    charge = 512
+    for key, value in row.items():
+        if type(key) is not str:
+            return None
+        charge += 128 + 4 * len(key)
+        kind = type(value)
+        if kind is str:
+            charge += 64 + 4 * len(value)
+        elif kind is bytes:
+            charge += 64 + len(value)
+        elif any(kind is scalar for scalar in (type(None), bool, int, float)):
+            charge += 64
+        else:
+            return None
+    return charge
+
+
+class _MapperPageFacts:
+    """Ephemeral raw rows for the original default mapper in one owned read."""
+
+    __slots__ = ("owner", "connection", "settings", "sources", "charge")
+
+    def __init__(self, owner, connection):
+        self.owner, self.connection = owner, connection
+        self.settings, self.sources, self.charge = None, [], 0
+
+    def _retain(self, row):
+        if self.sources is None:
+            return False
+        charge = _mapper_row_charge(row)
+        if charge is None or self.charge + charge > 8 * 1024 * 1024:
+            # The ordinary projection list is already produced. Dropping only
+            # optional stamps preserves the old path without replaying proofs.
+            self.settings, self.sources, self.charge = None, None, 0
+            return False
+        self.charge += charge
+        return True
+
+    def retain_config(self, row):
+        if self._retain(row):
+            self.settings = row
+
+    def retain_page(self, row):
+        if self._retain(row):
+            self.sources.append(row)
+
+    def prove_stamps(self, index):
+        if (any(globals()[name] is not provider for name, provider in _MAPPER_STAMP_PROVIDERS)
+                or not _snapshot_owner_current(self.owner, self.connection)):
+            raise CommittedSourceConflict("Committed page snapshot changed; reload required.")
+        if self.sources is None:
+            return None  # Retention declined; caller retains original point reads.
+        source = _prove_current_row(self.sources[index])
+        settings = _prove_current_row(self.settings)
+        return source, settings
+
+
+def _mapper_page_rows(campaign_slug, *, connection):
+    """Decline before producing rows unless the existing lexical owner is native."""
+    owner = _read_snapshot_owner.get()
+    from flask import g
+    from . import db
+    if (type(connection) is not _InstrumentedConnection
+            or not has_app_context() or g.get("db_connection") is not connection
+            or db.get_db is not get_db or get_db is not _PAGE_BATCH_GET_DB
+            or not _snapshot_owner_current(owner, connection)
+            or any(globals()[name] is not provider for name, provider in _MAPPER_PAGE_PROVIDERS)
+            or not _page_batch_supported(campaign_slug, connection)):
+        return None
+    refs = connection.execute("SELECT object_ref FROM committed_source_current WHERE campaign_slug=? AND object_kind='page'",
+                              (campaign_slug,)).fetchall()
+    mapper = _MapperPageFacts(owner, connection)
+    rows = _batch_page_facts(campaign_slug, connection, refs, include_sources=False, mapper=mapper)
+    if rows is None:
+        # This check rejects only duplicate/non-string refs, before page/config
+        # interpretation, just as page_rows falls back to its singular reader.
+        mapper.settings, mapper.sources, mapper.charge = None, None, 0
+        rows = _singular_page_rows(campaign_slug, connection, refs)
+    if not _snapshot_owner_current(owner, connection):
+        raise CommittedSourceConflict("Committed page snapshot changed; reload required.")
+    # Keep the entered owner even when optional raw retention declined. Later
+    # drift must refuse rather than silently enter a newly configured callback.
+    return rows, mapper
+
+
+# Only ordinary application providers share the lexical batch config proof. A custom
+# provider retains the original singular calls instead of being probed/replayed.
+_PAGE_BATCH_PROVIDERS = tuple((name, globals()[name]) for name in (
+    "current", "page_row", "page_rows", "_config_system_code", "_read_validated_config",
+    "_config_content_entry", "_decode_config_mapping", "_expected_page_payload", "digest",
+    "_prove_current_row", "_page_generation_matches", "_prove_page_projection",
+))
+_MAPPER_PAGE_PROVIDERS = tuple((name, globals()[name]) for name in (
+    "_validated_config_parts", "_batch_page_facts", "read_snapshot", "active", "_mapper_page_rows",
+    "_snapshot_owner_supported", "_snapshot_owner_current",
+))
+_MAPPER_STAMP_PROVIDERS = tuple((name, globals()[name]) for name in (
+    "current", "digest", "_prove_current_row", "active", "read_snapshot", "_snapshot_connection_supported",
+    "_snapshot_owner_supported", "_snapshot_owner_current",
+))
+_MAPPER_OWNER_TYPE = _ReadSnapshotOwner
+_MAPPER_OWNER_RECIPE = _capture_class_recipe(
+    _ReadSnapshotOwner, functions=("__init__", "current"),
+    inherited=("__new__", "__setattr__", "__getattribute__"),
+    absent=("__getattr__", "__dict__"), slots=True,
+)
+_MAPPER_OWNER_NAMESPACE = (type.__getattribute__(_ReadSnapshotOwner, "__dict__")
+                           if _MAPPER_OWNER_RECIPE is not None else {})
+_MAPPER_OWNER_CURRENT = _MAPPER_OWNER_NAMESPACE.get("current") if _MAPPER_OWNER_RECIPE is not None else None
+_MAPPER_OWNER_ACTIVE = _MAPPER_OWNER_NAMESPACE.get("active") if _MAPPER_OWNER_RECIPE is not None else None
+_MAPPER_CONNECTION_TYPE = _InstrumentedConnection
+_MAPPER_CURSOR_TYPE = _InstrumentedCursor
+_MAPPER_CONNECTION_RECIPE = _capture_class_recipe(
+    _InstrumentedConnection, functions=("__init__", "execute", "cursor", "__getattr__"),
+    inherited=("__new__", "__setattr__", "__getattribute__"),
+    absent=("_connection", "in_transaction", "total_changes"), getsets=("__dict__",),
+)
+_MAPPER_CURSOR_RECIPE = _capture_class_recipe(
+    _InstrumentedCursor, functions=("__init__", "execute", "__getattr__"),
+    inherited=("__new__", "__setattr__", "__getattribute__"),
+    absent=("_cursor", "fetchone", "fetchall"), getsets=("__dict__",),
+)
+_PAGE_BATCH_CONNECTION_PROVIDERS = tuple((name, getattr(_InstrumentedConnection, name))
+                                        for name in ("execute", "cursor", "__getattr__"))
+_PAGE_BATCH_SQLITE_ADAPTERS = tuple(sqlite3.adapters.items())
+_PAGE_BATCH_SQLITE_CONVERTERS = tuple(sqlite3.converters.items())
+_PAGE_BATCH_GET_DB = get_db
+
+from . import committed_source_store as _page_batch_source_store
+from . import repository as _page_batch_repository
+from . import campaign_page_refresh as _page_batch_refresh
+
+_PAGE_BATCH_EXTERNAL_PROVIDERS = tuple(
+    (module, name, getattr(module, name)) for module, names in (
+        (_page_batch_source_store, ("_validate_config_payload", "_decode_mapping", "_load_committed_yaml",
+                                    "_parse_yaml_bytes_uncached", "_yaml_mapping_cache_charge")),
+        (_page_batch_repository, ("parse_frontmatter",)),
+        (_page_batch_refresh, ("build_page_payload",)),
+        (yaml, ("safe_load", "SafeLoader")),
+    ) for name in names
+)
+_PAGE_BATCH_YAML_POLICY = tuple(
+    (name, getattr(yaml.SafeLoader, name), tuple(
+        (key, value, tuple(value) if type(value) is list else None)
+        for key, value in getattr(yaml.SafeLoader, name).items()))
+    for name in ("yaml_constructors", "yaml_multi_constructors", "yaml_implicit_resolvers", "yaml_path_resolvers")
+)
+
+
+def _page_batch_yaml_policy_matches():
+    """Decline configured YAML callbacks before coalescing config evaluation."""
+    for name, original, entries in _PAGE_BATCH_YAML_POLICY:
+        mapping = getattr(yaml.SafeLoader, name)
+        if (mapping is not original or type(mapping) is not dict or len(mapping) != len(entries)
+                or any(key is not None and type(key) is not str for key in mapping)):
+            return False
+        for key, value, items in entries:
+            current_value = mapping.get(key)
+            if current_value is not value:
+                return False
+            if items is not None and (len(current_value) != len(items)
+                    or any(old is not new for old, new in zip(items, current_value))):
+                return False
+    return True
+
+
+def revision(campaign_slug, kind, ref="", *, connection=None):
+    row = current(campaign_slug, kind, ref, connection=connection, allow_tombstone=True)
     return int(row["revision"]) if row else None
 
 
@@ -310,21 +783,37 @@ def _append(connection, campaign_slug, kind, ref, primary, *, expected, system, 
     return number
 
 
-def _reserve(connection):
+def _reserve(connection, *, source_read_cleanup=False):
     from .committed_source_store import _legacy_enum_values_valid
+    if type(source_read_cleanup) is not bool:
+        raise TypeError("Reservation cleanup mode must be explicit.")
+    if source_read_cleanup:
+        from .character_source_reads import _require_app_connection
+        _require_app_connection(connection)
     if connection.in_transaction:
         raise CommittedSourceConflict("Committed publication needs its own transaction.")
     # WAL NORMAL does not promise power-loss durability at acknowledgement.
     # Set this outside the transaction; SQLite FULL syncs the committed WAL.
-    connection.execute("PRAGMA synchronous = FULL")
-    if int(connection.execute("PRAGMA synchronous").fetchone()[0]) < 2:
-        raise CommittedSourceConflict("Durable SQLite publication is unavailable.")
-    connection.execute("BEGIN IMMEDIATE")
+    begin_attempted = False
+    admission_started = False
     try:
+        connection.execute("PRAGMA synchronous = FULL")
+        if int(connection.execute("PRAGMA synchronous").fetchone()[0]) < 2:
+            raise CommittedSourceConflict("Durable SQLite publication is unavailable.")
+        # Mark before dispatch: a delegate/metric failure can occur after SQLite
+        # has begun the transaction. This connection was quiescent at entry.
+        begin_attempted = True
+        connection.execute("BEGIN IMMEDIATE")
+        admission_started = True
         if not active(connection) or not _legacy_enum_values_valid(connection):
             raise CommittedSourceConflict("Committed publication proof is unavailable; repair required.")
-    except BaseException:
-        connection.rollback()
+    except BaseException as primary:
+        if source_read_cleanup and begin_attempted:
+            from .db import rollback_source_read_connection
+            rollback_source_read_connection(connection, primary=primary)
+        elif admission_started:
+            # Default callers retain their original admission-only cleanup.
+            connection.rollback()
         raise
 
 
@@ -333,7 +822,8 @@ def publish_config(campaigns_dir, campaign_slug, updates):
     from .committed_source_store import _validate_config_payload
     if not isinstance(updates, dict):
         raise CommittedSourceConflict("Campaign config updates must be an object.")
-    if any(key != "current_session" and not isinstance(value, str) for key, value in updates.items()):
+    if any(key not in ("current_session", "allow_artificer_infusion_deactivation")
+           and not isinstance(value, str) for key, value in updates.items()):
         raise CommittedSourceConflict("Campaign text settings must be strings.")
     previous, value = config(campaign_slug)
     if "current_session" in updates and (isinstance(updates["current_session"], bool) or
@@ -712,6 +1202,12 @@ def replay_mirrors(campaigns_dir, *, campaign_slug=None, limit=64, retry_conflic
                         image_conflict |= reason is not None
                     if image_conflict:
                         state="conflict"
+                # Publication may have replaced or removed the original inode.
+                # Observe the final safe path, including a competing editor's
+                # file, rather than recording the pre-publication local value.
+                actual = _mirror_bytes(path)
+                if digest(actual) != digest(desired):
+                    state = "conflict"
                 connection.execute("""INSERT INTO committed_source_mirrors
                     (campaign_slug,object_kind,object_ref,expected_primary_sha256,mirrored_revision,state,draft_primary_bytes,observed_primary_sha256,updated_at)
                     VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(campaign_slug,object_kind,object_ref) DO UPDATE SET
@@ -728,6 +1224,116 @@ def replay_mirrors(campaigns_dir, *, campaign_slug=None, limit=64, retry_conflic
         except BaseException:
             connection.rollback(); raise
     return counts
+
+
+def reobserve_config_mirror(campaign_slug, *, expected_revision,
+                            expected_primary_sha256, expected_mirror,
+                            expected_outbox):
+    """Private operator action: observe one completed config, never republish it.
+
+    Matching authority and quiesced external file writers are caller
+    preconditions. This is deliberately unavailable during a web request and
+    is not called by startup/replay. A successful observation describes this
+    instant, not immunity from later filesystem changes.
+    """
+    from flask import current_app
+    from .committed_source_store import _now
+
+    if not has_app_context() or has_request_context():
+        raise CommittedSourceConflict("Config mirror observation requires a private operator context.")
+    if (type(campaign_slug) is not str or not campaign_slug
+            or campaign_slug != campaign_slug.strip() or campaign_slug.endswith(".")
+            or campaign_slug in {".", ".."} or len(campaign_slug) > 240
+            or any(c in campaign_slug for c in "/\\:")
+            or any(ord(c) < 32 for c in campaign_slug)
+            or type(expected_revision) is not int or expected_revision < 1
+            or type(expected_primary_sha256) is not str or len(expected_primary_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in expected_primary_sha256)
+            or type(expected_mirror) is not dict or type(expected_outbox) is not dict):
+        raise CommittedSourceConflict("Exact config mirror observation inputs are required.")
+    path = Path(current_app.config["CAMPAIGNS_DIR"]) / campaign_slug / "campaign.yaml"
+    connection = get_db()
+    _reserve(connection)
+    try:
+        source, _ = config(campaign_slug, connection=connection)
+        if (source["revision"] != expected_revision
+                or source["primary_sha256"] != expected_primary_sha256):
+            raise CommittedSourceConflict("Campaign settings changed; inspect before observing the mirror.")
+        mirror = connection.execute(
+            "SELECT * FROM committed_source_mirrors WHERE campaign_slug=? "
+            "AND object_kind='config' AND object_ref=''", (campaign_slug,),
+        ).fetchone()
+        outbox = connection.execute(
+            "SELECT * FROM committed_source_outbox WHERE campaign_slug=? "
+            "AND object_kind='config' AND object_ref='' AND revision=?",
+            (campaign_slug, expected_revision),
+        ).fetchone()
+
+        def exact(row, expected):
+            return (row is not None and set(row.keys()) == set(expected)
+                    and all(type(row[key]) is type(expected[key])
+                            and row[key] == expected[key] for key in row.keys()))
+
+        if not exact(mirror, expected_mirror) or not exact(outbox, expected_outbox):
+            raise CommittedSourceConflict("Config mirror or outbox preimage changed; inspect again.")
+        if (mirror["state"] != "matching" or mirror["mirrored_revision"] != expected_revision
+                or mirror["expected_primary_sha256"] != expected_primary_sha256
+                or any(mirror[key] is not None for key in (
+                    "expected_secondary_sha256", "observed_secondary_sha256",
+                    "draft_primary_bytes", "draft_secondary_bytes"))
+                or outbox["state"] != "complete" or outbox["attempt_count"] < 1
+                or outbox["error_code"] is not None):
+            raise CommittedSourceConflict("Only a completed, otherwise matching config mirror may be observed.")
+        publications = connection.execute(
+            "SELECT state,desired_primary_bytes,desired_primary_sha256 "
+            "FROM committed_source_publications WHERE campaign_slug=? "
+            "AND object_kind='config' AND object_ref='' AND committed_revision=?",
+            (campaign_slug, expected_revision),
+        ).fetchall()
+        if (len(publications) != 1 or publications[0]["state"] != "committed"
+                or publications[0]["desired_primary_bytes"] != source["primary_bytes"]
+                or publications[0]["desired_primary_sha256"] != expected_primary_sha256):
+            raise CommittedSourceConflict("The completed config publication proof is unavailable.")
+        prior_hash = outbox["expected_primary_sha256"]
+        if prior_hash is not None and prior_hash != expected_primary_sha256:
+            retained = path.with_name(path.name + f".committed-{outbox['id']}.draft")
+            if digest(_mirror_bytes(retained)) != prior_hash:
+                raise CommittedSourceConflict("The retained prior config mirror proof is unavailable.")
+        for table, predicate in (
+            ("committed_source_publications", "state IN ('prepared','conflict')"),
+            ("committed_source_outbox", "state != 'complete'"),
+            ("committed_source_mirrors", "state != 'matching'"),
+            ("character_reconciliation_operations", "state IN ('prepared','repository_pending','conflict')"),
+            ("character_deletion_operations", "state IN ('prepared','repository_pending','conflict')"),
+            ("player_wiki_reconciliation_operations", "state IN ('prepared','repository_pending','conflict')"),
+            ("player_wiki_deletion_operations", "state IN ('prepared','repository_pending','conflict')"),
+        ):
+            if connection.execute(
+                f"SELECT 1 FROM {table} WHERE campaign_slug=? AND {predicate} LIMIT 1",
+                (campaign_slug,),
+            ).fetchone() is not None:
+                raise CommittedSourceConflict("Pending campaign recovery prevents mirror observation.")
+        observed = digest(_mirror_bytes(path))
+        if observed != expected_primary_sha256:
+            raise CommittedSourceConflict("The actual config mirror differs; no observation was changed.")
+        if mirror["observed_primary_sha256"] == observed:
+            connection.rollback()
+            return {"changed": False, "revision": expected_revision, "observed_primary_sha256": observed}
+        changed = connection.execute(
+            "UPDATE committed_source_mirrors SET observed_primary_sha256=?,updated_at=? "
+            "WHERE campaign_slug=? AND object_kind='config' AND object_ref='' "
+            "AND mirrored_revision=? AND expected_primary_sha256=? "
+            "AND observed_primary_sha256 IS ? AND updated_at=?",
+            (observed, _now(), campaign_slug, expected_revision, expected_primary_sha256,
+             mirror["observed_primary_sha256"], mirror["updated_at"]),
+        ).rowcount
+        if changed != 1:
+            raise CommittedSourceConflict("Config mirror observation changed concurrently.")
+        connection.commit()
+        return {"changed": True, "revision": expected_revision, "observed_primary_sha256": observed}
+    except BaseException:
+        connection.rollback()
+        raise
 
 
 @read_snapshot

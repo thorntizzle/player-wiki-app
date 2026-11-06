@@ -1,0 +1,46 @@
+{% if item.item_uses_rule %}
+  {% set uses = item.item_uses_rule %}
+  <p class="meta">Uses: {% if uses.known %}{{ item.charges_current }} / {{ uses.maximum }}{% elif uses.can_admit %}Not recorded (capacity {{ uses.maximum }}){% else %}Raw {{ item.charges_raw_current }} / {{ item.charges_raw_max }}; source capacity {{ uses.maximum }}. Needs repair.{% endif %} · {{ uses.reset_label }}</p>
+  {% if item_uses_editable | default(false) and (uses.known or (uses.can_admit and can_repair_equipment_activation | default(false))) %}
+    <form class="session-inline-form" method="post" action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+      <input type="hidden" name="operation" value="item_uses">
+      <input type="hidden" name="mode" value="{{ session_character_form_mode | default('read') }}">
+      <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
+      {% if session_return_view | default('') %}<input type="hidden" name="return_view" value="{{ session_return_view }}">{% endif %}
+      <label class="session-field"><span>Current uses</span><input type="number" name="current" min="0" max="{{ uses.maximum }}" step="1" value="{{ item.charges_current if uses.known else '' }}" required></label>
+      {% if not uses.known %}<label><input type="checkbox" name="confirm_unrecorded" value="yes" required>Confirm the item's current remaining uses. This records a present fact, not a rest.</label>{% endif %}
+      <button type="submit" class="ghost-button">Save uses</button>
+    </form>
+  {% endif %}
+{% endif %}
+{% for note in item.item_capability_notes | default([]) %}<p class="meta">{{ note }}</p>{% endfor %}
+{% if item.item_noncasting_action | default(none) %}
+  {% set item_action = item.item_noncasting_action %}
+  <div class="subtle-panel">
+    <strong>{{ item_action.title }}</strong>
+    <p class="meta">{{ item_action.rule }} Costs {{ item_action.counter_cost }} item use; no spell slot or attunement required.</p>
+    <p class="meta">Source recovery: {{ item_action.source_recovery_label }}. Campaign recovery: {{ item_action.campaign_recovery_label }}.</p>
+    {% if not item_action.enabled %}<p class="meta">{{ item_action.disabled_reason }}</p>{% endif %}
+    {% if item_uses_editable | default(false) and item_action.enabled %}
+      <form class="session-inline-form" method="post" action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="operation" value="{{ item_action.operation }}">
+        <input type="hidden" name="mode" value="{{ session_character_form_mode | default('read') }}">
+        <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
+        {% if session_return_view | default('') %}<input type="hidden" name="return_view" value="{{ session_return_view }}">{% endif %}
+        {% if item_action.kind == 'prevent_forced_movement' %}
+          <label>Trigger<select name="trigger" required>{% for trigger in item_action.triggers %}<option value="{{ trigger }}">{{ trigger | replace('_', ' ') }}</option>{% endfor %}</select></label>
+          <label>Target<select name="target_kind" required>{% for target in item_action.targets %}<option value="{{ target }}">{{ target | replace('_', ' ') }}</option>{% endfor %}</select></label>
+        {% endif %}
+        <label><input type="checkbox" name="{{ item_action.confirmation_name }}" value="yes" required>{{ item_action.confirmation }}</label>
+        <button type="submit" class="ghost-button">{{ item_action.button }}</button>
+      </form>
+    {% endif %}
+  </div>
+{% endif %}
+{% include '_character_item_casting.html' %}
+{% include '_character_item_storage.html' %}
+{% include '_character_item_prepared.html' %}

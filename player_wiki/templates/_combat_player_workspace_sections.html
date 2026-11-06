@@ -402,6 +402,14 @@
                 </div>
               {% endif %}
             </div>
+            {% from "_character_flexible_casting.html" import totals, controls with context %}
+            {{ totals(section.spellcasting.slot_totals) }}
+            {% if can_edit_combat_character_state and selected_combatant_id %}
+              {% call controls(section.spellcasting.flexible_casting, url_for('campaign_combat_character_flexible_casting', campaign_slug=campaign.slug, combatant_id=selected_combatant_id), selected_combat_character.state_revision) %}
+                {{ combat_workspace_return_fields() }}
+                <input type="hidden" name="combatant" value="{{ selected_combatant_id }}">
+              {% endcall %}
+            {% endif %}
             {% for slot_pool in section.spellcasting.slot_pools %}
               {% if slot_pool.slots %}
                 {% set slot_pool_title = slot_pool.title or section.spellcasting.slots_title or "Spell slots" %}
@@ -414,7 +422,7 @@
                         {% if slot.can_edit %}
                         <form
                           class="detail-card combat-spell-slot-row"
-                          data-character-autosubmit
+                          {% if not slot.is_granted %}data-character-autosubmit{% endif %}
                           method="post"
                           action="{{ url_for('campaign_combat_character_spell_slots', campaign_slug=campaign.slug, combatant_id=selected_combatant_id, level=slot.level) }}"
                           {% if combat_workspace_return_view != "character" %}
@@ -430,10 +438,15 @@
                             <strong>{{ slot.label }}</strong>
                             <span class="meta">{{ slot.available }} available / {{ slot.max }}</span>
                           </div>
+                          {% if slot.is_granted %}
+                            <input type="hidden" name="delta_used" value="1">
+                            <button type="submit" {% if not slot.available %}disabled{% endif %}>Spend slot</button>
+                          {% else %}
                           <label class="combat-compact-field">
                             <span>Used</span>
                             <input type="number" name="used" value="{{ slot.used }}" min="0" max="{{ slot.max }}">
                           </label>
+                          {% endif %}
                         </form>
                         {% else %}
                           <div class="detail-card combat-spell-slot-row">
@@ -817,7 +830,9 @@
                 {% if item.tags %}
                   <p class="meta">{{ item.tags | join(", ") }}</p>
                 {% endif %}
-                {% if item.charges_label %}<p class="meta">Charges: {{ item.charges_label }}</p>{% endif %}
+                {% if item.charges_label and not item.item_uses_rule %}<p class="meta">Charges: {{ item.charges_label }}</p>{% endif %}
+                    {% set item_uses_editable = false %}
+                    {% include "_character_item_uses.html" %}
                 {{ combat_item_description_details(item, item_dialog_id) }}
               </article>
             {% endfor %}

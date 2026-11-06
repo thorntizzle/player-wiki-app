@@ -230,6 +230,11 @@ def load_campaign(config_path: Path, page_store: Any, *, config_spec: CampaignCo
         config_spec = load_campaign_config(config_path)
         page_snapshot = page_store.list_pages(config_spec.slug)
     spec = config_spec if config_spec is not None else load_campaign_config(config_path)
+    return hydrate_campaign(config_path, spec, page_snapshot, page_store=page_store)
+
+
+def hydrate_campaign(config_path: Path, spec: CampaignConfig, page_snapshot: list[Page] | None, *, page_store=None) -> Campaign:
+    """Hydrate validated settings/pages without choosing a database or source view."""
     config = spec.config
     content_root = spec.content_root
     assets_root = config_path.parent / config.get("asset_dir", "assets")
@@ -404,6 +409,21 @@ def resolve_campaign_links(campaign: Campaign) -> None:
 
 
 def load_page_content(campaign: Campaign, page: Page, page_store: Any) -> str:
+    from .character_source_reads import phase_of, SourceReadConflict
+    phase = phase_of(page_store)
+    if phase is not None:
+        if campaign.slug != phase.owner.campaign_slug or not page.source_path.startswith(f"db://{campaign.slug}/"):
+            raise SourceReadConflict("Page belongs to another source view.")
+        ref = page.source_path[len(f"db://{campaign.slug}/"):]
+        record = page_store.get_page_record(campaign.slug, ref, include_body=True)
+        settings = phase.fact("config")
+        if (record is None or page.committed_revision != record.page.committed_revision
+                or page.committed_config_revision != settings[0]["revision"]
+                or record.page.route_slug != page.route_slug or not record.page.published
+                or record.page.reveal_after_session > int(settings[1]["current_session"])
+                or page.is_deprecated_wiki_overview):
+            raise SourceReadConflict("Page changed or is not visible in this source view.")
+        return record.body_markdown
     from .committed_publication import active, config, current, page_row, read_snapshot, CommittedSourceConflict
     if active():
         @read_snapshot
@@ -437,7 +457,8 @@ def load_page_content(campaign: Campaign, page: Page, page_store: Any) -> str:
 
 def render_page_content(campaign: Campaign, page: Page, page_store: Any) -> str:
     from .committed_publication import active
-    if page.html_loaded and not active():
+    from .character_source_reads import phase_of
+    if page.html_loaded and phase_of(page_store) is None and not active():
         return page.body_html
 
     body = load_page_content(campaign, page, page_store)

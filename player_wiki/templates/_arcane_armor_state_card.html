@@ -4,9 +4,16 @@
       <h3>{{ arcane_armor_state.label or "Arcane Armor" }}</h3>
       <span class="meta">
         {{ arcane_armor_state.status_label }}
-        {% if arcane_armor_state.enabled %} | {{ arcane_armor_state.hands_label }}{% endif %}
+        | {{ arcane_armor_state.hands_label }}
       </span>
     </div>
+    {% if arcane_armor_state.reason %}<p class="muted">{{ arcane_armor_state.reason }}</p>{% endif %}
+    {% for hand, occupancy in (arcane_armor_state.hands or {}).items() %}
+      <p class="muted">{{ hand }}: {{ occupancy.status }} — {{ occupancy.reason }}</p>
+    {% endfor %}
+    {% if arcane_armor_state.defensive_field_temp_hp is not none and arcane_armor_state.defensive_field_temp_hp is defined %}
+      <p class="muted">Defensive Field: {{ arcane_armor_state.defensive_field_temp_hp }} temporary HP by current class level; hand occupancy does not limit it. Use and doffing consequences remain table managed.</p>
+    {% endif %}
     {% if arcane_armor_state_can_edit and arcane_armor_state_action %}
       <form
         class="stack-form"

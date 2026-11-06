@@ -7,10 +7,13 @@ its separate transaction path in committed_publication.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import sqlite3
+import sys
+from copy import deepcopy
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -19,7 +22,7 @@ import yaml
 from .campaign_page_refresh import build_page_payload, normalize_page_ref
 from .models import is_deprecated_wiki_identity
 from .repository import parse_frontmatter
-from .system_policy import KNOWN_SYSTEM_CODES, normalize_system_code
+from .system_policy import DND_5E_SYSTEM_CODE, KNOWN_SYSTEM_CODES, normalize_system_code
 
 
 _MAX_SOURCE_BYTES = 2 * 1024 * 1024
@@ -183,9 +186,100 @@ def _portrait_row_proved(
     return stored_media is not None
 
 
+_YAML_CACHE_MAX_INPUT = 256 * 1024
+_YAML_CACHE_MAX_BYTES = 16 * 1024 * 1024
+_YAML_CACHE_MAX_ENTRIES = 64
+_YAML_CACHE_MAX_NODES = 32768
+_YAML_CACHE_MAX_DEPTH = 64
+
+
+def _yaml_mapping_cache_charge(raw: bytes, mapping: dict) -> int | None:
+    """Charge only plain data; unsupported shapes retain uncached parsing."""
+    pending = [(mapping, 0)]
+    seen = set()
+    charge = 2 * sys.getsizeof(raw) + 512
+    scalars = (type(None), bool, int, float, str, bytes, date, datetime)
+    while pending:
+        value, depth = pending.pop()
+        if depth > _YAML_CACHE_MAX_DEPTH:
+            return None
+        identity = id(value)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        if len(seen) > _YAML_CACHE_MAX_NODES:
+            return None
+        kind = type(value)
+        if kind not in scalars and kind not in (dict, list):
+            return None
+        if kind is float and not math.isfinite(value):
+            return None
+        if (kind is datetime and value.tzinfo is not None
+                and type(value.tzinfo) is not timezone):
+            return None
+        # Include allocator overhead and immutable scalar backing storage.
+        charge += sys.getsizeof(value) + 128
+        if charge > _YAML_CACHE_MAX_BYTES:
+            return None
+        if kind is dict:
+            for key, item in value.items():
+                pending.append((key, depth + 1))
+                pending.append((item, depth + 1))
+        elif kind is list:
+            pending.extend((item, depth + 1) for item in value)
+    return charge
+
+
+def _parse_yaml_bytes_uncached(value: bytes) -> Any:
+    return yaml.safe_load(value.decode("utf-8"))
+
+
+def _load_committed_yaml(value: bytes) -> Any:
+    """Reuse pure parsing only; callers must still prove every source row."""
+    from flask import has_request_context, request
+
+    if (type(value) is not bytes or len(value) > _YAML_CACHE_MAX_INPUT
+            or not has_request_context()):
+        return _parse_yaml_bytes_uncached(value)
+    policy = (yaml.safe_load, yaml.SafeLoader, _parse_yaml_bytes_uncached)
+    cache = getattr(request, "_cpw_committed_yaml_parse_cache", None)
+    previous = getattr(request, "_cpw_committed_yaml_parse_policy", None)
+    if (type(cache) is not dict or type(previous) is not tuple
+            or len(previous) != len(policy)
+            or any(old is not new for old, new in zip(previous, policy))):
+        cache = request._cpw_committed_yaml_parse_cache = {}
+        request._cpw_committed_yaml_parse_bytes = 0
+        request._cpw_committed_yaml_parse_policy = policy
+    if value in cache:
+        parsed, charge = cache[value]
+        try:
+            return deepcopy(parsed)
+        except RecursionError:
+            del cache[value]
+            request._cpw_committed_yaml_parse_bytes -= charge
+            return _parse_yaml_bytes_uncached(value)
+    parsed = _parse_yaml_bytes_uncached(value)
+    if type(parsed) is not dict:
+        return parsed
+    charge = _yaml_mapping_cache_charge(value, parsed)
+    if charge is None:
+        return parsed
+    try:
+        detached = deepcopy(parsed)
+    except RecursionError:
+        return parsed
+    while cache and (len(cache) >= _YAML_CACHE_MAX_ENTRIES
+                     or request._cpw_committed_yaml_parse_bytes + charge > _YAML_CACHE_MAX_BYTES):
+        _old_value, old_charge = cache.pop(next(iter(cache)))
+        request._cpw_committed_yaml_parse_bytes -= old_charge
+    cache[value] = (parsed, charge)
+    request._cpw_committed_yaml_parse_bytes += charge
+    return detached
+
+
 def _decode_mapping(value: bytes) -> dict[str, Any] | None:
     try:
-        parsed = yaml.safe_load(value.decode("utf-8"))
+        parsed = _load_committed_yaml(value)
     except (UnicodeError, yaml.YAMLError, ValueError, OverflowError, RecursionError):
         return None
     return parsed if isinstance(parsed, dict) else None
@@ -259,6 +353,9 @@ def _validate_config_payload(
     if character_dir is None or not isinstance(payload.get("character_source_root", ""), str):
         return "malformed_primary", None
     if "systems_sources" in payload and not isinstance(payload["systems_sources"], list):
+        return "malformed_primary", None
+    if ("allow_artificer_infusion_deactivation" in payload
+            and type(payload["allow_artificer_infusion_deactivation"]) is not bool):
         return "malformed_primary", None
     return None, _ValidatedConfig(system_code, current_session, character_dir)
 
@@ -349,6 +446,19 @@ def _page_parity(connection: sqlite3.Connection, campaign_slug: str,
     return None
 
 
+def _character_system_code(payload: dict[str, Any]) -> str:
+    """Read the established omitted-system default without rewriting bytes.
+
+    Only absence of both keys receives the historical DND-5E default. An
+    explicit null, invalid value or system_code-only alias retains its former
+    strict rejection; an explicit system continues to use existing aliases.
+    """
+    if "system" not in payload and "system_code" not in payload:
+        return DND_5E_SYSTEM_CODE
+    system = payload.get("system")
+    return normalize_system_code(system) if isinstance(system, str) else ""
+
+
 def _classify(connection: sqlite3.Connection, campaign_slug: str, kind: str,
               ref: str, primary: bytes | None, secondary: bytes | None) -> str | None:
     if primary is None:
@@ -379,11 +489,10 @@ def _classify(connection: sqlite3.Connection, campaign_slug: str, kind: str,
         return "malformed_primary"
     if not isinstance(payload.get("status"), str) or not payload["status"].strip():
         return "malformed_primary"
-    system = payload.get("system")
     config = _current_config(connection, campaign_slug)
     if config is None:
         return "config_not_admitted"
-    if not isinstance(system, str) or normalize_system_code(system) != config.system_code:
+    if _character_system_code(payload) != config.system_code:
         return "system_mismatch"
     imported = _decode_mapping(secondary)
     if imported is None:

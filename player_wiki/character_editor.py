@@ -26,6 +26,11 @@ from .character_adjustments import (
     strip_manual_stat_adjustments,
 )
 from .character_builder import (
+    CharacterBuildError,
+    _background_instrument_payload,
+    _background_instrument_saved_values,
+    _build_background_choice_fields,
+    current_background_entry,
     IMPORTED_CHARACTER_SOURCE_TYPES,
     LINKED_CAMPAIGN_PAGE_ALLOWED_KINDS_BY_FIELD_KIND,
     NATIVE_LEVEL_UP_READY,
@@ -163,6 +168,39 @@ class CharacterEditValidationError(ValueError):
     pass
 
 
+def prepare_native_editor_inventory_note_overrides(
+    definition: CharacterDefinition, state: dict[str, Any], values: dict[str, str],
+) -> dict[str, dict[str, str]]:
+    """Bind existing editor note controls to their exact current physical rows."""
+    from .character_service import prepare_inventory_note_overrides
+
+    existing = _manual_equipment_entries(definition)
+    submitted: dict[str, str] = {}
+    seen: set[str] = set()
+    indexes = sorted({int(match.group(1)) for key in values
+                      if (match := re.fullmatch(r"manual_item_(?:id|notes)_(\d+)", str(key)))})
+    for index in indexes:
+        if index < 1:
+            raise CharacterEditValidationError("Item note controls need a valid editor row.")
+        item_id = str(values.get(f"manual_item_id_{index}") or "")
+        if item_id != item_id.strip():
+            raise CharacterEditValidationError("Item note controls need exact current row identities.")
+        if not item_id:
+            if f"manual_item_notes_{index}" in values and 1 <= index <= len(existing):
+                raise CharacterEditValidationError("Item note controls are missing their current row identity.")
+            continue  # A new manual row still seeds its note through normal creation.
+        if item_id in seen:
+            raise CharacterEditValidationError("Item note controls contain a duplicate identity.")
+        seen.add(item_id)
+        if index > len(existing) or existing[index - 1].get("id") != item_id:
+            raise CharacterEditValidationError("Item note controls do not match the current editor rows.")
+        field = f"manual_item_notes_{index}"
+        if field not in values:
+            continue
+        submitted[item_id] = values[field]
+    return prepare_inventory_note_overrides(definition, state, submitted)
+
+
 def build_linked_feature_authoring_support(
     definition: CharacterDefinition,
     *,
@@ -204,6 +242,7 @@ def build_character_spell_management_context(
     selected_class: Any | None = None,
     selected_class_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
+    from .character_spell_grants import has_native_grants
     spellcasting = dict(definition.spellcasting or {})
 
     spell_catalog = dict(spell_catalog or {})
@@ -235,6 +274,19 @@ def build_character_spell_management_context(
         )
         for row_payload in class_row_payloads
     ]
+    if has_native_grants(definition) and spellcasting.get("native_grant_projection") is not True:
+        # The stored occurrence model is a claim. Only the common qualified
+        # read projection can supply management counts and permissions.
+        for section in sections:
+            section["can_manage"] = False
+            section["can_add_cantrip"] = False
+            section["can_add_spell"] = False
+            section["unavailable_message"] = "Refresh the qualified spell view before managing this spell list."
+            for count in section["counts"]:
+                count["value"] = "UNKNOWN"
+            for row in section["rows"]:
+                row["can_remove"] = False
+                row["can_toggle_prepared"] = False
     return {
         "sections": sections,
         "is_multiclass": len(managed_class_rows) > 1,
@@ -289,6 +341,14 @@ def _feature_spell_management_rows(
     return rows
 
 
+def _spell_management_ability_key(value: Any) -> str:
+    key = normalize_lookup(str(value or ""))
+    return {"strength": "str", "dexterity": "dex", "constitution": "con",
+            "intelligence": "int", "wisdom": "wis", "charisma": "cha",
+            "str": "str", "dex": "dex", "con": "con", "int": "int",
+            "wis": "wis", "cha": "cha"}.get(key, "")
+
+
 def _spell_management_class_rows(
     definition: CharacterDefinition,
     *,
@@ -328,7 +388,8 @@ def _spell_management_class_rows(
                     "level": int(row.get("level") or 0),
                     "mode": str(row.get("spell_mode") or "").strip(),
                     "spellcasting_ability": str(row.get("spellcasting_ability") or "").strip(),
-                    "spellcasting_ability_key": "",
+                    "spellcasting_ability_key": _spell_management_ability_key(row.get("spellcasting_ability_key") or row.get("spellcasting_ability")),
+                    "authority_status": row.get("authority_status"),
                     "spell_save_dc": row.get("spell_save_dc"),
                     "spell_attack_bonus": row.get("spell_attack_bonus"),
                     "selected_class": resolved_class,
@@ -371,7 +432,7 @@ def _spell_management_class_rows(
                     "level": current_level,
                     "mode": mode,
                     "spellcasting_ability": str(spellcasting.get("spellcasting_ability") or "").strip(),
-                    "spellcasting_ability_key": "",
+                    "spellcasting_ability_key": _spell_management_ability_key(spellcasting.get("spellcasting_ability_key") or spellcasting.get("spellcasting_ability")),
                     "spell_save_dc": spellcasting.get("spell_save_dc"),
                     "spell_attack_bonus": spellcasting.get("spell_attack_bonus"),
                     "selected_class": selected_class if isinstance(selected_class, SystemsEntryRecord) else None,
@@ -394,7 +455,8 @@ def _spell_management_class_rows(
                 "level": 0,
                 "mode": str(payload.get("spell_mode") or "").strip(),
                 "spellcasting_ability": str(payload.get("spellcasting_ability") or "").strip(),
-                "spellcasting_ability_key": "",
+                "spellcasting_ability_key": _spell_management_ability_key(payload.get("spellcasting_ability_key") or payload.get("spellcasting_ability")),
+                "authority_status": payload.get("authority_status"),
                 "spell_save_dc": payload.get("spell_save_dc"),
                 "spell_attack_bonus": payload.get("spell_attack_bonus"),
                 "selected_class": None,
@@ -446,10 +508,13 @@ def _build_spell_management_section(
     row_payload: dict[str, Any],
     total_spell_rows: int,
 ) -> dict[str, Any]:
+    from .character_spell_grants import has_native_grants
+    migrated_grants = has_native_grants(definition)
     class_name = str(row_payload.get("class_name") or "").strip()
     spell_list_class_name = str(row_payload.get("spell_list_class_name") or class_name).strip()
     mode = str(row_payload.get("mode") or "").strip()
     row_kind = str(row_payload.get("row_kind") or "class").strip() or "class"
+    qualified_class = migrated_grants and row_kind == "class"
     current_level = int(row_payload.get("level") or 0)
     selected_class = row_payload.get("selected_class")
     selected_subclass = row_payload.get("selected_subclass")
@@ -477,14 +542,24 @@ def _build_spell_management_section(
         row_kind=row_kind,
     )
 
-    mutable_cantrip_count = sum(1 for row in rows if row["counts_against_cantrip_limit"])
-    mutable_known_count = sum(1 for row in rows if row["counts_against_known_limit"])
-    mutable_prepared_count = sum(1 for row in rows if row["counts_against_prepared_limit"])
-    mutable_spellbook_count = sum(1 for row in rows if row["counts_against_spellbook_total"])
-    mutable_ritual_book_count = sum(1 for row in rows if row["counts_against_ritual_book_total"])
-    fixed_spell_count = sum(1 for row in rows if row["is_fixed"])
+    def counted(field: str) -> int:
+        # Origins are independent; compatible exact spells share one class
+        # count. Unqualified legacy rows retain their existing adapter limits.
+        return len({str(row.get("count_identity") or row["spell_key"])
+                    for row in rows if row[field]})
+    mutable_cantrip_count = None if qualified_class else counted("counts_against_cantrip_limit")
+    mutable_known_count = None if qualified_class else counted("counts_against_known_limit")
+    mutable_prepared_count = None if qualified_class else counted("counts_against_prepared_limit")
+    mutable_spellbook_count = None if qualified_class else counted("counts_against_spellbook_total")
+    mutable_ritual_book_count = counted("counts_against_ritual_book_total")
+    fixed_spell_count = counted("is_fixed")
 
     ability_scores = _spell_management_ability_scores(definition)
+    ability_key = str(row_payload.get("spellcasting_ability_key") or "")
+    ability_row = dict(dict(definition.stats or {}).get("ability_scores") or {}).get(ability_key)
+    ability_score = ability_row.get("score") if isinstance(ability_row, dict) else None
+    preparation_input_unknown = bool(migrated_grants and mode in {"prepared", "wizard"}
+                                     and (not ability_key or type(ability_score) is not int))
     target_cantrip_count = (
         _spell_progression_value(
             class_name,
@@ -493,7 +568,7 @@ def _build_spell_management_section(
             selected_class=selected_class,
             selected_subclass=selected_subclass,
         )
-        if class_name and mode
+        if class_name and mode and not qualified_class
         else 0
     )
     target_known_count = (
@@ -504,7 +579,7 @@ def _build_spell_management_section(
             selected_class=selected_class,
             selected_subclass=selected_subclass,
         )
-        if mode == "known"
+        if mode == "known" and not qualified_class
         else 0
     )
     target_prepared_count = (
@@ -515,20 +590,57 @@ def _build_spell_management_section(
             selected_class=selected_class,
             selected_subclass=selected_subclass,
         )
-        if mode in {"prepared", "wizard"}
+        if mode in {"prepared", "wizard"} and not preparation_input_unknown and not qualified_class
         else 0
     )
+    if preparation_input_unknown:
+        target_prepared_count = None
+
+    pools: dict[str, dict[str, Any] | None] = {}
+    if migrated_grants and row_kind == "class":
+        ledger = (definition.spellcasting or {}).get("native_choice_ledger")
+        qualified = bool((definition.spellcasting or {}).get("native_grant_projection") is True
+                         and isinstance(ledger, dict))
+        for kind in ("cantrip", "known", "prepared", "spellbook"):
+            matches = [pool for pool in (ledger.get("pools", []) if qualified else [])
+                       if isinstance(pool, dict) and pool.get("class_row_id") == class_row_id
+                       and pool.get("kind") == kind]
+            pools[kind] = matches[0] if len(matches) == 1 else None
+
+        def pool_value(kind: str, key: str) -> int | None:
+            pool = pools.get(kind)
+            value = pool.get(key) if pool is not None and pool.get("status") == "KNOWN" else None
+            return value if type(value) is int else None
+
+        # Complete qualified occupancy is independent of row display grouping.
+        mutable_cantrip_count = pool_value("cantrip", "occupancy")
+        mutable_known_count = pool_value("known", "occupancy")
+        mutable_prepared_count = pool_value("prepared", "occupancy")
+        mutable_spellbook_count = pool_value("spellbook", "occupancy")
+        target_cantrip_count = pool_value("cantrip", "allowance")
+        target_known_count = pool_value("known", "allowance")
+        target_prepared_count = pool_value("prepared", "allowance")
+
+    cantrip_capacity_known = type(mutable_cantrip_count) is int and type(target_cantrip_count) is int
+    known_capacity_known = type(mutable_known_count) is int and type(target_known_count) is int
+    prepared_capacity_known = type(mutable_prepared_count) is int and type(target_prepared_count) is int
+    spellbook_capacity_known = (not migrated_grants or row_kind != "class"
+                               or (pools.get("spellbook") or {}).get("status") == "KNOWN")
 
     counts: list[dict[str, str]] = []
-    if target_cantrip_count:
+    if target_cantrip_count or (migrated_grants and row_kind == "class" and not cantrip_capacity_known):
         counts.append({"label": "Cantrips", "value": f"{mutable_cantrip_count} / {target_cantrip_count}"})
+        if not cantrip_capacity_known:
+            counts[-1]["value"] = "UNKNOWN"
     if mode == "known":
         counts.append({"label": "Known spells", "value": f"{mutable_known_count} / {target_known_count}"})
+        if not known_capacity_known:
+            counts[-1]["value"] = "UNKNOWN"
     elif mode == "prepared":
-        counts.append({"label": "Prepared spells", "value": f"{mutable_prepared_count} / {target_prepared_count}"})
+        counts.append({"label": "Prepared spells", "value": f"{mutable_prepared_count} / {target_prepared_count}" if target_prepared_count is not None else "UNKNOWN"})
     elif mode == "wizard":
-        counts.append({"label": "Prepared spells", "value": f"{mutable_prepared_count} / {target_prepared_count}"})
-        counts.append({"label": "Spellbook spells", "value": str(mutable_spellbook_count)})
+        counts.append({"label": "Prepared spells", "value": f"{mutable_prepared_count} / {target_prepared_count}" if target_prepared_count is not None else "UNKNOWN"})
+        counts.append({"label": "Spellbook spells", "value": str(mutable_spellbook_count) if spellbook_capacity_known else "UNKNOWN"})
     elif mode == "ritual_book":
         counts.append({"label": "Ritual book spells", "value": str(mutable_ritual_book_count)})
     if fixed_spell_count:
@@ -546,6 +658,13 @@ def _build_spell_management_section(
     )
     if not can_manage and not unavailable_message and mode:
         unavailable_message = "Enable Systems spell entries in this campaign to manage spells from the character sheet."
+    if not (migrated_grants and row_kind == "class") and (preparation_input_unknown or any(row.get("grant_count_unknown") for row in rows)
+            or (migrated_grants and str(row_payload.get("authority_status") or "").upper() in {"NEEDS REPAIR", "NEEDS ATTENTION", "MANUAL"})):
+        can_manage = False
+        unavailable_message = "Spell counting needs source repair before this list can change."
+        for count in counts:
+            if count["label"] != "Fixed feature spells":
+                count["value"] = "UNKNOWN"
 
     spell_add_label = {
         "known": "Add known spell",
@@ -617,16 +736,16 @@ def _build_spell_management_section(
         "can_manage": can_manage,
         "unavailable_message": unavailable_message,
         "rules_note": rules_note,
-        "show_cantrip_form": bool(mode and target_cantrip_count),
-        "can_add_cantrip": bool(can_manage and mutable_cantrip_count < target_cantrip_count),
+        "show_cantrip_form": bool(mode and (target_cantrip_count or not cantrip_capacity_known)),
+        "can_add_cantrip": bool(can_manage and cantrip_capacity_known and mutable_cantrip_count < target_cantrip_count),
         "show_spell_form": bool(mode and max_spell_level > 0),
         "can_add_spell": bool(
             can_manage
             and max_spell_level > 0
             and (
-                mode in {"wizard", "ritual_book"}
-                or (mode == "known" and mutable_known_count < target_known_count)
-                or (mode == "prepared" and mutable_prepared_count < target_prepared_count)
+                (mode == "wizard" and spellbook_capacity_known) or mode == "ritual_book"
+                or (mode == "known" and known_capacity_known and mutable_known_count < target_known_count)
+                or (mode == "prepared" and prepared_capacity_known and mutable_prepared_count < target_prepared_count)
             )
         ),
         "spell_add_kind": (
@@ -680,6 +799,8 @@ def search_character_spell_management_options(
         return [], "Only wizard sheets use spellbook additions."
     if clean_kind == "ritual_book" and section.get("mode") != "ritual_book":
         return [], "Only ritual-book sheets use ritual spell additions."
+    if not section.get("can_add_cantrip" if clean_kind == "cantrip" else "can_add_spell"):
+        return [], "This spell pool has no proved available capacity."
 
     clean_query = normalize_lookup(query)
     if len(clean_query) < SPELL_MANAGEMENT_QUERY_MIN_LENGTH:
@@ -691,6 +812,12 @@ def search_character_spell_management_options(
     existing_keys = {
         str(row.get("catalog_key") or row.get("spell_key") or "").strip()
         for row in list(section.get("rows") or [])
+        if not (section.get("row_kind") == "class"
+            and ((clean_kind == "cantrip")
+                 or (clean_kind == "spell" and section.get("mode") in {"known", "prepared"})
+                 or (clean_kind == "spellbook" and section.get("mode") == "wizard"))
+            and dict(row.get("payload") or {}).get("grant_class_choice_can_select") is True
+            and row.get("class_list_available") is not True)
         if str(row.get("catalog_key") or row.get("spell_key") or "").strip()
     }
     results: list[dict[str, str]] = []
@@ -764,8 +891,12 @@ def apply_character_spell_management_edit(
     prepared_value: str = "",
     target_class_row_id: str = "",
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
+    from .character_spell_grants import has_native_grants
+    migrated_grants = has_native_grants(current_definition)
+    if migrated_grants and (source_authority is None or eligibility_definition is None):
+        raise CharacterEditValidationError("Refresh the qualified spell view before managing this spell list.")
     manager = build_character_spell_management_context(
-        current_definition,
+        eligibility_definition if migrated_grants else current_definition,
         spell_catalog=spell_catalog,
         selected_class=selected_class,
         selected_class_rows=selected_class_rows,
@@ -820,6 +951,23 @@ def apply_character_spell_management_edit(
         key: deepcopy(dict(row.get("payload") or {}))
         for key, row in rows_by_key.items()
     }
+    retained_spell_rows: list[dict[str, Any]] = []
+    ambiguous_spell_keys: set[str] = set()
+    if migrated_grants:
+        # Presentation rows may contain derived flags and qualified origins.
+        # Durable management changes only its original spell observation.
+        spells_by_key = {}
+        for raw in list((current_definition.spellcasting or {}).get("spells") or []):
+            if not isinstance(raw, dict):
+                raise CharacterEditValidationError("The stored spell list needs manager repair.")
+            key = _spell_payload_map_key(raw)
+            if not key or key in ambiguous_spell_keys:
+                retained_spell_rows.append(deepcopy(raw))
+            elif key in spells_by_key:
+                ambiguous_spell_keys.add(key)
+                retained_spell_rows.extend((spells_by_key.pop(key), deepcopy(raw)))
+            else:
+                spells_by_key[key] = deepcopy(raw)
     catalog_keys = {
         str(row.get("catalog_key") or row.get("spell_key") or "").strip()
         for row in list(section.get("rows") or [])
@@ -832,6 +980,9 @@ def apply_character_spell_management_edit(
     clean_mode = str(section.get("mode") or "").strip()
     clean_target_class_row_id = str(section.get("class_row_id") or target_class_row_id or "").strip()
     support_kwargs = _spell_management_section_support_kwargs(section)
+    ordinary_addition = bool(migrated_grants and section.get("row_kind") == "class" and (
+        clean_kind == "cantrip" or clean_kind == "spell" and clean_mode in {"known", "prepared"}
+        or clean_kind == "spellbook" and clean_mode == "wizard"))
     if clean_spell_key and clean_spell_key not in rows_by_key:
         legacy_candidates: set[str] = set()
         for candidate in list(section.get("rows") or []):
@@ -861,7 +1012,12 @@ def apply_character_spell_management_edit(
             if resolved_entry is not None
             else _spell_lookup_key(clean_selected_value, dict(spell_catalog or {}))
         )
-        if resolved_key in catalog_keys:
+        selectable = [row for row in section.get("rows", [])
+            if row.get("catalog_key") == resolved_key
+            and dict(row.get("payload") or {}).get("grant_class_choice_can_select") is True
+            and row.get("class_list_available") is not True
+            and ordinary_addition]
+        if resolved_key in catalog_keys and len(selectable) != 1:
             raise CharacterEditValidationError("That spell is already on this sheet.")
         _validate_spell_management_addition(
             resolved_entry,
@@ -882,13 +1038,19 @@ def apply_character_spell_management_edit(
         elif clean_kind == "spell" and clean_mode == "known":
             if not bool(section.get("can_add_spell")):
                 raise CharacterEditValidationError("This sheet is already at its current known-spell count.")
-            _add_spell_to_payloads(
-                spells_by_key,
-                selected_value=clean_selected_value,
-                spell_catalog=dict(spell_catalog or {}),
-                mark="Known",
-                class_row_id=clean_target_class_row_id,
-            )
+            existing_key = str(selectable[0].get("spell_key") or "") if selectable else ""
+            if migrated_grants and existing_key in spells_by_key:
+                payload = deepcopy(spells_by_key[existing_key])
+                payload["native_class_choice_state"] = "active"
+                spells_by_key[existing_key] = payload
+            else:
+                _add_spell_to_payloads(
+                    spells_by_key,
+                    selected_value=clean_selected_value,
+                    spell_catalog=dict(spell_catalog or {}),
+                    mark="Known",
+                    class_row_id=clean_target_class_row_id,
+                )
         elif clean_kind == "spell" and clean_mode == "prepared":
             if not bool(section.get("can_add_spell")):
                 raise CharacterEditValidationError("This sheet is already at its current prepared-spell count.")
@@ -900,6 +1062,8 @@ def apply_character_spell_management_edit(
                 class_row_id=clean_target_class_row_id,
             )
         elif clean_kind == "spellbook" and clean_mode == "wizard":
+            if not bool(section.get("can_add_spell")):
+                raise CharacterEditValidationError("Spellbook capacity needs source repair before adding spells.")
             _add_spell_to_payloads(
                 spells_by_key,
                 selected_value=clean_selected_value,
@@ -921,17 +1085,56 @@ def apply_character_spell_management_edit(
             )
         else:
             raise CharacterEditValidationError("Choose a valid spell-management action.")
+        if ordinary_addition:
+            from .character_spell_grants import canonical_digest, native_class_choice_state, publication_identity
+            from .character_source_authority import native_spell_choice_birth_is_absent
+            # A virtual feature row has no stored ordinary observation. A
+            # confirmed retirement instead reuses its exact original row.
+            existing_key = str(selectable[0].get("spell_key") or "") if selectable else ""
+            original_rows = [raw for raw in current_definition.spellcasting.get("spells", [])
+                             if isinstance(raw, dict) and existing_key and _spell_payload_map_key(raw) == existing_key]
+            if len(original_rows) > 1:
+                raise CharacterEditValidationError("This spell needs an unambiguous stored choice before selection.")
+            if original_rows:
+                original = original_rows[0]
+                if (native_class_choice_state(original) != "retired"
+                        or original.get("id") not in source_authority.confirmed_retired_spell_choices):
+                    raise CharacterEditValidationError("This stored spell needs confirmed ordinary retirement before reselection.")
+                spells_by_key[existing_key] = deepcopy(original_rows[0])
+                spells_by_key[existing_key]["native_class_choice_state"] = "active"
+            else:
+                added = [raw for raw in spells_by_key.values()
+                         if _spell_payload_key(raw) == _spell_payload_key({"systems_ref": _systems_ref_from_entry(resolved_entry)})
+                         and raw.get("class_row_id") == clean_target_class_row_id
+                         and not raw.get("spell_source_row_id")]
+                if len(added) != 1:
+                    raise CharacterEditValidationError("This spell needs an exact class selection before it can be added.")
+                new = added[0]
+                new["id"] = "spell:" + canonical_digest([
+                    new.get("class_row_id"), new.get("spell_source_row_id"),
+                    publication_identity(new["systems_ref"]),
+                ])
+                new["native_class_choice_state"] = "active"
+                if not native_spell_choice_birth_is_absent(current_definition, new):
+                    raise CharacterEditValidationError("This spell has unresolved original choice history and cannot be added as new.")
     elif clean_operation == "remove":
         row = rows_by_key.get(clean_spell_key)
         if row is None:
             raise CharacterEditValidationError("Choose a valid spell to remove.")
+        if migrated_grants and (clean_spell_key in ambiguous_spell_keys or clean_spell_key not in spells_by_key):
+            raise CharacterEditValidationError("This spell needs an unambiguous stored choice before removal.")
         if activated and not any(str(candidate.get("spell_key") or "").strip() == clean_spell_key
                    and bool(candidate.get("can_remove"))
                    for candidate in list(safe_section.get("rows") or [])):
             raise CharacterEditValidationError("This spell needs manager source repair before removal.")
         if not bool(row.get("can_remove")):
             raise CharacterEditValidationError("That spell is fixed by class or feature rules and cannot be removed here.")
-        spells_by_key.pop(clean_spell_key, None)
+        if migrated_grants and dict(row.get("payload") or {}).get("grant_class_choice_can_remove") is True:
+            payload = deepcopy(spells_by_key[clean_spell_key])
+            payload["native_class_choice_state"] = "retired"
+            spells_by_key[clean_spell_key] = payload
+        else:
+            spells_by_key.pop(clean_spell_key, None)
     elif clean_operation == "update":
         row = rows_by_key.get(clean_spell_key)
         if row is None:
@@ -942,6 +1145,8 @@ def apply_character_spell_management_edit(
             raise CharacterEditValidationError("This spell needs manager source repair before preparation changes.")
         if not bool(row.get("can_toggle_prepared")):
             raise CharacterEditValidationError("That spell cannot have its prepared state changed here.")
+        if migrated_grants and (clean_spell_key in ambiguous_spell_keys or clean_spell_key not in spells_by_key):
+            raise CharacterEditValidationError("This spell needs an authenticated stored choice before preparation can change.")
         set_prepared = str(prepared_value or "").strip() in {"1", "true", "yes", "on"}
         if set_prepared and clean_mode in {"prepared", "wizard"}:
             spell_level = int(row.get("spell_level") or 0)
@@ -956,10 +1161,34 @@ def apply_character_spell_management_edit(
         ):
             raise CharacterEditValidationError("This caster is already at the current prepared-spell count.")
         payload = deepcopy(spells_by_key.get(clean_spell_key) or {})
+        if migrated_grants and clean_mode == "prepared":
+            from .character_spell_grants import native_class_choice_state
+            state = native_class_choice_state(payload)
+            if state not in (None, "active"):
+                raise CharacterEditValidationError("A retired choice cannot be changed through preparation controls.")
+            if set_prepared and state is None:
+                ledger = source_authority.spell_choice_ledger
+                available = [choice for choice in ledger.get("choices", [])
+                    if isinstance(choice, dict) and choice.get("spell_id") == payload.get("id")
+                    and choice.get("class_row_id") == clean_target_class_row_id
+                    and choice.get("class_list_available") is True
+                    and choice.get("current_reconstruction_role") == "available"
+                    and choice.get("ordinary_eligible") is True and choice.get("current_usable") is True]
+                if (section.get("row_kind") != "class" or len(available) != 1
+                        or payload.get("class_row_id") != clean_target_class_row_id
+                        or payload.get("spell_source_row_id")):
+                    raise CharacterEditValidationError("This preparation needs a confirmed available class-list spell.")
+                # This is a current preparation of an existing observation.
+                # Publication records prepare_available, never a learned birth.
+                payload["native_class_choice_state"] = "active"
         if clean_mode == "prepared":
             payload["mark"] = "Prepared" if set_prepared else ""
         else:
             payload["mark"] = "Prepared + Spellbook" if set_prepared else "Spellbook"
+        if migrated_grants and clean_mode in {"prepared", "wizard"}:
+            for field_name in ("is_prepared", "prepared"):
+                if field_name in payload:
+                    payload[field_name] = set_prepared
         spells_by_key[clean_spell_key] = payload
     else:
         raise CharacterEditValidationError("Choose a valid spell-management action.")
@@ -967,14 +1196,14 @@ def apply_character_spell_management_edit(
     payload = deepcopy(current_definition.to_dict())
     next_spellcasting = dict(payload.get("spellcasting") or {})
     next_spellcasting["spells"] = sorted(
-        list(spells_by_key.values()),
+        list(spells_by_key.values()) + retained_spell_rows,
         key=lambda value: _spell_management_payload_sort_key(value, dict(spell_catalog or {})),
     )
     payload["spellcasting"] = next_spellcasting
 
     definition = CharacterDefinition.from_dict(payload)
     source_type = str((current_definition.source or {}).get("source_type") or "").strip()
-    if source_type and source_type != "native_character_builder":
+    if source_type and source_type != "native_character_builder" and not migrated_grants:
         definition = converge_imported_definition(
             definition,
             existing_definition=current_definition,
@@ -1096,6 +1325,20 @@ def _build_spell_management_rows(
     total_spell_rows: int,
     row_kind: str = "class",
 ) -> list[dict[str, Any]]:
+    from .character_spell_grants import has_native_grants
+    migrated_grants = has_native_grants(definition)
+    qualified_projection = (definition.spellcasting or {}).get("native_grant_projection") is True
+    ledger = (definition.spellcasting or {}).get("native_choice_ledger")
+    qualified_ledger = ledger if qualified_projection and isinstance(ledger, dict) else {}
+    row_pools = {kind: [pool for pool in qualified_ledger.get("pools", [])
+                       if isinstance(pool, dict) and pool.get("class_row_id") == class_row_id
+                       and pool.get("kind") == kind]
+                 for kind in ("cantrip", "known", "prepared", "spellbook")}
+
+    def ledger_counted(kind: str, spell_id: str) -> bool:
+        matches = row_pools[kind]
+        return bool(len(matches) == 1 and matches[0].get("status") == "KNOWN"
+                    and spell_id in matches[0].get("counted_spell_ids", []))
     rows: list[dict[str, Any]] = []
     for raw_spell_payload in list((definition.spellcasting or {}).get("spells") or []):
         payload_row_id = _spell_payload_management_row_id(dict(raw_spell_payload or {}))
@@ -1109,6 +1352,8 @@ def _build_spell_management_rows(
             spell_catalog=spell_catalog,
             mode=mode,
             class_name=class_name,
+            migrated_grants=migrated_grants,
+            qualified_projection=qualified_projection,
         )
         if class_row_id and row_kind == "class" and not _spell_payload_management_row_id(normalized_payload):
             normalized_payload["class_row_id"] = class_row_id
@@ -1117,9 +1362,17 @@ def _build_spell_management_rows(
             continue
 
         normalized_mark = normalize_lookup(str(normalized_payload.get("mark") or "").strip())
+        choices = [choice for choice in qualified_ledger.get("choices", [])
+                   if isinstance(choice, dict) and choice.get("spell_id") == normalized_payload.get("id")
+                   and choice.get("class_row_id") == class_row_id]
+        choice = choices[0] if len(choices) == 1 else {}
+        class_list_available = bool(mode == "prepared" and row_kind == "class"
+            and choice.get("class_list_available") is True)
+        spell_id = str(normalized_payload.get("id") or "")
         review_only = bool(
             normalized_payload.get("item_spell_review_only")
             or normalized_payload.get("spell_source_review_only")
+            or (migrated_grants and str(normalized_payload.get("authority_status") or "").upper() != "VERIFIED")
         )
         source_label = str(
             normalized_payload.get("grant_source_label")
@@ -1135,6 +1388,15 @@ def _build_spell_management_rows(
             )
         )
         in_spellbook = bool(not review_only and not is_cantrip and "spellbook" in normalized_mark)
+        if migrated_grants and mode == "wizard" and row_kind == "class":
+            # The exact qualified ledger owns current ordinary membership and
+            # preparation, including retained aliases and Boolean-only marks.
+            ordinary_book = bool(choice.get("pool") == "spellbook"
+                and choice.get("ordinary_counted") is True and choice.get("current_usable") is True)
+            in_spellbook = bool(not review_only and not is_cantrip and ordinary_book)
+            is_prepared = bool(not review_only and not is_cantrip and (
+                normalized_payload.get("is_always_prepared") is True
+                or ordinary_book and choice.get("ordinary_prepared") is True))
         in_ritual_book = bool(
             not review_only and not is_cantrip
             and (
@@ -1144,7 +1406,8 @@ def _build_spell_management_rows(
         )
         is_fixed = bool(
             not review_only
-            and (normalized_payload.get("is_always_prepared") or normalized_payload.get("is_bonus_known"))
+            and (normalized_payload.get("grant_fixed") is True if migrated_grants else
+                 normalized_payload.get("is_always_prepared") or normalized_payload.get("is_bonus_known"))
         )
 
         managed_group = ""
@@ -1170,6 +1433,8 @@ def _build_spell_management_rows(
             badges.append("Known")
         elif is_prepared:
             badges.append("Prepared")
+        elif not review_only and class_list_available:
+            badges.append("Available")
         if bool(normalized_payload.get("is_always_prepared")):
             badges.append("Always prepared")
         elif bool(normalized_payload.get("is_bonus_known")):
@@ -1198,28 +1463,48 @@ def _build_spell_management_rows(
                 "is_cantrip": is_cantrip,
                 "is_fixed": is_fixed,
                 "is_prepared": is_prepared,
+                "class_list_available": class_list_available,
                 "in_spellbook": in_spellbook,
                 "managed_group": managed_group,
                 "badges": badges,
                 "management_note": management_note,
-                "counts_against_cantrip_limit": bool(is_cantrip and not bool(normalized_payload.get("is_bonus_known"))),
-                "counts_against_known_limit": bool(
+                "count_identity": (
+                    class_row_id + "::" + str(dict(normalized_payload.get("systems_ref") or {}).get("entry_key") or spell_key)
+                    if migrated_grants else spell_key
+                ),
+                "grant_count_unknown": bool(
+                    migrated_grants and (choice.get("retained_obligation") is True or not review_only) and (
+                        ((is_cantrip or mode == "known") and normalized_payload.get("grant_counts_against_known") is None)
+                        or (is_prepared and mode in {"prepared", "wizard"}
+                            and normalized_payload.get("grant_counts_against_prepared") is None)
+                    )
+                ),
+                "counts_against_cantrip_limit": ledger_counted("cantrip", spell_id) if migrated_grants and row_kind == "class" else bool(is_cantrip and (
+                    normalized_payload.get("grant_counts_against_known") is not False if migrated_grants
+                    else not bool(normalized_payload.get("is_bonus_known"))
+                )),
+                "counts_against_known_limit": ledger_counted("known", spell_id) if migrated_grants and row_kind == "class" else bool(
                     not is_cantrip
                     and managed_group == "known"
-                    and not bool(normalized_payload.get("is_bonus_known"))
-                    and not bool(normalized_payload.get("is_always_prepared"))
+                    and (normalized_payload.get("grant_counts_against_known") is not False if migrated_grants else
+                         not bool(normalized_payload.get("is_bonus_known"))
+                         and not bool(normalized_payload.get("is_always_prepared")))
                 ),
-                "counts_against_prepared_limit": bool(
+                "counts_against_prepared_limit": ledger_counted("prepared", spell_id) if migrated_grants and row_kind == "class" else bool(
                     not is_cantrip
                     and is_prepared
-                    and not bool(normalized_payload.get("is_always_prepared"))
+                    and (normalized_payload.get("grant_counts_against_prepared") is not False if migrated_grants
+                         else not bool(normalized_payload.get("is_always_prepared")))
                 ),
-                "counts_against_spellbook_total": bool(not is_cantrip and in_spellbook),
+                "counts_against_spellbook_total": ledger_counted("spellbook", spell_id) if migrated_grants and row_kind == "class" else bool(not is_cantrip and in_spellbook),
                 "counts_against_ritual_book_total": bool(not is_cantrip and in_ritual_book),
                 "can_remove": bool(
                     not review_only and not is_cantrip
                     and (row_kind == "class" or mode == "ritual_book")
-                    and not is_fixed
+                    and (not is_fixed or normalized_payload.get("grant_class_choice_can_remove") is True)
+                    and (not migrated_grants or row_kind != "class"
+                         or (choice.get("replaceable") is True if mode == "known"
+                             else choice.get("ordinary_counted") is True and choice.get("current_usable") is True))
                     and mode != "prepared"
                 ),
                 "can_toggle_prepared": bool(
@@ -1228,6 +1513,14 @@ def _build_spell_management_rows(
                     and not is_cantrip
                     and (mode != "wizard" or in_spellbook)
                     and not bool(normalized_payload.get("is_always_prepared"))
+                    and (not migrated_grants or mode != "wizard"
+                         or type(choice.get("ordinary_prepared")) is bool)
+                    and (not migrated_grants or len(row_pools["prepared"]) == 1
+                         and row_pools["prepared"][0].get("status") == "KNOWN"
+                         and choice.get("current_usable") is True
+                         and (choice.get("ordinary_counted") is True
+                              or class_list_available and choice.get("ordinary_eligible") is True)
+                         and normalized_payload.get("native_class_choice_state") != "retired")
                 ),
                 "remove_label": "" if review_only else _spell_management_remove_label(
                     mode=mode,
@@ -1249,6 +1542,8 @@ def _normalize_spell_management_payload(
     spell_catalog: dict[str, Any],
     mode: str,
     class_name: str,
+    migrated_grants: bool = False,
+    qualified_projection: bool = False,
 ) -> tuple[dict[str, Any], Any | None, int]:
     payload = deepcopy(dict(raw_spell_payload or {}))
     spell_entry = _spell_management_entry_for_payload(payload, spell_catalog)
@@ -1262,18 +1557,26 @@ def _normalize_spell_management_payload(
         }
 
     spell_level = _spell_entry_level(spell_entry) if spell_entry is not None else int(payload.get("level") or 0)
-    if payload.get("item_spell_review_only") or payload.get("spell_source_review_only"):
+    if (payload.get("item_spell_review_only") or payload.get("spell_source_review_only")
+            or (migrated_grants and not qualified_projection)):
         _quarantine_reviewed_spell_entitlement(payload)
+        payload["spell_source_review_only"] = True
+        return payload, spell_entry, spell_level
+    if migrated_grants:
+        # Current qualification supplies flags and actions. The historical
+        # mark is an observation, including an admitted empty Known mark.
         return payload, spell_entry, spell_level
     source_label = str(payload.get("source") or "").strip()
     normalized_mark = normalize_lookup(str(payload.get("mark") or "").strip())
-    always_prepared = _spell_payload_is_always_prepared(payload)
-    feature_grant = _spell_management_is_feature_grant_source(
+    always_prepared = (payload.get("is_always_prepared") is True if migrated_grants
+                       else _spell_payload_is_always_prepared(payload))
+    feature_grant = not migrated_grants and _spell_management_is_feature_grant_source(
         source_label,
         class_name=class_name,
         spell_payload=payload,
     )
-    bonus_known = bool(payload.get("is_bonus_known")) or feature_grant
+    bonus_known = (payload.get("is_bonus_known") is True if migrated_grants
+                   else bool(payload.get("is_bonus_known")) or feature_grant)
 
     payload["is_always_prepared"] = always_prepared
     payload["is_bonus_known"] = bonus_known
@@ -1498,7 +1801,7 @@ def normalize_custom_equipment_entry(
     if not clean_name:
         raise CharacterEditValidationError("Each custom equipment row needs an item name.")
 
-    parsed_quantity = _parse_manual_item_quantity(str(quantity or "").strip())
+    parsed_quantity = _parse_manual_item_quantity(str(quantity if quantity is not None else "").strip())
     normalized_page_ref = str(page_ref or "").strip()
     normalized_campaign_option = dict(campaign_option or {})
     existing = deepcopy(existing_item or {})
@@ -1889,6 +2192,10 @@ def apply_artificer_infusion_state_edit(
     systems_service: Any | None = None,
     active_entries: list[dict[str, Any]] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int], dict[str, dict[str, Any]]]:
+    from .character_infusion_recipes import typed_mode
+    if typed_mode(current_definition):
+        raise CharacterEditValidationError(
+            "Typed recipe knowledge does not authorize active assignments. Preserve the existing assignments until their supported reconciliation.")
     artificer_level = artificer_level_from_definition(current_definition)
     active_capacity = artificer_infusion_active_capacity(artificer_level)
     known_infusions = known_artificer_infusions(current_definition)
@@ -2008,10 +2315,12 @@ def build_native_character_edit_context(
     campaign_page_records: list[Any] | None = None,
     form_values: dict[str, str] | None = None,
     state_notes: dict[str, Any] | None = None,
+    inventory_notes: dict[str, str] | None = None,
     optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
     spell_catalog: dict[str, Any] | None = None,
     item_catalog: dict[str, Any] | None = None,
     linked_feature_authoring_support: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
 ) -> dict[str, Any]:
     definition = normalize_definition_to_native_model(
         definition, item_catalog=item_catalog, spell_catalog=spell_catalog,
@@ -2024,6 +2333,19 @@ def build_native_character_edit_context(
     optionalfeature_catalog = dict(optionalfeature_catalog or {})
     spell_catalog = dict(spell_catalog or {})
     item_catalog = dict(item_catalog or _build_item_catalog([]))
+    background_fields: list[dict[str, Any]] = []
+    background_message = ""
+    if systems_service is not None:
+        background = current_background_entry(definition, systems_service)
+        saved_values = _background_instrument_saved_values(definition, background, item_catalog)
+        for name, value in saved_values.items():
+            values.setdefault(name, value)
+        background_fields = [field for field in _build_background_choice_fields(background, values, item_catalog=item_catalog)
+                             if str(field.get("name") or "").startswith("background_instrument_")]
+        if dict(definition.profile or {}).get("background_choices") and not saved_values:
+            background_message = "The saved background instrument source changed. Review the affected choice before saving."
+    elif dict(definition.profile or {}).get("background_choices"):
+        background_message = "Refresh the editor to load current background instrument sources."
     proficiency_lists = _display_proficiency_lists_for_editor(definition)
     manual_features = _manual_custom_features(definition)
     manual_items = _manual_equipment_entries(definition)
@@ -2265,12 +2587,16 @@ def build_native_character_edit_context(
                     or ""
                 ).strip(),
                 "quantity": str(
-                    values.get(f"manual_item_quantity_{index}")
-                    or existing.get("default_quantity")
-                    or ""
+                    values[f"manual_item_quantity_{index}"]
+                    if f"manual_item_quantity_{index}" in values
+                    else existing.get("default_quantity", "")
                 ).strip(),
                 "weight": str(values.get(f"manual_item_weight_{index}") or existing.get("weight") or "").strip(),
-                "notes": str(values.get(f"manual_item_notes_{index}") or existing.get("notes") or ""),
+                "notes": str(
+                    values[f"manual_item_notes_{index}"]
+                    if f"manual_item_notes_{index}" in values
+                    else dict(inventory_notes or {}).get(str(existing.get("id") or ""), existing.get("notes") or "")
+                ),
                 "campaign_option": dict(_editable_campaign_option_for_page_ref(
                     str(
                         values.get(f"manual_item_page_ref_{index}")
@@ -2314,6 +2640,8 @@ def build_native_character_edit_context(
     return {
         "values": values,
         "proficiency_fields": proficiency_fields,
+        "background_choice_fields": background_fields,
+        "background_choice_message": background_message,
         "reference_fields": reference_fields,
         "stat_adjustment_fields": stat_adjustment_fields,
         "recoverable_penalty_rows": recoverable_penalty_rows,
@@ -2356,6 +2684,7 @@ def build_native_character_retraining_context(
     optionalfeature_catalog: dict[str, SystemsEntryRecord] | None = None,
     spell_catalog: dict[str, Any] | None = None,
     item_catalog: dict[str, Any] | None = None,
+    systems_service: Any | None = None,
 ) -> dict[str, Any]:
     edit_context = build_native_character_edit_context(
         definition,
@@ -2364,6 +2693,7 @@ def build_native_character_retraining_context(
         optionalfeature_catalog=optionalfeature_catalog,
         spell_catalog=spell_catalog,
         item_catalog=item_catalog,
+        systems_service=systems_service,
     )
     retraining_rows = _native_character_retraining_rows_from_edit_context(edit_context)
     return {
@@ -2401,6 +2731,7 @@ def apply_native_character_retraining(
         optionalfeature_catalog=optionalfeature_catalog,
         spell_catalog=spell_catalog,
         item_catalog=item_catalog,
+        systems_service=systems_service,
     )
     retraining_context = build_native_character_retraining_context(
         current_definition,
@@ -2408,6 +2739,7 @@ def apply_native_character_retraining(
         optionalfeature_catalog=optionalfeature_catalog,
         spell_catalog=spell_catalog,
         item_catalog=item_catalog,
+        systems_service=systems_service,
     )
     retraining_field_names = _native_character_retraining_field_names(retraining_context)
     if not retraining_field_names:
@@ -2504,6 +2836,8 @@ def _native_character_edit_form_values_from_context(edit_context: dict[str, Any]
             if not field_name:
                 continue
             values[field_name] = str(field.get("value") or "")
+    for field in list(edit_context.get("background_choice_fields") or []):
+        values[str(field["name"])] = str(field.get("selected") or "")
 
     for row in list(edit_context.get("recoverable_penalty_rows") or []):
         row_index = int(row.get("index") or 0)
@@ -2546,6 +2880,82 @@ def _native_character_edit_form_values_from_context(edit_context: dict[str, Any]
     return values
 
 
+def _is_inert_native_page_feature_addition(
+    previous: CharacterDefinition, candidate: CharacterDefinition,
+    campaign_page_lookup: dict[str, dict[str, Any]],
+) -> bool:
+    """Recognize only an additive current page reminder, not new numeric input."""
+    if (previous.system != "DND-5E"
+            or previous.source.get("source_type") != "native_character_builder"
+            or any(getattr(previous, field) != getattr(candidate, field) for field in
+                   ("profile", "stats", "skills", "proficiencies", "equipment_catalog", "resource_templates", "source"))):
+        return False
+    prior = {row.get("id"): row for row in previous.features}
+    current = {row.get("id"): row for row in candidate.features}
+    if (len(prior) != len(previous.features) or len(current) != len(candidate.features)
+            or not all(key and current.get(key) == row for key, row in prior.items())):
+        return False
+    added = [row for key, row in current.items() if key not in prior]
+    if not added:
+        return False
+    descriptive = {"kind", "title", "display_name", "feature_name", "page_ref", "summary",
+                   "description_markdown", "activation_type", "proficiencies", "spells", "stat_adjustments"}
+    for row in added:
+        page_ref = row.get("page_ref")
+        option = _editable_campaign_option_for_page_ref(page_ref, campaign_page_lookup, default_kind="feature")
+        if (row.get("category") != CUSTOM_FEATURE_CATEGORY or not option
+                or option.get("kind") != "feature" or set(option) - descriptive
+                or row.get("campaign_option") != option
+                or option.get("spells") or option.get("stat_adjustments")):
+            return False
+        grants = option.get("proficiencies") or {}
+        if (not isinstance(grants, dict) or set(grants) - {"armor", "weapons", "tools", "languages", "skills"}
+                or any(grants.values())):
+            return False
+    return True
+
+
+def _retire_changed_native_manager_claims(
+    previous: CharacterDefinition, candidate: CharacterDefinition, state: dict[str, Any],
+) -> CharacterDefinition:
+    """Withdraw stale copied claims; an ordinary edit never renews their proof."""
+    if (previous.system != "DND-5E" or candidate.system != "DND-5E"
+            or previous.source.get("source_type") != "native_character_builder"
+            or candidate.source.get("source_type") != "native_character_builder"):
+        return candidate
+    from .character_source_authority import numeric_target_owner_digest, numeric_target_values
+
+    prior = previous.source.get("source_authorizations", [])
+    current = candidate.source.get("source_authorizations", [])
+    if not isinstance(prior, list) or not isinstance(current, list):
+        raise CharacterEditValidationError("Numeric source claims are malformed. Use Source Repair before editing this Character.")
+    old_values = numeric_target_values(previous, state)
+    new_values = numeric_target_values(candidate, state)
+    retained = []
+    for marker in current:
+        if (isinstance(marker, dict) and marker.get("provenance") == "manager"
+                and prior.count(marker) == 1):
+            key = (marker.get("target_kind"), marker.get("target_id"), marker.get("metric"))
+            if all(isinstance(value, str) and value for value in key):
+                def matches(row: Any) -> bool:
+                    return isinstance(row, dict) and (
+                        row.get("target_kind"), row.get("target_id"), row.get("metric")) == key
+
+                if sum(map(matches, prior)) != 1 or sum(map(matches, current)) != 1:
+                    raise CharacterEditValidationError("Numeric source claims conflict. Use Source Repair before editing this Character.")
+                old_owner = numeric_target_owner_digest(previous, state, *key)
+                new_owner = numeric_target_owner_digest(candidate, state, *key)
+                if (key not in old_values or key not in new_values or old_values[key] != new_values[key]
+                        or old_owner is None or new_owner is None or old_owner != new_owner):
+                    continue
+        retained.append(deepcopy(marker))
+    if retained == current:
+        return candidate
+    payload = deepcopy(candidate.to_dict())
+    payload["source"]["source_authorizations"] = retained
+    return CharacterDefinition.from_dict(payload)
+
+
 def apply_native_character_edits(
     campaign_slug: str,
     current_definition: CharacterDefinition,
@@ -2562,14 +2972,27 @@ def apply_native_character_edits(
     state_revision: int | None = None,
     verified_manual_actions: tuple[Any, ...] = (),
     verified_numeric_actions: tuple[Any, ...] = (),
+    inventory_note_overrides: dict[str, dict[str, str]] | None = None,
 ) -> tuple[CharacterDefinition, CharacterImportMetadata, dict[str, int]]:
     values = dict(form_values or {})
     # Seed legacy provenance before removing any penalty or feature metadata.
     raw_current_definition = current_definition
+    if inventory_note_overrides is not None:
+        from .character_service import prepare_inventory_note_overrides
+
+        if state is None or any(set(row) != {"notes"} for row in inventory_note_overrides.values()):
+            raise CharacterEditValidationError("Current inventory note intent is unavailable.")
+        inventory_note_overrides = prepare_inventory_note_overrides(
+            raw_current_definition, state,
+            {item_id: row["notes"] for item_id, row in inventory_note_overrides.items()},
+        )
     current_definition = normalize_definition_to_native_model(
         current_definition, item_catalog=item_catalog, spell_catalog=spell_catalog,
         systems_service=systems_service, campaign_page_records=campaign_page_records,
     )
+    if isinstance(raw_current_definition.source.get("native_reconstruction_choices"), dict):
+        from .character_reconstruction import retain_reconstruction_content
+        current_definition = retain_reconstruction_content(raw_current_definition, current_definition)
     current_definition = recover_inputs(current_definition, values)
     require_resolved_ability_inputs(current_definition)
     from .committed_publication import active
@@ -2582,6 +3005,9 @@ def apply_native_character_edits(
             campaign_page_records=campaign_page_records,
             verified_manual_actions=verified_manual_actions,
             verified_numeric_actions=verified_numeric_actions,
+        ).bind_current_numbers(
+            raw_current_definition, state, systems_service=systems_service,
+            campaign_page_records=campaign_page_records, item_catalog=item_catalog,
         )
     # Existing copied option payloads cannot be used to invert saved totals.
     # Only current source-approved options may contribute to editor arithmetic.
@@ -2601,6 +3027,7 @@ def apply_native_character_edits(
             optionalfeature_catalog=optionalfeature_catalog,
             spell_catalog=spell_catalog,
             item_catalog=item_catalog,
+            systems_service=systems_service,
         )
         preserved_values = _native_character_edit_form_values_from_context(preserved_edit_context)
         custom_feature_field_names = {
@@ -2660,6 +3087,10 @@ def apply_native_character_edits(
         for item in _manual_equipment_entries(current_definition)
         if str(item.get("id") or "").strip()
     }
+    raw_manual_item_lookup = {
+        str(item.get("id") or "").strip(): item
+        for item in _manual_equipment_entries(raw_current_definition)
+    }
     existing_campaign_option_payloads = _campaign_option_payloads_from_entries(
         _manual_custom_features(current_effective_definition),
         _manual_equipment_entries(current_effective_definition),
@@ -2683,6 +3114,32 @@ def apply_native_character_edits(
     profile = dict(current_definition.profile or {})
     profile["biography_markdown"] = str(values.get("biography_markdown") or "")
     profile["personality_markdown"] = str(values.get("personality_markdown") or "")
+    if systems_service is not None:
+        background = current_background_entry(current_definition, systems_service)
+        if background is None and profile.get("background_choices"):
+            raise CharacterEditValidationError("The background instrument owner is unavailable or changed. Repair its source before saving.")
+        saved_choices = _background_instrument_saved_values(current_definition, background, item_catalog)
+        instrument_values = {**saved_choices, **{key: str(value) for key, value in values.items()
+                                                if str(key).startswith("background_instrument_")}}
+        try:
+            choice, instrument_names = _background_instrument_payload(background, instrument_values, item_catalog, strict=True)
+        except CharacterBuildError as exc:
+            raise CharacterEditValidationError(str(exc)) from exc
+        prior_choice = dict(current_definition.profile or {}).get("background_choices")
+        old_names: set[str] = set()
+        if (isinstance(prior_choice, dict) and prior_choice.get("owner") == dict(current_definition.profile or {}).get("background_ref")
+                and isinstance(prior_choice.get("instrument"), dict)):
+            refs = prior_choice["instrument"].get("entries")
+            if isinstance(refs, list) and len(refs) <= 8:
+                old_names = {normalize_lookup(str(ref.get("title") or "")) for ref in refs if isinstance(ref, dict)}
+        manual_proficiencies["tools"] = [name for name in manual_proficiencies["tools"] if normalize_lookup(name) not in old_names]
+        manual_proficiencies["tools"] += instrument_names
+        if choice is not None:
+            profile["background_choices"] = choice
+        else:
+            profile.pop("background_choices", None)
+    elif any(str(key).startswith("background_instrument_") for key in values) or profile.get("background_choices"):
+        raise CharacterEditValidationError("Refresh the Character before changing background instrument choices.")
     base_stats, _ = strip_manual_stat_adjustments(dict(stripped_definition.stats or {}))
     base_stats, existing_recoverable_penalties = strip_recoverable_stat_penalties(base_stats)
     existing_campaign_stat_adjustments = collect_campaign_option_stat_adjustments(existing_campaign_option_payloads)
@@ -2881,11 +3338,10 @@ def apply_native_character_edits(
             or (equipment_campaign_page_lookup.get(page_ref) or {}).get("title")
             or ""
         ).strip()
-        quantity_text = str(
-            values.get(f"manual_item_quantity_{index}")
-            or (campaign_option or {}).get("quantity")
-            or ""
-        ).strip()
+        quantity_value = values.get(f"manual_item_quantity_{index}")
+        if quantity_value is None:
+            quantity_value = (campaign_option or {}).get("quantity")
+        quantity_text = str(quantity_value if quantity_value is not None else "").strip()
         weight = str(
             values.get(f"manual_item_weight_{index}")
             or (campaign_option or {}).get("weight")
@@ -2896,6 +3352,10 @@ def apply_native_character_edits(
             or (campaign_option or {}).get("notes")
             or ""
         )
+        if inventory_note_overrides is not None and raw_id in raw_manual_item_lookup:
+            notes = str(inventory_note_overrides.get(raw_id, {}).get(
+                "notes", raw_manual_item_lookup[raw_id].get("notes", ""),
+            ) or "")
         has_content = bool(name or page_ref or quantity_text or weight or notes.strip())
         if not has_content:
             continue
@@ -2910,6 +3370,21 @@ def apply_native_character_edits(
             page_ref=page_ref,
             campaign_option=campaign_option,
         )
+        existing_item = manual_item_lookup.get(raw_id)
+        if (existing_item is not None
+                and all(next_item.get(key) == existing_item.get(key)
+                        for key in ("name", "default_quantity", "page_ref", "systems_ref", "campaign_option"))
+                and all(str(next_item.get(key) or "") == str(existing_item.get(key) or "")
+                        for key in ("weight", "notes"))):
+            # An untouched manual row retains its exact physical/source data.
+            next_item = deepcopy(existing_item)
+        if (inventory_note_overrides is not None and raw_id in raw_manual_item_lookup
+                and raw_id not in inventory_note_overrides):
+            raw_item = raw_manual_item_lookup[raw_id]
+            if "notes" in raw_item:
+                next_item["notes"] = deepcopy(raw_item["notes"])
+            else:
+                next_item.pop("notes", None)
         used_item_ids.add(str(next_item.get("id") or "").strip())
         manual_items.append(next_item)
         inventory_quantity_overrides[str(next_item.get("id") or "").strip()] = quantity
@@ -2963,6 +3438,12 @@ def apply_native_character_edits(
         stats["ability_scores"] = ability_payloads
     stats = apply_recoverable_stat_penalties(stats, recoverable_penalties, adjust_ability_scores=False)
     stats = apply_manual_stat_adjustments(stats, stat_adjustments)
+    if (current_authority is not None
+            and str((current_definition.source or {}).get("source_type") or "") == "native_character_builder"):
+        # Derived ability layers are not new authoring inputs. Keep their exact
+        # qualified baseline through candidate proof; the complete pass below
+        # recomputes them from the retained typed inputs and current effects.
+        stats["ability_scores"] = deepcopy(current_definition.stats.get("ability_scores") or {})
     spellcasting = _apply_campaign_option_spells_to_spellcasting(
         current_definition.spellcasting,
         existing_campaign_option_payloads=existing_campaign_option_payloads,
@@ -3002,6 +3483,9 @@ def apply_native_character_edits(
     ] + manual_resource_templates
 
     definition = CharacterDefinition.from_dict(payload)
+    inert_page_addition = _is_inert_native_page_feature_addition(
+        current_definition, definition, campaign_page_lookup,
+    )
     authority = None
     if activated and state is not None and state_revision is not None and systems_service is not None:
         if mechanics_changed(raw_current_definition, definition):
@@ -3028,14 +3512,85 @@ def apply_native_character_edits(
             campaign_page_records=campaign_page_records,
         )
     else:
+        raw_equipment = deepcopy(definition.equipment_catalog)
+        retained_resources = {row.get("id"): deepcopy(row) for row in definition.resource_templates}
+        if authority is not None:
+            from .character_equipment_activation import effective_definition as activation_definition
+
+            definition, activation_warnings = activation_definition(definition, state)
+            if activation_warnings:
+                raise CharacterEditValidationError("Equipment activation identity needs manager repair before editing this Character.")
+        retained_reconstruction = definition
         definition = normalize_definition_to_native_model(
             definition,
             mode="authoring" if authority is not None else "historical",
             source_authority=authority,
+            item_catalog=item_catalog,
             spell_catalog=spell_catalog,
             systems_service=systems_service,
             campaign_page_records=campaign_page_records,
         )
+        if isinstance(raw_current_definition.source.get("native_reconstruction_choices"), dict):
+            definition = retain_reconstruction_content(retained_reconstruction, definition)
+        if authority is not None:
+            # SQLite activation and refreshed source mechanics are derivation
+            # inputs, not edits to existing physical equipment rows.
+            definition.equipment_catalog = raw_equipment
+            if isinstance(raw_current_definition.source.get("native_reconstruction"), dict):
+                # Read projection owns current arithmetic. A normal editor Save
+                # does not reissue the accepted HP recipe or skill-choice
+                # witnesses merely because equipment changed a displayed total.
+                definition.stats["max_hp"] = deepcopy(raw_current_definition.stats.get("max_hp"))
+                definition.stats["ability_inputs"] = deepcopy(raw_current_definition.stats.get("ability_inputs"))
+                definition.skills = deepcopy(raw_current_definition.skills)
+            for template in definition.resource_templates:
+                retained = retained_resources.get(template.get("id"))
+                if (retained is None or "initial_current" not in retained
+                        or any(template.get(key) != retained.get(key) for key in
+                               ("class_row_id", "reset_on", "reset_to", "rest_behavior"))):
+                    continue
+                initial = retained["initial_current"]
+                reconstructed = isinstance(raw_current_definition.source.get("native_reconstruction_choices"), dict)
+                maximum = template.get("max")
+                if ((not reconstructed and (type(initial) is not int or type(maximum) is not int))
+                        or type(initial) is int and (initial < 0 or type(maximum) is int and initial > maximum)):
+                    raise CharacterEditValidationError("A retained resource observation needs manager repair before editing this Character.")
+                # An item capacity bonus is not a new historical observation.
+                template["initial_current"] = deepcopy(initial)
+            if source_type == "native_character_builder":
+                ranks = {"none": 0, "half_proficient": 1, "proficient": 2, "expertise": 3}
+                prior_skills = {normalize_lookup(row.get("name")): row for row in current_definition.skills}
+                passives = {"perception": "passive_perception", "insight": "passive_insight",
+                            "investigation": "passive_investigation"}
+                for index, row in enumerate(definition.skills):
+                    name = normalize_lookup(row.get("name"))
+                    prior = prior_skills.get(name)
+                    if prior is None or prior.get("proficiency_level") not in ranks:
+                        continue
+                    authority_path = f"skills.{str(prior.get('name') or '').strip().casefold()}"
+                    status = authority.field_status(authority_path)
+                    if status.status == "CONFLICT":
+                        raise CharacterEditValidationError("A native skill choice has conflicting source owners. Use Source Repair before editing it.")
+                    if (row.get("proficiency_level") in ranks
+                            and ranks[row["proficiency_level"]] < ranks[prior["proficiency_level"]]):
+                        passive = passives.get(name)
+                        if (not inert_page_addition or status.status != "UNKNOWN"
+                                or not current_authority.field_status(authority_path).is_effective
+                                or (passive and not current_authority.field_status(f"stats.{passive}").is_effective)):
+                            raise CharacterEditValidationError("This edit cannot preserve a native skill choice with its current source proof. Use Source Repair before changing this feature.")
+                        # The editor has no skill-choice controls. Retain the
+                        # qualified historical input/observation without issuing
+                        # a witness for the changed feature-owner context.
+                        definition.skills[index] = deepcopy(prior)
+                        if passive:
+                            definition.stats[passive] = deepcopy(current_definition.stats.get(passive))
+                final_names = {normalize_lookup(row.get("name")) for row in definition.skills}
+                if any(name not in final_names and ranks.get(row.get("proficiency_level"), 0) > 0
+                       for name, row in prior_skills.items()):
+                    raise CharacterEditValidationError("A native skill choice is missing after this edit. Use Source Repair before changing this feature.")
+    if (activated and current_authority is not None and state is not None
+            and state_revision is not None):
+        definition = _retire_changed_native_manager_claims(raw_current_definition, definition, state)
     require_resolved_ability_inputs(definition)
     import_metadata = build_managed_character_import_metadata(
         campaign_slug,
@@ -4243,6 +4798,34 @@ def _apply_campaign_option_spells_to_spellcasting(
         spellcasting["campaign_option_replacement_bases"] = hidden_spells
     else:
         spellcasting.pop("campaign_option_replacement_bases", None)
+    if "native_spell_grants" in dict(current_spellcasting or {}):
+        # Legacy replay validates the submitted feature choices, but its base
+        # metadata and aggregate marks cannot rewrite audited native rows.
+        # Material changes to an existing legacy source need their own source
+        # repair; an ordinary Edit Save must preserve exact role evidence.
+        retained = deepcopy(dict(current_spellcasting or {}))
+        originals = _campaign_option_tracked_spell_payloads(retained)
+        original_keys = set()
+        for original in originals:
+            key = _campaign_option_spell_map_key(original, spell_catalog)
+            replayed = spells_by_key.get(key)
+            if not key or key in original_keys or replayed is None:
+                raise CharacterEditValidationError("An existing native spell needs unambiguous source repair before editing.")
+            original_keys.add(key)
+            if any(_normalize_campaign_option_source_annotations(original.get(field_name))
+                   != _normalize_campaign_option_source_annotations(replayed.get(field_name))
+                   for field_name in ("campaign_option_sources", "campaign_option_replaced_by")):
+                raise CharacterEditValidationError("An existing native spell grant or replacement changed. Use Source Repair for that source change.")
+        retained["spells"] = deepcopy(list(retained.get("spells") or [])) + [deepcopy(row)
+            for row in visible_spells if _campaign_option_spell_map_key(row, spell_catalog) not in original_keys]
+        new_hidden = [deepcopy(row) for row in hidden_spells
+            if _campaign_option_spell_map_key(row, spell_catalog) not in original_keys]
+        if new_hidden:
+            prior_hidden = retained.get("campaign_option_replacement_bases", [])
+            if not isinstance(prior_hidden, list):
+                raise CharacterEditValidationError("An existing native replacement record needs source repair before editing.")
+            retained["campaign_option_replacement_bases"] = deepcopy(prior_hidden) + new_hidden
+        return retained
     return spellcasting
 
 

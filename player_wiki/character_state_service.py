@@ -349,6 +349,22 @@ class CharacterStateService:
         updated_by_user_id: int | None = None,
     ) -> CharacterStateRecord:
         self._require_resource(record, "spell_slot", f"{normalize_spell_slot_lane_id(slot_lane_id)}:{int(level)}")
+        from .character_spell_slots import (spell_slot_contributions, spend_slot_contribution, slot_grant_intent)
+        authority = self.current_authority(record)
+        lane = normalize_spell_slot_lane_id(slot_lane_id)
+        pools = [pool for pool in spell_slot_contributions(record.definition.spellcasting,
+            record.state_record.state, authority) if pool["id"] == lane]
+        if len(pools) == 1 and pools[0]["source_kind"] != "class":
+            if used is not None or delta_used is None:
+                raise ValueError("Granted slots are spent explicitly; their capacity is not restored by a usage edit.")
+            if type(delta_used) is str and delta_used.isascii() and delta_used.isdecimal() and len(delta_used) <= 10:
+                delta_used = int(delta_used)
+            state = spend_slot_contribution(record.state_record.state, record.definition.spellcasting,
+                authority, lane, int(level), count=delta_used)
+            intent = slot_grant_intent(record.state_record.state, state,
+                {"kind": "spend", "pool_id": lane, "level": int(level), "count": delta_used})
+            return self._replace_state(record, state, expected_revision=expected_revision,
+                updated_by_user_id=updated_by_user_id, slot_grant_intent=intent)
         state = deepcopy(record.state_record.state)
         self._apply_spell_slots_update(
             state,
@@ -363,6 +379,19 @@ class CharacterStateService:
             expected_revision=expected_revision,
             updated_by_user_id=updated_by_user_id,
         )
+
+    def flexible_casting(
+        self, record: CharacterRecord, *, direction: str, slot_level: Any,
+        slot_lane_id: str = "", expected_revision: int, updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        from .committed_publication import active
+        if not active() or not is_dnd_5e_system(record.definition.system):
+            raise ValueError("Flexible Casting requires current source-owned DND-5E state.")
+        from .character_flexible_casting import prepare_conversion
+        state, intent = prepare_conversion(record.state_record.state, record.definition,
+            self.current_authority(record), direction, slot_level, slot_lane_id)
+        return self._replace_state(record, state, expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id, slot_grant_intent=intent)
 
     def use_spell_slot_item_action(
         self,
@@ -418,22 +447,19 @@ class CharacterStateService:
             raise ValueError("Choose a valid spell slot for this item action.")
         self._require_resource(record, "spell_slot", f"{clean_lane_id}:{int(slot_level)}")
 
-        state = deepcopy(record.state_record.state)
-        max_slots = int(selected_option.get("max") or 0)
-        used_slots = self._spell_slot_used_value(state, int(slot_level), slot_lane_id=clean_lane_id)
-        if max_slots <= 0 or used_slots >= max_slots:
-            raise ValueError("No matching spell slots are available.")
-        self._apply_spell_slots_update(
-            state,
-            int(slot_level),
-            slot_lane_id=clean_lane_id,
-            delta_used=1,
-        )
+        from .character_spell_slots import (SLOT_GRANTS_KEY, spend_slot_contribution, slot_grant_intent)
+        authority = self.current_authority(record)
+        state = spend_slot_contribution(record.state_record.state, record.definition.spellcasting,
+            authority, clean_lane_id, int(slot_level))
+        intent = (slot_grant_intent(record.state_record.state, state,
+            {"kind": "spend", "pool_id": clean_lane_id, "level": int(slot_level), "count": 1})
+            if state.get(SLOT_GRANTS_KEY, []) != record.state_record.state.get(SLOT_GRANTS_KEY, []) else None)
         return self._replace_state(
             record,
             state,
             expected_revision=expected_revision,
             updated_by_user_id=updated_by_user_id,
+            slot_grant_intent=intent,
         )
 
     def update_inventory_quantity(
@@ -454,6 +480,159 @@ class CharacterStateService:
             expected_revision=expected_revision,
             updated_by_user_id=updated_by_user_id,
         )
+
+    def item_spell_action(
+        self, record: CharacterRecord, item_id: str, *, operation: str,
+        expected_revision: int, values: dict[str, Any], manager_authorized: bool = False,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        from .committed_publication import active
+        if not active() or not is_dnd_5e_system(record.definition.system):
+            raise ValueError("Item spell actions require current source-owned DND-5E state.")
+        if type(updated_by_user_id) is not int or updated_by_user_id < 1:
+            raise ValueError("Item spell actions require an authenticated actor.")
+        from .character_item_casting import prepare_operation, integer
+        import uuid
+        kinds = {"item_cast": "cast", "storage_initialize": "initialize", "storage_store": "store",
+                 "storage_external": "observe_external", "storage_release": "release"}
+        if operation not in kinds:
+            raise ValueError("Choose a supported item spell action.")
+        kind = kinds[operation]
+        params = {"kind": kind, "item_id": item_id}
+        if kind == "cast":
+            params.update(mode_id=values.get("mode_id"), confirm_trigger=values.get("confirm_trigger") is True)
+        if kind in {"cast", "store", "observe_external"}:
+            params.update(slot_level=values.get("slot_level"), slot_lane_id=values.get("slot_lane_id", ""))
+        if kind in {"store", "observe_external"}:
+            params["stored_id"] = uuid.uuid4().hex
+        if kind == "store":
+            params["choice_id"] = values.get("choice_id")
+        if kind == "release":
+            params["stored_id"] = values.get("stored_id")
+        if kind in {"initialize", "observe_external"}:
+            if manager_authorized is not True or values.get("confirm_observation") is not True:
+                raise ValueError("A manager must explicitly confirm the actual storage observation.")
+            params["manager_confirmed"] = True
+        if kind == "observe_external":
+            params.update(spell_entry_key=values.get("spell_entry_key"), caster=values.get("caster"), metrics={
+                "ability": values.get("ability"), "ability_modifier": integer(values.get("ability_modifier"), -10, 30),
+                "save_dc": integer(values.get("save_dc"), 0, 99), "attack_bonus": integer(values.get("attack_bonus"), -30, 99)})
+        authority = self.current_authority(record)
+        state, intent = prepare_operation(record.state_record.state, record.definition, authority, params)
+        return self._replace_state(record, state, expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id, item_spell_intent=intent)
+
+    def artificer_assignment_action(
+        self, record: CharacterRecord, *, expected_revision: int,
+        values: dict[str, Any], updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        from .committed_publication import active
+        from .auth import get_systems_service
+        from .character_artificer_assignments import prepare_operation
+        if (not active() or not is_dnd_5e_system(record.definition.system)
+                or type(updated_by_user_id) is not int or updated_by_user_id < 1
+                or type(expected_revision) is not int or expected_revision < 1
+                or expected_revision != record.state_record.revision
+                or type(values) is not dict):
+            raise ValueError("Assignments require the current character, an authenticated player and exact state revision.")
+        authority = self.current_authority(record)
+        state, intent = prepare_operation(record.state_record.state, record.definition,
+            authority, get_systems_service(), values, actor_id=updated_by_user_id,
+            state_revision=expected_revision)
+        return self._replace_state(record, state, expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id, assignment_intent=intent)
+
+    def prepared_item_action(
+        self, record: CharacterRecord, item_id: str, *, operation: str,
+        expected_revision: int, values: dict[str, Any], manager_authorized: bool = False,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        from .committed_publication import active
+        from .character_item_prepared import OPERATIONS, prepare_operation
+        from .character_item_casting import integer
+        if (not active() or not is_dnd_5e_system(record.definition.system)
+                or type(updated_by_user_id) is not int or updated_by_user_id < 1
+                or type(expected_revision) is not int or expected_revision < 1):
+            raise ValueError("Prepared ammunition requires its authenticated actor, current source and exact state revision.")
+        if type(operation) is not str or operation not in OPERATIONS or type(values) is not dict:
+            raise ValueError("Choose one supported prepared-ammunition operation.")
+        params = {"item_id": item_id, "operation": operation}
+        if operation == "prepared_observe":
+            if manager_authorized is not True or values.get("confirm_observation") is not True:
+                raise ValueError("A manager must confirm the actual first load observation.")
+            kind = values.get("load_kind")
+            level = values.get("slot_level")
+            params.update(manager_confirmed=True, load_kind=kind, choice_id=values.get("choice_id", ""),
+                slot_level=None if level in (None, "") else integer(level, 1, 9))
+        elif operation == "prepared_load":
+            params.update(confirm_reload=values.get("confirm_reload") is True, choice_id=values.get("choice_id"),
+                slot_level=integer(values.get("slot_level"), 1, 9), slot_lane_id=values.get("slot_lane_id"))
+        else:
+            params["confirm_discharge"] = values.get("confirm_discharge") is True
+        authority = self.current_authority(record)
+        state, intent = prepare_operation(record.state_record.state, record.definition, authority, params)
+        return self._replace_state(record, state, expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id, prepared_item_intent=intent)
+
+    def use_item_action(
+        self, record: CharacterRecord, item_id: str, *, expected_revision: int,
+        confirm_attack: bool = False, reaction_values: dict[str, Any] | None = None,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        from .committed_publication import active
+        if not active() or not is_dnd_5e_system(record.definition.system):
+            raise ValueError("Noncasting item actions require current source-owned DND-5E state.")
+        if (type(updated_by_user_id) is not int or updated_by_user_id < 1
+                or type(expected_revision) is not int or expected_revision < 1):
+            raise ValueError("An item action requires an authenticated actor and exact state revision.")
+        from .character_item_actions import prepare_operation
+        authority = self.current_authority(record)
+        if reaction_values is not None:
+            if confirm_attack is not False or type(reaction_values) is not dict or set(reaction_values) != {"confirm_reaction", "trigger", "target_kind"}:
+                raise ValueError("Use one distinct confirmed reaction, without an attack-d20 choice.")
+            params = {"item_id": item_id, **reaction_values}
+        else:
+            params = {"item_id": item_id, "confirm_attack": confirm_attack}
+        state, intent = prepare_operation(record.state_record.state, record.definition, authority, params)
+        return self._replace_state(record, state, expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id, item_action_intent=intent)
+
+    def update_item_uses(
+        self, record: CharacterRecord, item_id: str, *, expected_revision: int,
+        current: Any, confirm_unrecorded: bool = False, manager_authorized: bool = False,
+        updated_by_user_id: int | None = None,
+    ) -> CharacterStateRecord:
+        if not is_dnd_5e_system(record.definition.system):
+            raise ValueError("This item-use action applies only to DND-5E.")
+        authority = self.current_authority(record)
+        if authority is None:
+            raise ValueError("Current item source authority is required before recording uses.")
+        rule = authority.item_counter_rule(record.definition, item_id)
+        if rule is None:
+            raise ValueError("The exact physical item/use source needs repair.")
+        from .character_item_capabilities import known_counter
+        state = deepcopy(record.state_record.state)
+        rows = [row for row in state.get("inventory", []) if isinstance(row, dict) and row.get("id") == item_id]
+        if len(rows) != 1:
+            raise ValueError("The physical item identity is ambiguous.")
+        row = rows[0]
+        initial = row.get("charges_current") is None and row.get("charges_max") is None
+        if initial:
+            if confirm_unrecorded is not True or manager_authorized is not True:
+                raise ValueError("A manager must explicitly confirm this item's unrecorded current uses.")
+        elif confirm_unrecorded or not known_counter(row, rule["maximum"]):
+            raise ValueError("The existing item-use observations need a separate repair.")
+        elif not authority.resource_status("item_charge", item_id).is_effective:
+            raise ValueError("The item-use owner changed. Refresh before saving.")
+        if type(current) is str and current.isascii() and current.isdecimal() and len(current) <= 4:
+            current = int(current)
+        if type(current) is not int or not 0 <= current <= rule["maximum"]:
+            raise ValueError("Current item uses must be a whole number within the source capacity.")
+        row["charges_current"] = current
+        row["charges_max"] = rule["maximum"]
+        return self._replace_state(record, state, expected_revision=expected_revision,
+            updated_by_user_id=updated_by_user_id,
+            initial_item_charge_id=item_id if initial else None)
 
     def add_xianxia_inventory_item(
         self,
@@ -1541,12 +1720,45 @@ class CharacterStateService:
                     source_authority=authority,
                 )):
             raise ValueError("No verified recovery can be applied by this rest.")
+        from .character_spell_slots import SLOT_GRANTS_KEY, slot_grant_intent
+        intent = (slot_grant_intent(prior_state, state, {"kind": "long_rest"})
+            if normalized_rest == "long" and prior_state.get(SLOT_GRANTS_KEY, []) != state.get(SLOT_GRANTS_KEY, []) else None)
         return self._replace_state(
             record,
             state,
             expected_revision=expected_revision,
             updated_by_user_id=updated_by_user_id,
+            slot_grant_intent=intent,
         )
+
+    @staticmethod
+    def _qualified_item_hd_bonus(definition, authority):
+        from .character_item_capabilities import qualified_hit_die_recovery_bonus
+        return qualified_hit_die_recovery_bonus(authority, definition)
+
+    def _rest_hit_dice_state(self, definition, state, authority):
+        if authority is None:
+            return apply_long_rest_hit_dice_recovery(definition, state)
+        return recover_verified_hit_dice_pools(definition, state,
+            self._verified_hit_die_faces(definition, state, authority),
+            verified_total_level=self._verified_character_level(definition, authority),
+            recovery_bonus=self._qualified_item_hd_bonus(definition, authority))
+
+    def _rest_item_use_rows(self, definition, state, authority, rest_type):
+        if authority is None:
+            return []
+        from .character_item_capabilities import known_counter
+        result = []
+        for item in state.get("inventory", []):
+            if not isinstance(item, dict):
+                continue
+            rule = authority.item_counter_rule(definition, item.get("id"))
+            if (rule is None or not known_counter(item, rule["maximum"])
+                    or not authority.resource_status("item_charge", item.get("id")).is_effective
+                    or not self._should_reset_resource(rule, rest_type)):
+                continue
+            result.append((item, rule))
+        return result
 
     def _modeled_rest_state(
         self,
@@ -1568,7 +1780,11 @@ class CharacterStateService:
                 continue
             resource["current"] = self._reset_resource_value(effective_resource)
 
+        for item, rule in self._rest_item_use_rows(definition, modeled_state, source_authority, rest_type):
+            item["charges_current"] = rule["maximum"]
         if rest_type == "long":
+            from .character_spell_slots import expire_slot_grants
+            modeled_state = expire_slot_grants(modeled_state, source_authority)
             for slot in list(modeled_state.get("spell_slots") or []):
                 if source_authority is not None and not source_authority.resource_status(
                     "spell_slot", f"{normalize_spell_slot_lane_id(slot.get('slot_lane_id'))}:{int(slot.get('level') or 0)}"
@@ -1578,11 +1794,7 @@ class CharacterStateService:
             if is_xianxia_system(getattr(definition, "system", None)):
                 self._apply_xianxia_one_day_rest(modeled_state, definition)
             else:
-                modeled_state = (apply_long_rest_hit_dice_recovery(definition, modeled_state)
-                                 if source_authority is None else recover_verified_hit_dice_pools(
-                                     definition, modeled_state,
-                                     self._verified_hit_die_faces(definition, modeled_state, source_authority),
-                                     verified_total_level=self._verified_character_level(definition, source_authority)))
+                modeled_state = self._rest_hit_dice_state(definition, modeled_state, source_authority)
         elif not is_xianxia_system(getattr(definition, "system", None)):
             modeled_state = (normalize_hit_dice_state_payload(definition, modeled_state)
                              if source_authority is None else modeled_state)
@@ -1640,10 +1852,19 @@ class CharacterStateService:
                 stable_id = f"{normalize_spell_slot_lane_id(slot.get('slot_lane_id'))}:{int(slot.get('level') or 0)}"
                 if not source_authority.resource_status("spell_slot", stable_id).is_effective:
                     skipped.append(f"Level {int(slot.get('level') or 0)} spell slots (NEEDS REPAIR)")
+            from .character_spell_slots import spell_slot_contributions
+            for pool in spell_slot_contributions(definition.spellcasting, state, source_authority):
+                if pool["source_kind"] != "class" and pool.get("needs_repair"):
+                    skipped.append(f"{pool['title']} (NEEDS REPAIR; capacity preserved)")
             for pool in list(dict(state.get("hit_dice") or {}).get("pools") or []):
                 if isinstance(pool, dict) and pool.get("faces") not in self._verified_hit_die_faces(
                     definition, state, source_authority):
                     skipped.append(f"Hit Dice d{pool.get('faces')} (NEEDS REPAIR)")
+        for entry in source_authority.item_capability_entries(definition):
+            counter = entry["capability"].get("counter")
+            if counter is not None and self._should_reset_resource(counter, rest_type) and not source_authority.resource_status(
+                    "item_charge", entry["physical_id"]).is_effective:
+                skipped.append(f"{entry['name']} uses (current availability unrecorded or incompatible)")
         if not source_authority.field_status("stats.max_hp").is_effective:
             skipped.append("HP adjustment unavailable (NEEDS REPAIR)")
         return skipped
@@ -1671,10 +1892,14 @@ class CharacterStateService:
                            "input_name": f"hit_dice_d{pool['faces']}"} for pool in pools],
                 "value": " | ".join(f"d{pool['faces']} {pool.get('current', 0)}/{pool.get('max', 0)}" for pool in pools) or "--",
                 "full_value": " + ".join(f"{pool.get('max', 0)}d{pool['faces']}" for pool in pools) or "--",
-                "regain_on_long_rest": max(1, total // 2) if total else 0,
+                "regain_on_long_rest": (max(1, total // 2) + self._qualified_item_hd_bonus(definition, source_authority)) if total else 0,
             }
         if list(hit_dice.get("pools") or []):
             adjustments["hit_dice"] = hit_dice
+        from .character_spell_slots import spell_slot_contributions, spell_slot_totals
+        contributions = spell_slot_contributions(definition.spellcasting, state, source_authority)
+        adjustments["slot_pools"] = contributions
+        adjustments["slot_totals"] = spell_slot_totals(contributions)
         return adjustments
 
     def _replace_state(
@@ -1685,11 +1910,29 @@ class CharacterStateService:
         expected_revision: int,
         updated_by_user_id: int | None = None,
         commit: bool = True,
+        initial_item_charge_id: str | None = None,
+        slot_grant_intent: Any | None = None,
+        item_spell_intent: Any | None = None,
+        item_action_intent: Any | None = None,
+        prepared_item_intent: Any | None = None,
+        assignment_intent: Any | None = None,
     ) -> CharacterStateRecord:
         from .committed_publication import active
         activated = active()
         if activated and not source_writer_reserved(self.state_store_connection()):
             raise CharacterStateConflictError("Character source writer reservation is unavailable.")
+        if item_action_intent is not None and any(value is not None for value in (
+                item_spell_intent, slot_grant_intent, initial_item_charge_id, prepared_item_intent)):
+            raise ValueError("A noncasting item use cannot combine other state action or admission intents.")
+        if prepared_item_intent is not None and any(value is not None for value in (
+                item_spell_intent, slot_grant_intent, initial_item_charge_id, item_action_intent)):
+            raise ValueError("Prepared ammunition owns one exact slot/load transition.")
+        if assignment_intent is not None and (not activated
+                or type(updated_by_user_id) is not int or updated_by_user_id < 1
+                or assignment_intent.actor_id != updated_by_user_id
+                or any(value is not None for value in (item_spell_intent, slot_grant_intent,
+                    initial_item_charge_id, item_action_intent, prepared_item_intent))):
+            raise ValueError("An assignment action owns one authenticated, exclusive ledger transition.")
         authority = self.current_authority(record)
         if authority is not None:
             # Validate before the CAS, then re-read current source policy and
@@ -1697,6 +1940,7 @@ class CharacterStateService:
             validate_state(
                 record.definition, state, source_authority=authority,
                 previous_state=record.state_record.state,
+                initial_item_charge_id=initial_item_charge_id,
             )
             refreshed = self.current_authority(record)
             if refreshed.identity != authority.identity:
@@ -1707,9 +1951,108 @@ class CharacterStateService:
             "source_authority": authority,
             "previous_state": record.state_record.state,
         }
+        if initial_item_charge_id is not None:
+            write_kwargs["initial_item_charge_id"] = initial_item_charge_id
+        if slot_grant_intent is not None:
+            from .character_spell_slots import validate_slot_grant_transition
+            validate_slot_grant_transition(record.state_record.state, state, record.definition, authority, slot_grant_intent)
+            if type(updated_by_user_id) is not int or updated_by_user_id < 1 or not activated:
+                raise ValueError("A source-owned slot action requires its authenticated actor and transaction.")
+            write_kwargs["slot_grant_intent"] = slot_grant_intent
+        if item_spell_intent is not None:
+            from .character_item_casting import validate_transition
+            validate_transition(record.state_record.state, state, record.definition, authority, item_spell_intent)
+            if type(updated_by_user_id) is not int or updated_by_user_id < 1 or not activated:
+                raise ValueError("An item spell action requires its authenticated actor and transaction.")
+            write_kwargs["item_spell_intent"] = item_spell_intent
+        if item_action_intent is not None:
+            from .character_item_actions import validate_transition
+            validate_transition(record.state_record.state, state, record.definition, authority, item_action_intent)
+            if type(updated_by_user_id) is not int or updated_by_user_id < 1 or not activated:
+                raise ValueError("A noncasting item action requires its authenticated actor and transaction.")
+            write_kwargs["item_action_intent"] = item_action_intent
+        from .character_item_prepared import validate_transition as validate_prepared
+        validate_prepared(record.state_record.state, state, record.definition, authority, prepared_item_intent)
+        if prepared_item_intent is not None:
+            if type(updated_by_user_id) is not int or updated_by_user_id < 1 or not activated:
+                raise ValueError("Prepared ammunition requires its authenticated actor and transaction.")
+            write_kwargs["prepared_item_intent"] = prepared_item_intent
+        from .character_artificer_assignments import validate_transition as validate_assignments
+        validate_assignments(record.state_record.state, state, record.definition, authority, assignment_intent)
+        if assignment_intent is not None:
+            write_kwargs["assignment_intent"] = assignment_intent
         if not commit or activated:
             write_kwargs["commit"] = False
-        return self.state_store.replace_state(record.definition, state, **write_kwargs)
+        result = self.state_store.replace_state(record.definition, state, **write_kwargs)
+        if assignment_intent is not None:
+            import json
+            from flask import current_app
+            from .character_artificer_assignments import EVENT, audit_metadata
+            metadata = audit_metadata(record.state_record.state, result.state, record.definition,
+                authority, assignment_intent, expected_revision, result.revision)
+            audit = current_app.extensions["auth_store"]
+            if audit.sanitize_audit_metadata(metadata) != metadata or len(json.dumps(metadata).encode("utf-8")) > 65536:
+                raise ValueError("The complete assignment observation does not fit its audit contract.")
+            audit.insert_audit_event(event_type=EVENT, actor_user_id=updated_by_user_id,
+                campaign_slug=record.definition.campaign_slug, character_slug=record.definition.character_slug,
+                metadata=metadata, commit=False)
+        if prepared_item_intent is not None:
+            import json
+            from flask import current_app
+            from .character_item_prepared import EVENT, audit_metadata
+            metadata = audit_metadata(record.state_record.state, result.state, record.definition, authority,
+                prepared_item_intent, expected_revision, result.revision)
+            audit = current_app.extensions["auth_store"]
+            if audit.sanitize_audit_metadata(metadata) != metadata or len(json.dumps(metadata).encode("utf-8")) > 65536:
+                raise ValueError("The complete prepared-ammunition action does not fit its audit contract.")
+            audit.insert_audit_event(event_type=EVENT, actor_user_id=updated_by_user_id,
+                campaign_slug=record.definition.campaign_slug, character_slug=record.definition.character_slug,
+                metadata=metadata, commit=False)
+        if item_action_intent is not None:
+            import json
+            from flask import current_app
+            from .character_item_actions import EVENT, audit_metadata
+            metadata = audit_metadata(record.state_record.state, result.state, record.definition, authority,
+                item_action_intent, expected_revision, result.revision)
+            audit = current_app.extensions["auth_store"]
+            if audit.sanitize_audit_metadata(metadata) != metadata or len(json.dumps(metadata).encode("utf-8")) > 65536:
+                raise ValueError("The complete noncasting item action does not fit its audit contract.")
+            audit.insert_audit_event(event_type=EVENT, actor_user_id=updated_by_user_id,
+                campaign_slug=record.definition.campaign_slug, character_slug=record.definition.character_slug,
+                metadata=metadata, commit=False)
+        if item_spell_intent is not None:
+            import json
+            from flask import current_app
+            from .character_item_casting import validate_transition
+            from .character_item_storage import EVENT, audit_metadata
+            validate_transition(record.state_record.state, result.state, record.definition, authority, item_spell_intent)
+            metadata = audit_metadata(record.state_record.state, result.state, record.definition, authority,
+                json.loads(item_spell_intent.params_json), expected_revision)
+            audit = current_app.extensions["auth_store"]
+            if audit.sanitize_audit_metadata(metadata) != metadata or len(json.dumps(metadata).encode("utf-8")) > 65536:
+                raise ValueError("The complete item spell action does not fit its audit contract.")
+            audit.insert_audit_event(event_type=EVENT, actor_user_id=updated_by_user_id,
+                campaign_slug=record.definition.campaign_slug, character_slug=record.definition.character_slug,
+                metadata=metadata, commit=False)
+        if slot_grant_intent is not None:
+            import json
+            from flask import current_app
+            from .character_spell_slots import require_slot_grants_preserved, slot_value_digest
+            require_slot_grants_preserved(state, result.state)
+            if slot_value_digest(result.state) != slot_grant_intent.after_digest:
+                raise ValueError("Slot action validation changed unrelated state; refresh before acting.")
+            params = json.loads(slot_grant_intent.params_json)
+            metadata = {"source": "spell_slot_contributions_v1", **params,
+                "prior_state_revision": expected_revision, "state_revision": result.revision,
+                "prior_state_digest": slot_value_digest(record.state_record.state),
+                "state_digest": slot_value_digest(result.state)}
+            audit = current_app.extensions["auth_store"]
+            if audit.sanitize_audit_metadata(metadata) != metadata or len(json.dumps(metadata).encode("utf-8")) > 65536:
+                raise ValueError("The complete slot action does not fit its audit contract.")
+            audit.insert_audit_event(event_type="character_spell_slot_contribution_applied",
+                actor_user_id=updated_by_user_id, campaign_slug=record.definition.campaign_slug,
+                character_slug=record.definition.character_slug, metadata=metadata, commit=False)
+        return result
 
     @staticmethod
     def state_store_connection():
@@ -1726,6 +2069,16 @@ class CharacterStateService:
         source_authority: Any | None = None,
     ) -> list[CharacterRestChange]:
         changes: list[CharacterRestChange] = []
+        if rest_type == "long":
+            from .character_spell_slots import spell_slot_contributions
+            for pool in spell_slot_contributions(spellcasting, state, source_authority):
+                if (pool["source_kind"] != "class" and pool["lifecycle"] == "expires_long_rest"
+                        and not pool.get("needs_repair")):
+                    maximum = sum(slot["max"] for slot in pool["slots"])
+                    available = sum(slot["available"] for slot in pool["slots"])
+                    if maximum:
+                        changes.append(CharacterRestChange(label=f"{pool['title']} slot capacity expires",
+                            from_value=f"{available} available / {maximum}", to_value="0 available / 0"))
         for resource in list(state.get("resources") or []):
             status = source_authority.resource_status("resource", str(resource.get("id") or "")) if source_authority is not None else None
             if status is not None and not status.is_effective:
@@ -1740,20 +2093,21 @@ class CharacterStateService:
             changes.append(
                 CharacterRestChange(
                     label=str(resource.get("label") or "Resource"),
-                    from_value=self._resource_value_text(current, resource.get("max")),
-                    to_value=self._resource_value_text(next_current, resource.get("max")),
+                    from_value=self._resource_value_text(current, effective_resource.get("max")),
+                    to_value=self._resource_value_text(next_current, effective_resource.get("max")),
                 )
             )
 
+        for item, rule in self._rest_item_use_rows(definition, state, source_authority, rest_type):
+            if item["charges_current"] != rule["maximum"]:
+                changes.append(CharacterRestChange(label=f"{rule['name']} uses",
+                    from_value=f"{item['charges_current']} / {rule['maximum']}",
+                    to_value=f"{rule['maximum']} / {rule['maximum']}"))
         if rest_type == "long":
             if is_xianxia_system(getattr(definition, "system", None)):
                 changes.extend(self._collect_xianxia_one_day_rest_changes(state, definition))
             else:
-                rested_state = (apply_long_rest_hit_dice_recovery(definition, state)
-                                if source_authority is None else recover_verified_hit_dice_pools(
-                                    definition, state,
-                                    self._verified_hit_die_faces(definition, state, source_authority),
-                                    verified_total_level=self._verified_character_level(definition, source_authority)))
+                rested_state = self._rest_hit_dice_state(definition, state, source_authority)
                 if source_authority is None:
                     for change in hit_dice_rest_changes(definition, state, rested_state):
                         changes.append(CharacterRestChange(**change))
@@ -1968,7 +2322,7 @@ def _committed_state_action(method):
 for _action_name in (
     "update_vitals", "update_xianxia_dying_rounds", "update_xianxia_active_state",
     "update_feature_state", "update_divine_avatar_form", "update_resource",
-    "update_spell_slots", "use_spell_slot_item_action", "update_inventory_quantity",
+    "update_spell_slots", "flexible_casting", "use_spell_slot_item_action", "update_inventory_quantity", "update_item_uses", "item_spell_action", "use_item_action", "prepared_item_action", "artificer_assignment_action",
     "add_xianxia_inventory_item", "update_xianxia_inventory_item",
     "remove_xianxia_inventory_item", "update_xianxia_inventory_quantity",
     "update_xianxia_inventory_equipped_state", "update_currency",

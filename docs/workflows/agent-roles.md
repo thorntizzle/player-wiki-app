@@ -9,18 +9,21 @@ Status: accepted workflow reference
   integration, candidate freeze, verification coordination, cumulative
   controls, operator gates, and close-out. It resolves or escalates Scout
   choices; it does not invent substitute requirements.
-- **Scout** performs one comprehensive targeted read-only pass per cycle and
-  returns an Initial or Repair Requirements Brief.
+- **Scout** owns the cycle's comprehensive targeted read-only discovery and
+  Initial or Repair Requirements Brief. Bounded discovery can iterate before
+  approval; use the operating model's distinction between technical learning
+  and a genuine requirements change.
 - **Implementer** owns one non-overlapping lane, ordinary technical decisions
-  inside the freeze and L1 code/diff inspection. L2 focused drills are optional
-  for a concrete uncertainty.
+  inside the freeze and L1 code/diff inspection. It resolves critical execution
+  assumptions under the operating model; other focused L2 drills are optional.
 - **Verifier** is independent from implementation and owns the exact-candidate
   precommit L3 adversarial code review, applicable authorized L4 checks,
-  evidence audit, and acceptance or Frozen Failure Inventory. It reads every
-  changed path, traces affected entry-to-side-effect paths, challenges
-  applicable security, privacy, custody, compatibility, concurrency, and
-  failure assumptions, and records residual uncertainty. It does not repair
-  the candidate or run a routine drill gate.
+  evidence audit, and acceptance or Frozen Failure Inventory. It owns coverage
+  of every changed path and affected entry-to-side-effect path under the
+  operating model's review/reuse rules, challenges applicable security,
+  privacy, custody, compatibility, concurrency and failure assumptions, and
+  records residual uncertainty. It does not repair the candidate, inherit an
+  author's self-approval, or run a routine drill gate.
 - **Scribe** records assigned verified post-review notes.
 - **Auditor** owns read-only app, workflow, security, documentation, or
   context-health findings. Editing requires reclassification.
@@ -32,9 +35,15 @@ Publisher schema identifiers are legacy tool/protocol labels only; they grant
 no role, independence, publication, deployment, rollback, or cleanup authority.
 
 Ordinary documentation-only work may collapse roles except where a focused
-independent semantic review is required. Candidate-producing work follows the
-canonical lifecycle regardless of size; a tiny change may use an inline freeze
-after its cycle's one Scout brief.
+independent semantic review is required. Product changes follow the canonical
+lifecycle; bounded local tooling may use the operating model's compact route.
+The Orchestrator may also perform discovery and implementation when ownership
+permits. Product/helper candidate acceptance and required documentary semantic
+review remain independent of authorship; ordinary documentation retains author
+checks. A separate agent, handoff or document for every other role is not
+required. The
+[operating model](agent-operating-model.md) owns lifecycle and review rules;
+this file owns role capabilities and independence.
 
 ## Role Lock
 
@@ -46,6 +55,9 @@ optional L2, L3/L4 review scope including browser ownership when relevant;
 checkpoint and intended/achieved gate delta;
 cumulative controls; operator gates; stop conditions; and next owner/action.
 Restate only when one of those boundaries changes.
+Reuse exact references for unchanged fields rather than copying the full
+freeze or historical handoffs into each assignment. The Role Lock is not
+restated at every tool call or ordinary technical clarification.
 
 ## Handoffs
 

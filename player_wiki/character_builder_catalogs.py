@@ -501,11 +501,11 @@ def _builder_static_revision_key(
     return _RevisionBoundCacheKey(revision, lambda: _load_revision_key() == revision)
 
 
-def _sort_entries_for_builder(entries: list[SystemsEntryRecord]) -> list[SystemsEntryRecord]:
+def _sort_entries_for_builder(entries: list[SystemsEntryRecord], *, field=getattr) -> list[SystemsEntryRecord]:
     deduped_entries: list[SystemsEntryRecord] = []
     seen_entry_keys: set[str] = set()
     for entry in list(entries or []):
-        entry_key = str(entry.entry_key or "").strip()
+        entry_key = str(field(entry, "entry_key") or "").strip()
         if entry_key and entry_key in seen_entry_keys:
             continue
         if entry_key:
@@ -514,9 +514,9 @@ def _sort_entries_for_builder(entries: list[SystemsEntryRecord]) -> list[Systems
     return sorted(
         deduped_entries,
         key=lambda entry: (
-            normalize_lookup(entry.title),
-            str(entry.source_id or "").strip().upper(),
-            str(entry.slug or "").strip(),
+            normalize_lookup(field(entry, "title")),
+            str(field(entry, "source_id") or "").strip().upper(),
+            str(field(entry, "slug") or "").strip(),
         ),
     )
 
@@ -927,46 +927,37 @@ def _load_phb_level_one_spell_lists() -> dict[str, dict[str, list[str]]]:
     return normalized
 
 
-def _build_item_catalog(item_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
+def _item_catalog_groups(item_entries, field=getattr):
     entries_by_key: dict[str, list[SystemsEntryRecord]] = {}
     entries_by_slug: dict[str, list[SystemsEntryRecord]] = {}
     entries_by_title: dict[str, list[SystemsEntryRecord]] = {}
     for entry in item_entries:
-        entry_key = str(entry.entry_key or "").strip()
+        entry_key = str(field(entry, "entry_key") or "").strip()
         if entry_key:
             entries_by_key.setdefault(entry_key, []).append(entry)
-        normalized_title = normalize_lookup(entry.title)
+        normalized_title = normalize_lookup(field(entry, "title"))
         if normalized_title:
             entries_by_title.setdefault(normalized_title, []).append(entry)
-        slug = str(entry.slug or "").strip()
+        slug = str(field(entry, "slug") or "").strip()
         if slug:
             entries_by_slug.setdefault(slug, []).append(entry)
-    immutable_weapon_profiles, immutable_armor_profiles = (
-        _builtin_phb_item_profile_snapshots()
-    )
-    weapon_profiles = _materialize_builtin_profile_value(
-        immutable_weapon_profiles
-    )
-    armor_profiles = _materialize_builtin_profile_value(
-        immutable_armor_profiles
-    )
+    return entries_by_key, entries_by_slug, entries_by_title
+
+
+def _item_catalog_indices(groups):
+    by_key, by_slug, by_title = groups
     return {
-        "entries": list(item_entries),
-        "by_entry_key": {
-            key: candidates[0]
-            for key, candidates in entries_by_key.items()
-            if len(candidates) == 1
-        },
-        "by_slug": {
-            slug: candidates[0]
-            for slug, candidates in entries_by_slug.items()
-            if len(candidates) == 1
-        },
-        "by_title": {
-            title: candidates[0]
-            for title, candidates in entries_by_title.items()
-            if len(candidates) == 1
-        },
+        "by_entry_key": {key: rows[0] for key, rows in by_key.items() if len(rows) == 1},
+        "by_slug": {key: rows[0] for key, rows in by_slug.items() if len(rows) == 1},
+        "by_title": {key: rows[0] for key, rows in by_title.items() if len(rows) == 1},
+    }
+
+
+def _item_catalog_auxiliary():
+    immutable_weapon_profiles, immutable_armor_profiles = _builtin_phb_item_profile_snapshots()
+    weapon_profiles = _materialize_builtin_profile_value(immutable_weapon_profiles)
+    armor_profiles = _materialize_builtin_profile_value(immutable_armor_profiles)
+    return {
         "phb_weapon_profiles": weapon_profiles,
         "phb_armor_profiles": armor_profiles,
         "phb_weapon_profiles_normalized": immutable_weapon_profiles,
@@ -974,6 +965,12 @@ def _build_item_catalog(item_entries: list[SystemsEntryRecord]) -> dict[str, Any
         "campaign_item_support_by_page_ref": {},
         "campaign_item_support_by_title": {},
     }
+
+
+def _build_item_catalog(item_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
+    groups = _item_catalog_groups(item_entries)
+    auxiliary = _item_catalog_auxiliary()
+    return {"entries": list(item_entries), **_item_catalog_indices(groups), **auxiliary}
 
 
 def _build_scoped_item_catalog(
@@ -1295,6 +1292,8 @@ _CAMPAIGN_ITEM_PAGE_SUPPORT_METADATA_KEYS = (
     "resource_template_bonuses",
     "spell_support",
     "spellcasting_modifiers",
+    "spell_property_modifiers",
+    "weapon_extra_damage",
 )
 
 
@@ -1484,29 +1483,27 @@ def _resolve_campaign_item_weapon_title(
     return ""
 
 
-def _build_spell_catalog(spell_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
-    def _unique_index(key_builder: Callable[[SystemsEntryRecord], str]) -> dict[str, SystemsEntryRecord]:
-        candidates_by_key: dict[str, list[SystemsEntryRecord]] = defaultdict(list)
+def _spell_catalog_indices(spell_entries, field=getattr):
+    def unique_index(key_builder):
+        candidates = defaultdict(list)
         for entry in spell_entries:
             key = str(key_builder(entry) or "").strip()
             if key:
-                candidates_by_key[key].append(entry)
-        return {
-            key: candidates[0]
-            for key, candidates in candidates_by_key.items()
-            if len(candidates) == 1
-        }
+                candidates[key].append(entry)
+        return {key: rows[0] for key, rows in candidates.items() if len(rows) == 1}
+    by_key = unique_index(lambda entry: field(entry, "entry_key"))
+    by_slug = unique_index(lambda entry: field(entry, "slug"))
+    by_title = unique_index(lambda entry: normalize_lookup(field(entry, "title")))
+    return {"by_entry_key": by_key, "by_title": by_title, "by_slug": by_slug}
 
-    by_entry_key = _unique_index(lambda entry: entry.entry_key)
-    by_slug = _unique_index(lambda entry: entry.slug)
-    by_title = _unique_index(lambda entry: normalize_lookup(entry.title))
-    return {
-        "entries": list(spell_entries),
-        "by_entry_key": by_entry_key,
-        "by_title": by_title,
-        "by_slug": by_slug,
-        "phb_level_one_lists": _load_phb_level_one_spell_lists(),
-    }
+
+def _spell_catalog_auxiliary():
+    return {"phb_level_one_lists": _load_phb_level_one_spell_lists()}
+
+
+def _build_spell_catalog(spell_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
+    indices = _spell_catalog_indices(spell_entries)
+    return {"entries": list(spell_entries), **indices, **_spell_catalog_auxiliary()}
 
 
 def _build_feat_catalog(feat_entries: list[SystemsEntryRecord]) -> dict[str, Any]:
@@ -1534,3 +1531,19 @@ def _build_entry_slug_catalog(entries: list[SystemsEntryRecord]) -> dict[str, Sy
         if slug and slug not in by_slug:
             by_slug[slug] = entry
     return by_slug
+
+
+# Default interpretation/construction recipe for the closed private read path.
+# Unknown custom factories keep the ordinary APIs before new source dispatch.
+_NATIVE_CATALOG_RECIPE = tuple((name, globals()[name]) for name in (
+    "_build_item_catalog", "_build_spell_catalog", "_item_catalog_groups",
+    "_item_catalog_indices", "_item_catalog_auxiliary", "_spell_catalog_indices",
+    "_spell_catalog_auxiliary", "_attach_campaign_item_page_support",
+    "_build_campaign_item_page_support", "_build_campaign_item_support_metadata",
+    "_builtin_phb_item_profile_snapshots", "_freeze_builtin_profile_value",
+    "_materialize_builtin_profile_value", "_load_phb_weapon_profiles",
+    "_load_phb_armor_profiles", "_load_phb_level_one_spell_lists",
+    "_list_campaign_enabled_entries", "_sort_entries_for_builder", "normalize_lookup",
+    "_cached_builder_entry_records", "_builder_cache_get", "_builder_cache_context",
+    "_builder_service_cache_identity", "_builder_static_revision_key", "_bind_revision_key",
+))

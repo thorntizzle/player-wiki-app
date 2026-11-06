@@ -27,6 +27,7 @@
         class="stack-form character-builder-form"
         data-live-builder-form
       >
+        <input type="hidden" name="native_acquisition_intent" value="{{ builder['values'].native_acquisition_intent }}">
         <section class="builder-section">
           <h3>Identity</h3>
           <div class="builder-field-grid">
@@ -35,7 +36,7 @@
               <input
                 type="text"
                 name="name"
-                value="{{ builder.values.name }}"
+                value="{{ builder['values'].name }}"
                 placeholder="Zigzag Blackscar"
                 data-live-preview-trigger="{{ builder.field_live_preview.name.live_preview_trigger }}"
                 data-live-preview-regions="{{ builder.field_live_preview.name.live_preview_regions }}"
@@ -47,7 +48,7 @@
               <input
                 type="text"
                 name="character_slug"
-                value="{{ builder.values.character_slug }}"
+                value="{{ builder['values'].character_slug }}"
                 placeholder="Auto-generated from the name if left blank"
                 data-live-preview-trigger="{{ builder.field_live_preview.character_slug.live_preview_trigger }}"
                 data-live-preview-regions="{{ builder.field_live_preview.character_slug.live_preview_regions }}"
@@ -59,7 +60,7 @@
               <input
                 type="text"
                 name="alignment"
-                value="{{ builder.values.alignment }}"
+                value="{{ builder['values'].alignment }}"
                 placeholder="Neutral Good"
                 data-live-preview-trigger="{{ builder.field_live_preview.alignment.live_preview_trigger }}"
                 data-live-preview-regions="{{ builder.field_live_preview.alignment.live_preview_regions }}"
@@ -71,7 +72,7 @@
               <input
                 type="text"
                 name="experience_model"
-                value="{{ builder.values.experience_model }}"
+                value="{{ builder['values'].experience_model }}"
                 data-live-preview-trigger="{{ builder.field_live_preview.experience_model.live_preview_trigger }}"
                 data-live-preview-regions="{{ builder.field_live_preview.experience_model.live_preview_regions }}"
                 data-live-preview-debounce-ms="{{ builder.field_live_preview.experience_model.live_preview_debounce_ms }}"
@@ -176,7 +177,7 @@
                   name="{{ ability_key }}"
                   min="1"
                   max="30"
-                  value="{{ builder.values[ability_key] }}"
+                  value="{{ builder['values'][ability_key] }}"
                   data-live-preview-trigger="{{ builder.field_live_preview[ability_key].live_preview_trigger }}"
                   data-live-preview-regions="{{ builder.field_live_preview[ability_key].live_preview_regions }}"
                   data-live-preview-debounce-ms="{{ builder.field_live_preview[ability_key].live_preview_debounce_ms }}"

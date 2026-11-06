@@ -12,6 +12,7 @@ from .system_policy import DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAG
 @dataclass(frozen=True)
 class CharacterSpellSearchRouteDependencies:
     load_character_context: Callable[..., tuple[object, object]]
+    project_character_spell_management_definition: Callable[..., object]
     campaign_supports_dnd5e_character_spellcasting_tools: Callable[..., bool]
     load_character_spell_management_support: Callable[..., tuple[object, object]]
     has_session_mode_access: Callable[..., bool]
@@ -39,14 +40,17 @@ def register_character_spell_search_route(
                 }
             ), 404
 
+        management_definition = dependencies.project_character_spell_management_definition(
+            campaign_slug, campaign, record,
+        )
         spell_catalog, selected_class_rows = (
             dependencies.load_character_spell_management_support(
                 campaign_slug,
-                record.definition,
+                management_definition,
             )
         )
         results, message = dependencies.search_character_spell_management_options(
-            record.definition,
+            management_definition,
             spell_catalog=spell_catalog,
             selected_class_rows=selected_class_rows,
             query=request.args.get("q", ""),

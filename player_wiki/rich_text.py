@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Collection
 from copy import deepcopy
 from hashlib import sha256
 from html import unescape
 import re
+import sys
+from threading import Lock
 import unicodedata
 from typing import Any
 from urllib.parse import unquote
@@ -79,6 +82,12 @@ _MARKDOWN_AUTOLINK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _RICH_HTML_REQUEST_CACHE_MAX_ENTRIES = 128
+_RICH_HTML_SHARED_CACHE_MAX_ENTRIES = 8192
+_RICH_HTML_SHARED_CACHE_MAX_BYTES = 16 * 1024 * 1024
+_RICH_HTML_SHARED_CACHE_MAX_VALUE_CHARS = 128 * 1024
+_RICH_HTML_SHARED_CACHE = OrderedDict()
+_RICH_HTML_SHARED_CACHE_BYTES = 0
+_RICH_HTML_SHARED_CACHE_LOCK = Lock()
 
 
 def _build_rich_html_cleaner() -> bleach.sanitizer.Cleaner:
@@ -380,21 +389,55 @@ def _allow_rich_text_attribute(tag: str, name: str, value: str) -> bool:
     return False
 
 
-def sanitize_rich_html(value: Any) -> str:
-    """Return allowlisted presentation HTML safe for every legacy and current read path."""
+def _rich_html_shared_key(source: str):
+    # Policy changes cannot reuse text sanitized under different allowlists.
+    return (frozenset(ALLOWED_RICH_TEXT_TAGS), frozenset(ALLOWED_LINK_PROTOCOLS),
+            frozenset(ALLOWED_IMAGE_PROTOCOLS), _allow_rich_text_attribute,
+            _build_rich_html_cleaner, bleach.sanitizer.Cleaner.clean,
+            _is_allowed_url, _decode_url_for_policy,
+            (_CLASS_VALUE_PATTERN.pattern, _CLASS_VALUE_PATTERN.flags),
+            (_ID_VALUE_PATTERN.pattern, _ID_VALUE_PATTERN.flags),
+            (_ASCII_CONTROL_OR_SPACE_PATTERN.pattern, _ASCII_CONTROL_OR_SPACE_PATTERN.flags), source)
 
-    source = str(value or "")
-    request_cache: dict[str, str] | None = None
-    if has_request_context():
-        cached = getattr(g, "_rich_html_sanitizer_cache", None)
-        if isinstance(cached, dict):
-            request_cache = cached
-            if source in request_cache:
-                return request_cache[source]
-        else:
-            request_cache = {}
-            g._rich_html_sanitizer_cache = request_cache
 
+def _rich_html_shared_get(source: str) -> str | None:
+    if (not has_request_context() or len(source) > _RICH_HTML_SHARED_CACHE_MAX_VALUE_CHARS
+            or _RICH_HTML_SHARED_CACHE_MAX_ENTRIES <= 0 or _RICH_HTML_SHARED_CACHE_MAX_BYTES <= 0):
+        return None
+    key = _rich_html_shared_key(source)
+    with _RICH_HTML_SHARED_CACHE_LOCK:
+        cached = _RICH_HTML_SHARED_CACHE.get(key)
+        if cached is not None:
+            _RICH_HTML_SHARED_CACHE.move_to_end(key)
+            return cached[0]
+    return None
+
+
+def _rich_html_shared_put(source: str, sanitized: str) -> None:
+    global _RICH_HTML_SHARED_CACHE_BYTES
+    if (not has_request_context() or
+            max(len(source), len(sanitized)) > _RICH_HTML_SHARED_CACHE_MAX_VALUE_CHARS
+            or _RICH_HTML_SHARED_CACHE_MAX_ENTRIES <= 0):
+        return
+    key = _rich_html_shared_key(source)
+    charge = (sys.getsizeof(source) + sys.getsizeof(sanitized) + sys.getsizeof(key)
+              + sum(sys.getsizeof(item) for item in key if isinstance(item, tuple)) + 256)
+    if charge > _RICH_HTML_SHARED_CACHE_MAX_BYTES:
+        return
+    with _RICH_HTML_SHARED_CACHE_LOCK:
+        prior = _RICH_HTML_SHARED_CACHE.pop(key, None)
+        if prior is not None:
+            _RICH_HTML_SHARED_CACHE_BYTES -= prior[1]
+        while _RICH_HTML_SHARED_CACHE and (
+                len(_RICH_HTML_SHARED_CACHE) >= _RICH_HTML_SHARED_CACHE_MAX_ENTRIES
+                or _RICH_HTML_SHARED_CACHE_BYTES + charge > _RICH_HTML_SHARED_CACHE_MAX_BYTES):
+            _old_key, (_old_value, old_charge) = _RICH_HTML_SHARED_CACHE.popitem(last=False)
+            _RICH_HTML_SHARED_CACHE_BYTES -= old_charge
+        _RICH_HTML_SHARED_CACHE[key] = (sanitized, charge)
+        _RICH_HTML_SHARED_CACHE_BYTES += charge
+
+
+def _sanitize_rich_html_uncached(source: str) -> str:
     request_cleaner: bleach.sanitizer.Cleaner | None = None
     if has_request_context():
         cached_cleaner = getattr(g, "_rich_html_cleaner", None)
@@ -417,6 +460,28 @@ def sanitize_rich_html(value: Any) -> str:
     _cleanup_rich_html_cleaner_transients(cleaner)
     if request_cleaner is None:
         _dispose_rich_html_cleaner(cleaner)
+    return sanitized
+
+
+def sanitize_rich_html(value: Any) -> str:
+    """Return allowlisted presentation HTML safe for every legacy and current read path."""
+
+    source = str(value or "")
+    request_cache: dict[str, str] | None = None
+    if has_request_context():
+        cached = getattr(g, "_rich_html_sanitizer_cache", None)
+        if isinstance(cached, dict):
+            request_cache = cached
+            if source in request_cache:
+                return request_cache[source]
+        else:
+            request_cache = {}
+            g._rich_html_sanitizer_cache = request_cache
+
+    sanitized = _rich_html_shared_get(source)
+    if sanitized is None:
+        sanitized = _sanitize_rich_html_uncached(source)
+        _rich_html_shared_put(source, sanitized)
     if request_cache is not None and _RICH_HTML_REQUEST_CACHE_MAX_ENTRIES > 0:
         if (
             source not in request_cache

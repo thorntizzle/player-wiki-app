@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from flask import abort, render_template, request
+from flask import abort, current_app, make_response, render_template, request
 
 from .auth import campaign_scope_access_required
 from .csrf import CSRF_FIELD_NAME
@@ -17,6 +17,15 @@ from .character_store import CharacterStateConflictError
 from .character_service import CharacterStateValidationError
 from .runtime_lease import RuntimeStateLeaseError
 from .system_policy import is_dnd_5e_system
+
+
+def _observe_preparation_failure(error):
+    try:
+        observer = current_app.extensions.get("character_source_repair_failure_observer")
+        if callable(observer):
+            observer(error)
+    except BaseException:
+        pass
 
 
 def register_character_equipment_activation_repair_route(
@@ -36,8 +45,10 @@ def register_character_equipment_activation_repair_route(
         if not is_dnd_5e_system(record.definition.system):
             abort(404)
         outcome = ""
+        preview = None
         status_code = 200
         submitted_draft: dict[str, str] = {}
+        intent = None
         if request.method == "POST":
             submitted_draft = {
                 key: str(request.form.get(key) or "")[:160]
@@ -49,8 +60,8 @@ def register_character_equipment_activation_repair_route(
             if user is None:
                 abort(403)
             allowed = {CSRF_FIELD_NAME, "expected_revision", "definition_digest",
-                       "row_index", "state_index", "choice", "target_id"}
-            if set(request.form) - allowed:
+                       "row_index", "state_index", "choice", "target_id", "intent"}
+            if set(request.form) - allowed or any(len(request.form.getlist(key)) != 1 for key in request.form):
                 abort(400)
             try:
                 expected_revision = int(request.form["expected_revision"])
@@ -63,7 +74,16 @@ def register_character_equipment_activation_repair_route(
                 if (expected_revision != record.state_record.revision
                         or expected_digest != definition_digest(record.definition)):
                     raise CharacterStateConflictError("The reviewed Character changed. Refresh this preview.")
-                if choice == "remap_definition":
+                intent = str(request.form.get("intent") or "apply")
+                if intent not in {"preview", "apply"}:
+                    raise ValueError("Choose preview or apply.")
+                if intent == "preview":
+                    if choice != "preserve" or target_id or request.form.get("state_index"):
+                        raise ValueError("Preparation preview supports only preservation of an exact existing row.")
+                    from .committed_character_publication import preview_activation_repair
+                    preview = preview_activation_repair(coordinator, record, row_index=row_index, actor_id=user.id)
+                    outcome = "Preparation only. No Character repair was applied."
+                elif choice == "remap_definition":
                     new_definition, desired_state = repair_definition_identity(
                         record.definition, record.state_record.state,
                         definition_index=row_index,
@@ -76,24 +96,33 @@ def register_character_equipment_activation_repair_route(
                         record.definition, record.state_record.state,
                         row_index=row_index, choice=choice, target_id=target_id,
                     )
-                coordinator.update(
-                    record, new_definition, record.import_metadata, desired_state,
-                    expected_revision=expected_revision,
-                    updated_by_user_id=user.id,
-                    operation_kind="activation_repair",
-                )
-                refreshed = load_character_context(campaign_slug, character_slug)
-                if refreshed is None:
-                    abort(404)
-                _, record = refreshed
-                outcome = "Repair applied and reread from durable Character state."
+                if intent == "apply":
+                    coordinator.update(
+                        record, new_definition, record.import_metadata, desired_state,
+                        expected_revision=expected_revision,
+                        updated_by_user_id=user.id,
+                        operation_kind="activation_repair",
+                    )
+                    refreshed = load_character_context(campaign_slug, character_slug)
+                    if refreshed is None:
+                        abort(404)
+                    _, record = refreshed
+                    outcome = "Repair applied and reread from durable Character state."
             except (CharacterStateConflictError, CharacterPublicationConflict,
                     RuntimeStateLeaseError) as exc:
+                if intent == "preview":
+                    _observe_preparation_failure(exc)
                 outcome = str(exc) or "The Character changed; refresh before repairing."
                 status_code = 409
             except (CharacterStateValidationError, ValueError, KeyError) as exc:
+                if intent == "preview":
+                    _observe_preparation_failure(exc)
                 outcome = str(exc)
                 status_code = 400
+            except Exception as exc:
+                if intent == "preview":
+                    _observe_preparation_failure(exc)
+                raise
         analysis = analyze_activation(record.definition, record.state_record.state)
         definition_rows = [item for item in list(record.definition.equipment_catalog or [])
                            if isinstance(item, dict) and not item.get("is_currency_only")]
@@ -104,16 +133,18 @@ def register_character_equipment_activation_repair_route(
                           if str(item.get("id") or "").strip() not in state_ids
                           and sum(1 for row in definition_rows
                                   if str(row.get("id") or "").strip() == str(item.get("id") or "").strip()) == 1]
-        return render_template(
+        response = make_response(render_template(
             "character_equipment_activation_repair.html",
             campaign=campaign, character=record.definition,
             analysis=analysis, state_revision=record.state_record.revision,
             definition_digest=definition_digest(record.definition),
             unique_targets=unique_targets, outcome=outcome,
-            submitted_draft=submitted_draft if status_code != 200 else {},
+            submitted_draft=submitted_draft if status_code != 200 else {}, preview=preview,
             state_rows=list(record.state_record.state.get("inventory") or []),
             active_nav="characters",
-        ), status_code
+        ), status_code)
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     app.add_url_rule(
         "/campaigns/<campaign_slug>/characters/<character_slug>/equipment-activation-repair",

@@ -448,13 +448,14 @@ class CharacterRepository:
     @staticmethod
     def _committed_definition(campaign_slug, slug, source, settings):
         from .committed_publication import CommittedSourceConflict
+        from .committed_source_store import _character_system_code
 
         try:
             definition = yaml.safe_load(source["primary_bytes"].decode("utf-8"))
             if (not isinstance(definition, dict)
                     or definition.get("campaign_slug") != campaign_slug
                     or definition.get("character_slug") != slug
-                    or normalize_system_code(definition.get("system"))
+                    or _character_system_code(definition)
                     != normalize_system_code(settings.get("system"))):
                 raise ValueError("Invalid Character definition identity.")
             return definition
@@ -973,13 +974,13 @@ class CharacterRepository:
                     definition = self._committed_definition(campaign_slug, slug, source, settings)
                     status = str(definition.get("status") or "").strip()
                     targets.append(_source_health_character_target(
-                        campaign_slug, slug, system_code=normalize_system_code(definition.get("system")),
+                        campaign_slug, slug, system_code=normalize_system_code(settings.get("system")),
                         enabled=status == "active",
                     ))
                     if status == "active":
                         definitions[slug] = dict(definition)
                         consumers.extend(_character_source_health_consumers(
-                            campaign_slug, slug, normalize_system_code(definition.get("system")), definition,
+                            campaign_slug, slug, normalize_system_code(settings.get("system")), definition,
                         ))
                 next_offset = offset + len(selected)
                 return SourceHealthInventoryPage(
@@ -1169,7 +1170,7 @@ class CharacterRepository:
                             resolution = SourceHealthResolution(targets=(
                                 _source_health_character_target(
                                     campaign_slug, slug,
-                                    system_code=normalize_system_code(definition.get("system")),
+                                    system_code=normalize_system_code(settings.get("system")),
                                     enabled=status == "active",
                                 ),
                             ))

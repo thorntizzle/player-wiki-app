@@ -39,6 +39,40 @@ Last updated: 2026-09-27
   subtree; the intervening commits hardened workflow, validation, and
   Publisher tooling rather than changing application behavior.
 
+## Native class and subclass semantic read family
+
+The native phase service shares class/subclass progression, unique reference
+resolution, unconditional bundles and attained-grant traversal with the public
+Systems service through `systems_feature_semantics.py`. The private adapter in
+`systems_feature_read_model.py` consumes the complete enabled feature catalog
+as one phase-owned immutable observation. The ordinary store and native reader
+share the same eager field interpretation, including rich-text sanitation and
+timestamps. Native capture avoids constructing an intermediate full mutable
+record catalog; it uses the existing frozen record signature and original
+public store read identity. Closing guards still re-read and compare the full
+mapped catalog, not merely selected records or revision tokens.
+
+Only selected progression/grant outputs and existing embedded-card decorators
+receive ordinary detached records. Public full catalogs and mutable record
+contracts are unchanged. Current-owner full equality remains required for the
+attained collector; the progression APIs retain their supplied-owner semantics.
+Campaign-page candidates, complete ambiguity checks, both grant passes and the
+exact selected Armor Model rules remain in the shared algorithm. Custom stores
+or unsupported providers use the original path before native capture. Nonplain
+interpreted catalog values fall through the original facade using the already
+captured ordinary store cache; parsing and SQL are not replayed. Facts
+and indices are cleared with the phase; no authority verdict or graph is reused
+across phases or requests. This is the first semantic family, not a complete
+Character read-model migration or a latency guarantee.
+
+Native record eligibility permits Python's optional ordinary `__slotnames__`
+cache only as an exact list of the original 17 slot-name strings in order.
+Its lazy initialization during copying does not change the record recipe.
+Every other original class binding, field, descriptor, constructor and provider
+check remains required; malformed or custom cache/layout values use the legacy
+path. Eligibility is rechecked rather than cached as a positive verdict.
+
+
 ## Phase 6 Boundary And Evidence
 
 - CLOSED AND SHIPPED: Slices 6.1 through 6.5, route/access/browser contracts,
@@ -460,6 +494,40 @@ Foundation completion claim follows.
   already match. Unchanged rows keep their creation and update timestamps;
   sync-state bookkeeping still runs. Inserts, content changes, missing-page
   deletion and direct-save timestamp behavior retain their existing semantics.
+- Activated committed-source campaign settings reuse pure YAML decoding within
+  one HTTP request for at most eight exact byte payloads of at most 64 KiB each.
+  Every read still resolves the current admitted generation, verifies its digest
+  and validates the settings. Callers receive independent copies of parsed
+  values; larger payloads and calls outside a request use ordinary decoding.
+  This does not cache authorization, activation, revisions or source proofs.
+- Activated page proofs reuse only the pure expected projection inside a
+  request, keyed by campaign, page reference, exact generation bytes and the
+  selected projection timestamp. The cache is bounded to 512 entries and
+  16 MiB of charged content; inputs over 128 KiB use ordinary construction.
+  Each call still reads current config/page admission and digests, checks the
+  system, selects the projection and compares every expected field. Returned
+  projections are detached; rows, permissions and proof verdicts are not cached.
+- Committed repository construction does not scan filesystem mirrors. Every
+  activated `RepositoryStore.status()` call observes current admitted config,
+  content and asset paths in a read snapshot for the legacy `/healthz`
+  diagnostics. Explicit page-sync observations, manager page-repair checks and
+  publication/recovery file checks retain their independent paths.
+- Builtin Systems library preparation uses the existing request cache only
+  under a fresh durable revision and selected library identity. Selection and
+  entry/source policy remain current; preparation that changes the revision
+  is not cached. Callers receive independent library values.
+- The shared Systems request cache initializes each service facade's revision
+  marker independently. First use does not evict another facade's valid values;
+  a changed known revision still clears all entries. Value keys retain service,
+  current policy context, revision and operation identity, with fresh prehit
+  and postbuild probes and all owning-write invalidations unchanged.
+- Pure HTML sanitation also has a process-local LRU for HTTP calls, keyed by
+  exact input and sanitizer policy/function identity. It holds at most 8192
+  entries and 16 MiB of charged string/container storage, bypassing inputs or
+  outputs over 128 Ki characters. It stores only strings, retaining the same
+  allowlists and request Cleaner lifecycle. Source records, authorization,
+  security permissions, parsers and mutable Systems entries are never reused
+  through this text cache. Calls outside HTTP retain ordinary sanitation.
 - The integrated Foundation Slice B implementation separates refresh into
   `campaign_page_refresh.py` source observations, pure payload normalization and
   diff planning, and `CampaignPageStore` authoritative apply. Discovery, reads,
@@ -827,6 +895,228 @@ Foundation completion claim follows.
 - [Characters Overview](characters-overview.md)
 - [Systems Wiki](systems.md)
 - [Ops And Fly Deployment](ops-deploy.md)
+
+## Native Source Content Copies
+
+Class/subclass feature lookup can select an exact source bucket before repeated
+detachment. Open source phases cache only that unfiltered bucket under the
+original operation, campaign, source-policy/subset context and tuple identity.
+The complete original map producer and underlying readset still run; fresh
+closing guards, all caller filters and independently detached returned values
+remain. Default whole-map and unphased lookup behavior are preserved.
+
+Native derivation foundations take ownership of already-detached local item
+and spell catalogs. Supplied, static and fallback catalogs receive their input
+isolation copy, including fallback cached built-in spell lists/profile
+wrappers. The public reusable-foundation normalizer detaches catalogs before
+each use. The direct normalizer creates an unexposed foundation and consumes
+its owned catalogs once through a private core; its definition, resolved-entry,
+page and transient copies and identity checks remain unchanged.
+Global memoization, cross-index alias merging and authority/witness caching
+are not introduced.
+
+Exact-ref phase page reads use the existing frozen page index and detach only
+the requested row. They retain open-phase/campaign checks and the same mapper,
+projection/config revision proof and full fresh closing guard. List and
+route-slug lookups retain their original ordering and ambiguity behavior.
+
+Reconstruction proficiency bases can prepare category-owner content lazily
+within one invocation bound to the concrete open phase service. Per-target
+selection, current-source/status rules and digest construction remain; other
+providers retain their per-target producer. This content does not escape into
+a shared authority or witness cache. Source-state and override point reads
+use separately namespaced optional-record projections over the same full map
+producers/readsets and policy context. Returned records remain detached;
+missing None and an explicitly disabled override False retain their meanings.
+Default whole-map and unphased map.get behavior, enabled predicates and fresh
+closing guards remain.
+
+Activated native DND Features GET/HEAD producers use separate owned source
+phases for shell and selected-section presentation. The shell materializes
+only its original visible manifest/body recipe; the selected phase rebuilds
+the shell-then-Features body union in its own snapshot. Each returns a detached
+DTO only after its fresh guard; phase Page/authority objects are not carried
+as trusted inputs between producers. Their distinct component recipes and
+activated shell cache-key None remain. Existing pre-dispatch declines use the
+original unphased inputs once; entered failures propagate without replay.
+Eligibility excludes other sections, POST/protected conflicts and ambient
+transactions, with transaction/activation rechecks at each producer. Auth,
+header/readiness, rest previews, managers and templates stay outside; their
+write/reservation contracts are unchanged.
+
+Ordinary committed page-list mapping captures one connection for its existing
+read snapshot. Each canonical row retains its complete page/config/current,
+admission, digest, system and projection proof plus current revision stamps.
+The private lexical mapper establishes activation after the first pure Page
+construction, then reuses that boolean only within the batch snapshot. Empty
+batches add no probe; activation failures propagate. JSON decoding, fresh Page
+allocation, sorting and owned/ambient cleanup remain; legacy, point, phase and
+custom-store mapping paths keep their original behavior. This is no request
+admission cache or raw-row authorization shortcut.
+
+For the ordinary default mapper, an explicit lexical owner from the existing
+`read_snapshot` transaction can retain the exact proved page/config generation
+rows until mapping completes. Nested reads on that same connection may borrow
+the owner; an unrelated ambient transaction does not establish ownership.
+The mapper repeats digest/tombstone validation at the original post-constructor
+revision-stamp positions, without fetching those same rows again. Each access
+check still opens its own fresh health observation; no health or permission
+success is reused between observations. Full configuration, admission, system,
+projection and closing character-source checks remain.
+Retention is private, limited to an aggregate conservative 8 MiB scalar-row
+charge, and discarded at call end. An unsupported or oversized retention uses
+the already-proved projection list with original point revision reads, without
+replaying page proofs. Custom providers/constructors/JSON state, nondefault
+connections and unknown ambient/write contexts retain ordinary behavior.
+Entered ownership or mapper drift refuses instead of replaying callbacks.
+Public page lists and phase row/generation APIs keep their existing return
+types, omission rules, error ordering and detached mutable Page objects.
+
+Canonical point page reads use a private system-only config projection. Its
+shared validation core freshly reads current config and runs the existing
+complete schema validator before reading the page generation.
+Only bounded copy-compatible private parsed content can avoid a full settings
+copy; eligibility is plain-content metadata, not a validation result. The
+projection returns an immutable normalized system string. Public config reads
+still return detached mutable mappings, and deep/unsupported/oversized or
+non-request inputs retain the original decode/copy/fresh-parse behavior.
+Config/page omission, errors, ownership, digests and transaction/guard rules
+are unchanged; no admission or schema success is memoized across snapshots.
+Ordinary GET/HEAD page lists can share the config proof within their existing
+owned read snapshot, validating config once per batch and retaining every
+per-row digest, system and full payload check.
+Generation and projection point reads stay in original reference order so an
+eager later corrupt SQLite row cannot mask an earlier payload exception.
+Empty lists do not inspect config; unhealthy pages remain individually omitted.
+Only generations passing admission, tombstone, digest and system checks have
+their projections fetched. Original reference order and SQLite row types remain.
+Unknown providers, connection wrappers and row/text factories retain singular
+reads, as do nonrequest/write callers. Character source phases consume the
+proved row/generation pairs without an immediate duplicate generation lookup;
+each fresh closing snapshot repeats all batch proofs and complete basis/readset
+comparisons. No batch facts or positive proof result crosses snapshots/cards.
+Coalescing also requires an existing bounded ordinary request config-content
+cache. Its flag alone is insufficient: an identity-only built-in graph check
+precedes sizing checks. Absent, custom, malformed or ineligible cached content
+retains singular reads before any config evaluation; no cache is primed by the
+eligibility check. Cold calls can therefore keep their original cost.
+
+Numeric-status classification can prepare one private input frame within a
+single native DND pass. It reuses the pass's exact target values and lazily
+captures a read-only payload only for ordinary built-in data and supported
+witness wrappers. Every per-target owner hash and authorization decision still
+runs. Public owner-digest callers continue to derive fresh inputs. Historical
+requalification schemas 3-6 can rebuild their private expected source with one
+owned authorization replay, preserving linear replacement and append order,
+whole-payload detachment and final digest checks. Unsupported protocols,
+cyclic/deep/oversized graphs and nonnative inputs retain the original paths.
+These are content-preparation boundaries, not authority or witness caches.
+
+## Pure Committed YAML Parsing
+
+HTTP requests may reuse successful plain YAML mapping parses keyed by exact
+immutable input bytes and the current parser/loader identity. Every cached
+return, including the first, is deeply detached; aliases retain their normal
+within-value relationships. The request-local cache admits inputs up to
+256 KiB, at most 64 entries, 32,768 unique nodes and depth 64, with a conservative
+16 MiB retained-charge limit. Oversized, deep, unsupported, nonfinite or
+nonmapping values and copy-recursion failures retain uncached behavior.
+Parser exceptions are never cached. There is no process-global retention.
+
+The strict reader preserves original YAML values and exceptions. The existing
+mapping reader retains its dict-or-None conversion and original failure tuple.
+Character pair, portrait and record-load readers share only this pure parse;
+their journal, current-row, admission, digest, owner, system and state checks
+remain independent and fresh. Historical actor/revision/source verification,
+post-snapshot guards, transaction ownership and publication/CAS checks are
+unchanged. No source row, verified batch, canonical digest or positive
+admission is cached. Other direct write-operation parse sites are unchanged.
+
+## Campaign Access Facts
+
+Access helpers requiring only campaign presence or system use a fresh narrow
+lookup. Activated lookups prove current configuration and target page
+projections in one read snapshot, preserving omitted unhealthy pages,
+duplicate route refusals and conflicting visible redirects. They reuse page
+visibility and redirect validation without constructing aliases or backlinks.
+Returned slug/system facts are immutable and are not permission verdicts.
+User, membership, role, visibility and own-character checks remain unchanged.
+Inactive campaigns and reconstruction input scopes retain full repository
+lookup; context and loading-media consumers still load actual page graphs.
+
+## Guarded Character Read Construction
+
+Assignment HTML/API GET presentation uses an owned transaction-bound source
+phase for numeric authority and the complete assignment display together.
+Mechanical roster-card consumers such as the Session chooser use a separate
+exact-character phase for the full producer and formatter. Detached display data leaves only
+after a fresh source/state/audit/Systems read-set guard. Missing-library decline
+is selected before producer dispatch; conflicts never replay the producer.
+Mechanical card conflicts discard the provisional card and retain historical fallback,
+while connection cleanup failures propagate. Ambient transactions, borrowed
+phases, nonrequest callers and all write/CAS authority paths are unchanged.
+The Flask roster route instead uses `present_character_directory`: only name,
+class/level, species, background, search and sheet links are materialized. Its
+existing record loader still performs committed pair/portrait/state/journal and
+visibility checks; auth, tools, filtering and private/no-store remain. The
+directory does not request Systems catalogs, current Character mechanics or
+their warnings. Full HP, Hit Dice, resources and rule/repair diagnostics are
+qualified on Character open. Session chooser/API mechanical presenters retain
+their existing contracts; no completed Character projection is prefetched or
+cached for a later request by the directory.
+Phase Systems views reuse detached normalized captured policy and its base
+cache context within that phase only. Dynamic selected-entry subset identities
+are recomputed on each call; the full fresh basis/readset guard remains.
+
+### Private item and spell read inputs
+
+Default owned roster, character shell, selected-section and assignment read
+phases can consume complete immutable item/spell observations through explicit
+catalog operations. Unique key, slug and title indices retain ambiguity and
+ordered negative evidence. Shared selectors and filters hydrate only the
+ordinary records they actually select; they do not construct a second complete
+mutable catalog. Auxiliary profiles, references and page support use the same
+producers and retain their original container semantics.
+
+A separate private `NativeReadFoundation` carries these inputs through the
+shared derivation core. The public prepared foundation, normalization, effective
+catalog and static-bundle APIs retain ordinary catalogs and independent mutable
+copy behavior. Initial source validators still produce all eight sibling source
+families in the original order before constructing options and catalogs; scoped
+full-catalog reads retain their narrower original recipe. Targeted and empty
+catalogs, unsupported providers and reserved/write scopes retain legacy paths.
+No private catalog implements a lazy Mapping or implicit full-catalog conversion.
+Configured copy extensions for the supported record/plain/temporal value family
+keep ordinary catalogs. The private path binds the trusted startup copy policy;
+entered policy drift refuses without replay. Unknown auxiliary values, cycles,
+representation bounds and non-UTC timezone objects also retain ordinary values
+from the already captured source observation and produced auxiliaries.
+
+These facts are owned by one open source phase, not cached qualification or
+permission results. Selected mutable values are local to their logical catalog
+origin and preparation. Closing the phase invalidates catalog handles and clears
+selection buffers. Full source/state/audit read-set checks, warnings, source
+identity, actor authorization and durable write/CAS checks remain independent.
+
+The separate private `character_current_inputs` contract belongs to one ordinary
+owned assignment/Features `build_source_authority` invocation. It stages qualified
+optional-weapon and instrument outputs at their original demand point, and sends
+only the primitive original Constitution basis from the completed main input
+stage to HP. This avoids repeating unrelated proficiency qualification just for
+that HP input. It does not substitute the main map across different elective
+witnesses. Language basis calls and HP language-outcome frames keep their original
+recipes. Complete historical witness loading/serialization and current HP source,
+recipe, ownership and value checks remain unchanged.
+
+Finite original provider/copy recipes admit stock inputs before native entry;
+unknown/custom/nonphase/reserved/prospective contexts keep legacy calls. The
+private capture binds definition/state/revision, full evidence, current statuses,
+source snapshot, phase and request actor. Representation size/depth/node bounds
+limit retained validation facts; adapters return detached ordinary values. Drift
+after entry refuses, never replays qualification. The object leaves no global or
+phase cache and is not attached to public results. This is neither a durable play
+snapshot nor permission to omit fresh closing proofs, warnings, authorization or
+state CAS. Existing historical Combat snapshots retain their own stale handling.
 
 ## Source Pointers
 

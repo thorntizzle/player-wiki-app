@@ -6,8 +6,8 @@ from typing import Any, Callable
 from flask import abort, current_app, flash, redirect, request, url_for
 
 from .auth import campaign_scope_access_required
-from .character_editor import CharacterEditValidationError
-from .character_service import CharacterStateValidationError
+from .character_editor import CharacterEditValidationError, prepare_native_editor_inventory_note_overrides
+from .character_service import CharacterStateValidationError, current_inventory_note_values
 from .character_store import CharacterStateConflictError, CharacterStateUnavailableError
 from .character_reconciliation import CharacterPublicationConflict
 from .character_page_records import list_visible_character_page_records
@@ -104,16 +104,18 @@ def register_character_edit_route(
             campaign_page_records=campaign_page_records,
             form_values=form_values if request.method == "POST" else None,
             state_notes=dict((record.state_record.state or {}).get("notes") or {}),
+            inventory_notes=current_inventory_note_values(record.definition, record.state_record.state or {}),
             optionalfeature_catalog=optionalfeature_catalog,
             spell_catalog=spell_catalog,
             item_catalog=item_catalog,
+            systems_service=current_app.extensions["systems_service"],
             linked_feature_authoring_support=linked_feature_authoring,
         )
         edit_context["state_revision"] = record.state_record.revision
 
         draft_names = [
             field["name"]
-            for group in ("proficiency_fields", "reference_fields", "stat_adjustment_fields", "ability_recovery_rows")
+            for group in ("proficiency_fields", "reference_fields", "stat_adjustment_fields", "ability_recovery_rows", "background_choice_fields")
             for field in edit_context.get(group, ())
         ]
         for row in edit_context.get("recoverable_penalty_rows", ()):
@@ -149,6 +151,9 @@ def register_character_edit_route(
 
         try:
             expected_revision = dependencies.parse_expected_revision()
+            note_overrides = prepare_native_editor_inventory_note_overrides(
+                record.definition, record.state_record.state or {}, form_values,
+            )
             definition, import_metadata, inventory_quantity_overrides = (
                 dependencies.apply_native_character_edits(
                     campaign_slug,
@@ -167,6 +172,7 @@ def register_character_edit_route(
                                              if active() else ()),
                     verified_numeric_actions=(load_verified_numeric_actions(campaign_slug, character_slug)
                                               if active() else ()),
+                    inventory_note_overrides=note_overrides,
                 )
             )
             definition = dependencies.finalize_character_definition_for_write(
@@ -203,6 +209,7 @@ def register_character_edit_route(
                 record.state_record.state,
                 source_authority=prospective_authority,
                 inventory_quantity_overrides=inventory_quantity_overrides,
+                inventory_state_overrides=note_overrides,
                 removed_resource_ids=removed_resource_ids,
             )
             if (
@@ -217,6 +224,8 @@ def register_character_edit_route(
                     form_values.get("background_markdown") or ""
                 )
                 merged_state["notes"] = notes_payload
+            native_edit = (record.definition.system == "DND-5E"
+                           and record.definition.source.get("source_type") == "native_character_builder")
             dependencies.character_publication_coordinator.update(
                 record,
                 definition,
@@ -224,6 +233,9 @@ def register_character_edit_route(
                 merged_state,
                 expected_revision=expected_revision,
                 updated_by_user_id=user.id,
+                audit_event_type="character_native_edited" if native_edit else None,
+                audit_actor_user_id=user.id if native_edit else None,
+                audit_metadata={"source": "native_edit_confirmed"} if native_edit else None,
             )
         except CharacterPublicationConflict:
             return protected_recovery(

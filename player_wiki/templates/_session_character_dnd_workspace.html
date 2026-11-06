@@ -424,7 +424,9 @@
           {% if item.tags %}
             <p class="meta">{{ item.tags | join(", ") }}</p>
           {% endif %}
-          {% if item.charges_label %}<p class="meta">Charges: {{ item.charges_label }}</p>{% endif %}
+          {% if item.charges_label and not item.item_uses_rule %}<p class="meta">Charges: {{ item.charges_label }}</p>{% endif %}
+                    {% set item_uses_editable = false %}
+                    {% include "_character_item_uses.html" %}
           {{ session_character_item_description_details(item, item_dialog_id) }}
           {{ session_character_item_fallback_details(item) }}
         </article>

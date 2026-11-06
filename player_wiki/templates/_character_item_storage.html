@@ -1,0 +1,71 @@
+{% if item.spell_storage %}
+  {% set storage = item.spell_storage %}
+  <div class="subtle-panel">
+    <strong>Stored spells</strong>
+    <p class="meta">{% if storage.known %}{{ storage.occupied }} / {{ storage.capacity }} spell levels occupied.{% if not storage.spells %} Empty.{% endif %}{% else %}{{ storage.reason }} Capacity: {{ storage.capacity }} spell levels.{% endif %}</p>
+    {% if storage.known and not storage.active %}<p class="meta">Casting requires this item to be worn and attuned. Contents are preserved.</p>{% endif %}
+    {% for stored in storage.spells %}
+      <p>{{ stored.spell_ref.title }} · stored level {{ stored.slot_level }} · original caster {{ stored.caster }} · {{ stored.metrics.ability | upper }} {{ '%+d' | format(stored.metrics.ability_modifier) }}, save DC {{ stored.metrics.save_dc }}, attack {{ '%+d' | format(stored.metrics.attack_bonus) }}</p>
+      {% if item_uses_editable | default(false) and storage.active %}
+        <form class="session-inline-form" method="post" action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}">
+          {{ csrf_input() }}
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="operation" value="storage_release">
+          <input type="hidden" name="stored_id" value="{{ stored.id }}">
+          <input type="hidden" name="mode" value="{{ session_character_form_mode | default('read') }}">
+          <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
+          {% if session_return_view | default('') %}<input type="hidden" name="return_view" value="{{ session_return_view }}">{% endif %}
+          <button type="submit" class="ghost-button">Cast and remove stored spell</button>
+        </form>
+      {% endif %}
+    {% endfor %}
+    {% if item_uses_editable | default(false) and storage.known and storage.occupied < storage.capacity and storage.choices and storage.slot_options %}
+      <form class="session-inline-form" method="post" action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="operation" value="storage_store">
+        <input type="hidden" name="mode" value="{{ session_character_form_mode | default('read') }}">
+        <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
+        {% if session_return_view | default('') %}<input type="hidden" name="return_view" value="{{ session_return_view }}">{% endif %}
+        <label>Spell<select name="choice_id" required>{% for choice in storage.choices %}<option value="{{ choice.id }}">{{ choice.label }}</option>{% endfor %}</select></label>
+        <label>Slot to spend<select name="slot_selection" required>{% for option in storage.slot_options %}<option value="{{ option.selection }}">{{ option.label }} ({{ option.available }} available)</option>{% endfor %}</select></label>
+        <p class="meta">Store a currently castable spell using its qualified caster values. Normal components and touching the item are required. The spell has no other effect.</p>
+        <button type="submit" class="ghost-button">Spend slot and store spell</button>
+      </form>
+    {% endif %}
+    {% if item_uses_editable | default(false) and can_repair_equipment_activation | default(false) %}
+      {% if storage.can_initialize %}
+        <form class="session-inline-form" method="post" action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}">
+          {{ csrf_input() }}
+          <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+          <input type="hidden" name="operation" value="storage_initialize">
+          <input type="hidden" name="mode" value="{{ session_character_form_mode | default('read') }}">
+          <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
+          {% if session_return_view | default('') %}<input type="hidden" name="return_view" value="{{ session_return_view }}">{% endif %}
+          <label><input type="checkbox" name="confirm_observation" value="yes" required>Confirm that this item's baseline is empty.</label>
+          <button type="submit" class="ghost-button">Record empty baseline</button>
+        </form>
+      {% elif storage.known and storage.occupied < storage.capacity %}
+        <details><summary>Record an actual external casting</summary>
+          <form class="session-inline-form" method="post" action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}">
+            {{ csrf_input() }}
+            <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+            <input type="hidden" name="operation" value="storage_external">
+            <input type="hidden" name="mode" value="{{ session_character_form_mode | default('read') }}">
+            <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
+            {% if session_return_view | default('') %}<input type="hidden" name="return_view" value="{{ session_return_view }}">{% endif %}
+            <label>Spell<select name="spell_entry_key" required>{% for spell in storage.external_spell_options %}<option value="{{ spell.entry_key }}">{{ spell.title }}</option>{% endfor %}</select></label>
+            <label>Original caster<input name="caster" maxlength="120" required></label>
+            <label>Actual slot level<input name="slot_level" type="number" min="1" max="{{ storage.capacity }}" required></label>
+            <label>Casting ability<select name="ability" required>{% for ability in ['str','dex','con','int','wis','cha'] %}<option value="{{ ability }}">{{ ability | upper }}</option>{% endfor %}</select></label>
+            <label>Original ability modifier<input name="ability_modifier" type="number" min="-10" max="30" required></label>
+            <label>Original save DC<input name="save_dc" type="number" min="0" max="99" required></label>
+            <label>Original attack bonus<input name="attack_bonus" type="number" min="-30" max="99" required></label>
+            <label><input type="checkbox" name="confirm_observation" value="yes" required>Confirm this spell was actually cast into this item using these original values. Its caster's costs were recorded separately.</label>
+            <button type="submit" class="ghost-button">Record external casting</button>
+          </form>
+        </details>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endif %}

@@ -11,6 +11,16 @@
         row {{ submitted_draft.row_index }}; state row {{ submitted_draft.state_index }};
         target {{ submitted_draft.target_id }}.</p>
     {% endif %}
+    {% if preview %}
+      <section class="callout">
+        <h2>Prepared activation preservation</h2>
+        <p>This is a read-only preparation of generation {{ preview.generation }} and state revision {{ preview.state_revision }}. A later repair must check current data again.</p>
+        <p>Definition bytes: {{ preview.primary_before_sha256 }} to {{ preview.primary_prepared_sha256 }}. Import bytes: {{ preview.secondary_before_sha256 }} to {{ preview.secondary_prepared_sha256 }}.</p>
+        <p>{{ preview.renewal_templates | length }} source-transition renewal templates. {{ preview.renewal_finalization }}</p>
+        <details><summary>Compare complete prepared data</summary><pre>{{ preview | tojson(indent=2) }}</pre></details>
+        <script type="application/json" id="activation-preparation-data">{{ preview | tojson }}</script>
+      </section>
+    {% endif %}
     {% if analysis.warnings %}
       <ul>{% for warning in analysis.warnings %}<li>{{ warning.message }}</li>{% endfor %}</ul>
     {% else %}<p>No unresolved activation rows.</p>{% endif %}
@@ -41,7 +51,8 @@
                 {% for item_id in unique_targets %}<option value="{{ item_id }}">{{ item_id }}</option>{% endfor %}
               </select>
             </label>
-            <button type="submit">Apply this explicit repair</button>
+            <button type="submit" name="intent" value="preview">Preview exact preservation</button>
+            <button type="submit" name="intent" value="apply">Apply this explicit repair</button>
           </form>
         {% elif row.source == "definition" and row.status == "missing_state_row" %}
           <form method="post">

@@ -77,6 +77,7 @@ def managed_resource_tracker(
     reset_to: str | int = "max",
     notes: str | None = None,
     rest_behavior: str | None = None,
+    notes_by_level: tuple[tuple[int, str], ...] = (),
 ) -> dict[str, Any]:
     return {
         "id": str(tracker_id or "").strip(),
@@ -87,6 +88,7 @@ def managed_resource_tracker(
         "notes": str(notes if notes is not None else label or "").strip(),
         "activation_type": str(activation_type or "passive").strip() or "passive",
         "rest_behavior": str(rest_behavior or "").strip() or None,
+        "notes_by_level": tuple((int(level), str(text).strip()) for level, text in notes_by_level),
     }
 
 
@@ -398,6 +400,7 @@ MANAGED_RESOURCE_FAMILIES: tuple[dict[str, Any], ...] = (
         inventory=(
             ("tce-subclassfeature-psionicpower-fighter-phb-psiwarrior-tce-3", "Psionic Power"),
             ("tce-subclassfeature-telekineticmovement-fighter-phb-psiwarrior-tce-3", "Telekinetic Movement"),
+            ("tce-subclassfeature-psipoweredleap-fighter-phb-psiwarrior-tce-7", "Psi-Powered Leap"),
         ),
         primary=managed_resource_member(
             "primary",
@@ -409,7 +412,18 @@ MANAGED_RESOURCE_FAMILIES: tuple[dict[str, Any], ...] = (
                 max_formula=managed_resource_formula_proficiency_bonus(multiplier=2, minimum=2),
                 reset_on="long_rest",
                 activation_type="passive",
-                notes="Psionic Power",
+                notes=(
+                    "Psionic Energy dice: d6; d8 at Fighter level 5, d10 at 11, d12 at 17. "
+                    "The number of dice is twice total-character proficiency bonus. "
+                    "Regain all expended dice on a long rest; advancement does not restore dice."
+                ),
+                notes_by_level=tuple(
+                    (level, f"Current Psionic Energy die: d{faces}. "
+                     "Die progression by Fighter level: d6 at 3, d8 at 5, d10 at 11, d12 at 17. "
+                     "The number of dice is twice total-character proficiency bonus. "
+                     "Regain all expended dice on a long rest; advancement does not restore dice.")
+                    for level, faces in ((1, 6), (5, 8), (11, 10), (17, 12))
+                ),
             ),
         ),
         members=(
@@ -466,6 +480,23 @@ MANAGED_RESOURCE_FAMILIES: tuple[dict[str, Any], ...] = (
                     notes="Psionic Power: Recovery",
                 ),
             ),
+            managed_resource_member(
+                "psi-powered-leap",
+                "Psi-Powered Leap",
+                activation_type="bonus_action",
+                description_markdown=(
+                    "Bonus action to gain a flying speed equal to twice your walking speed until "
+                    "the end of this turn. One free use per short or long rest; expend a Psionic "
+                    "Energy die to use it again."
+                ),
+                tracker=managed_resource_tracker(
+                    "psionic-power-psi-powered-leap",
+                    "Psi-Powered Leap",
+                    max_formula=managed_resource_formula_fixed(1),
+                    reset_on="short_rest",
+                    activation_type="bonus_action",
+                ),
+            ),
         ),
         match_slug_members={
             "tce-subclassfeature-psionicpower-fighter-phb-psiwarrior-tce-3": "primary",
@@ -476,6 +507,7 @@ MANAGED_RESOURCE_FAMILIES: tuple[dict[str, Any], ...] = (
             "tce-subclassfeature-psionic-strike": "psionic-strike",
             "tce-subclassfeature-telekineticmovement-fighter-phb-psiwarrior-tce-3": "telekinetic-movement",
             "tce-subclassfeature-telekinetic-movement": "telekinetic-movement",
+            "tce-subclassfeature-psipoweredleap-fighter-phb-psiwarrior-tce-7": "psi-powered-leap",
         },
         page_refs=("mechanics/psi-warrior/psionic-power",),
         allow_fallback=False,
@@ -553,7 +585,18 @@ MANAGED_RESOURCE_FAMILIES: tuple[dict[str, Any], ...] = (
     managed_resource_family(
         category="class_feature",
         source="PHB",
-        inventory=(("phb-classfeature-fontofmagic-sorcerer-phb-2", "Font of Magic"),),
+        inventory=(("phb-subclassfeature-tidesofchaos-sorcerer-phb-wild-phb-1", "Tides of Chaos"),),
+        primary=managed_resource_member("primary", "Tides of Chaos", activation_type="special",
+            tracker=managed_resource_tracker("tides-of-chaos", "Tides of Chaos",
+                max_formula=managed_resource_formula_fixed(1), reset_on="long_rest",
+                activation_type="special", notes="Long rest; separate DM-directed recovery follows the current Tides source.")),
+        allow_fallback=False,
+    ),
+    managed_resource_family(
+        category="class_feature",
+        source="PHB",
+        inventory=(("phb-classfeature-fontofmagic-sorcerer-phb-2", "Font of Magic"),
+                   ("phb-classfeature-sorcerypoints-sorcerer-phb-2", "Sorcery Points")),
         primary=managed_resource_member(
             "primary",
             "Font of Magic",
@@ -1535,6 +1578,19 @@ def resolve_managed_resource_family_and_member(feature_payload: dict[str, Any]) 
         return family, member or dict(family.get("primary") or {})
 
     normalized_name = normalize_lookup(str(feature_payload.get("name") or "").strip())
+    from .character_feature_composition import wild_resource_registration
+    registered = wild_resource_registration(feature_payload)
+    if registered is not None:
+        family = managed_resource_family(
+            category=registered["category"], source=registered["source_id"],
+            inventory=((registered["slug"], "Wild Magic Modification"),),
+            primary=managed_resource_member("primary", "Wild Magic Modification", activation_type="special",
+                tracker=managed_resource_tracker("wild-die", "Wild Die",
+                    max_formula={"kind": "total_half_level"}, reset_on="long_rest",
+                    activation_type="special", notes="Wild Die (d6); half total level, rounded down.")),
+            allow_fallback=False,
+        )
+        return family, dict(family["primary"])
     normalized_source = normalize_lookup(str(feature_payload.get("source") or "").strip())
     for category in _managed_resource_fallback_categories(feature_payload):
         fallback_key = (
@@ -1549,3 +1605,52 @@ def resolve_managed_resource_family_and_member(feature_payload: dict[str, Any]) 
         member = managed_resource_member_by_name(family, str(feature_payload.get("name") or ""))
         return family, member or dict(family.get("primary") or {})
     return None, None
+
+
+def managed_resource_feature_identity(feature_payload: dict[str, Any]) -> tuple[str, str] | None:
+    """Identify source-linked aliases of one member without merging other owners.
+
+    Generated children keep their parent's Systems reference. Their member name
+    and an actual child's reference can therefore denote the same family member.
+    Page/manual/fallback rows deliberately retain their ordinary identity.
+    """
+    systems_ref = dict(feature_payload.get("systems_ref") or {})
+    from .character_feature_composition import wild_resource_registration
+    registered = wild_resource_registration(feature_payload)
+    if registered is not None:
+        # Custom publication keys use the custom/campaign namespace, not the
+        # canonical classfeature/source namespace. This only identifies a
+        # candidate member; current source/owner proof remains independent.
+        key = systems_ref["entry_key"]
+        if (feature_payload.get("page_ref") or not key.startswith("dnd-5e|custom|")
+                or normalize_lookup(str(feature_payload.get("source") or ""))
+                   != normalize_lookup(registered["source_id"])):
+            return None
+        return ("registered:" + key + ":wild_magic_modification@1/wild_die@1",
+                str(feature_payload.get("class_row_id") or "").strip())
+    source_id = normalize_lookup(str(systems_ref.get("source_id") or ""))
+    entry_key = str(systems_ref.get("entry_key") or "").strip()
+    entry_type = normalize_lookup(str(systems_ref.get("entry_type") or ""))
+    key_parts = entry_key.split("|")
+    if (len(key_parts) != 4 or entry_type not in {"classfeature", "subclassfeature", "optionalfeature"}
+            or normalize_lookup(key_parts[1]) != entry_type
+            or normalize_lookup(key_parts[2]) != source_id
+            or feature_payload.get("page_ref")):
+        return None
+    family, member = resolve_managed_resource_family_and_member(feature_payload)
+    if not family or not member or source_id != family.get("source"):
+        return None
+    if normalize_lookup(str(systems_ref.get("slug") or "")) not in dict(family.get("match_slug_members") or {}):
+        return None
+    if normalize_lookup(str(feature_payload.get("source") or "")) != source_id:
+        return None
+    inventory = list(family.get("inventory") or ())
+    family_slug = str(dict(inventory[0]).get("slug") or "") if inventory else ""
+    member_key = str(member.get("key") or "")
+    library = key_parts[0].casefold()
+    if not family_slug or not member_key or not library:
+        return None
+    return (
+        f"managed:{library}:{source_id}:{family_slug}:{member_key}",
+        str(feature_payload.get("class_row_id") or "").strip(),
+    )

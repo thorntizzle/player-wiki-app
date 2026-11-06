@@ -12,6 +12,13 @@ def _normalized_sections(sections: Iterable[str] | None) -> frozenset[str]:
 
 def _committed_visible_records(page_store: Any, campaign_slug: str, *, include_body: bool) -> list[Any]:
     """Select config, page proofs, and projections in one short SQLite read view."""
+    from .character_source_reads import phase_of
+    phase = phase_of(page_store)
+    if phase is not None:
+        if campaign_slug != phase.owner.campaign_slug:
+            from .character_source_reads import SourceReadConflict
+            raise SourceReadConflict("Cross-campaign Character page selection.")
+        return phase.page_records(include_body=include_body)
     from .committed_publication import (
         CommittedSourceConflict, config, current, page_rows, read_snapshot,
     )
@@ -54,7 +61,9 @@ def list_builder_campaign_page_records(
     from .committed_publication import active
 
     allowed_sections = _normalized_sections(relevant_sections)
-    if active():
+    from .character_source_reads import phase_of
+    phase = phase_of(page_store)
+    if phase is not None or active():
         return [record for record in _committed_visible_records(page_store, campaign_slug, include_body=False)
                 if str(record.page.section or "").strip() in allowed_sections]
     return [
@@ -76,7 +85,9 @@ def list_visible_character_page_records(
     from .committed_publication import active
 
     ignored_sections = _normalized_sections(excluded_sections)
-    if active():
+    from .character_source_reads import phase_of
+    phase = phase_of(page_store)
+    if phase is not None or active():
         return [record for record in _committed_visible_records(page_store, campaign_slug, include_body=include_body)
                 if str(record.page.section or "").strip() not in ignored_sections]
     return [
@@ -280,6 +291,20 @@ def materialize_dnd_character_read_page_records(
 
     from .committed_publication import active, config, current, page_row, read_snapshot
 
+    from .character_source_reads import phase_of
+    phase = phase_of(page_store)
+    if phase is not None:
+        actual = phase.page_records(include_body=False)
+        from .character_source_reads import SourceReadConflict
+        basis = {record.page_ref: record for record in actual}
+        for record in campaign_page_records:
+            current_record = basis.get(record.page_ref)
+            if current_record is None:
+                raise SourceReadConflict("Supplied Character pages differ from the source view.")
+            phase.bind_page_record(record)
+        return _materialize_dnd_character_read_page_records(
+            page_store, campaign_slug, campaign_page_records, definition, state,
+            section=section, campaign=None, committed=True)
     if active():
         @read_snapshot
         def materialize_committed() -> list[object]:
@@ -358,7 +383,10 @@ def _materialize_dnd_character_read_page_records(
             canonical_ref,
             include_body=True,
         )
-        full_source = current(campaign_slug, "page", canonical_ref) if committed else None
+        from .character_source_reads import phase_of
+        phase = phase_of(page_store)
+        full_source = (phase.page_source(canonical_ref) if phase is not None else
+                       current(campaign_slug, "page", canonical_ref) if committed else None)
         if (
             full_record is not None
             and _normalized_page_ref(getattr(full_record, "page_ref", ""))

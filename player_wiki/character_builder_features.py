@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import re
 from typing import Any
 from flask import has_app_context
@@ -28,6 +29,11 @@ from .character_feature_trackers import (
     feature_has_effect as _feature_has_effect_impl,
 )
 from .character_models import CharacterDefinition
+from .character_spell_grants import (
+    AcquisitionContext, GrantContractError, feature_acquisition_id, owner_occurrence_id,
+)
+from .managed_resource_registry import (managed_resource_feature_identity,
+    resolve_managed_resource_family_and_member)
 from .character_page_companion import blocks_page_companion_heuristics
 from .character_profile import ensure_profile_class_rows
 from .character_source_matrix import PHB_SOURCE_ID
@@ -40,6 +46,11 @@ __all__ = [
     "_campaign_option_resource_payloads",
     "_feat_effect_keys_for_feature",
     "_build_feature_payloads",
+    "_derive_continuation_tracker_templates",
+    "_require_known_continuation_resource_observations",
+    "_require_preserved_continuation_resource_state",
+    "_continuation_pool_ids",
+    "_retain_continuation_resource_templates",
     "_feature_identity_key",
     "_build_feature_payload",
     "_proficiency_bonus_for_level",
@@ -112,7 +123,12 @@ def _build_feature_payloads(
     ability_scores: dict[str, int],
     current_level: int,
     class_row_id: str | None = None,
+    class_row_levels: dict[str, int] | None = None,
+    defer_trackers: bool = False,
+    acquisition_context: AcquisitionContext | None = None,
+    acquisition_class_row_id: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    defer_trackers = bool(defer_trackers and _activated_committed_character_mode())
     features: list[dict[str, Any]] = []
     seen_feature_names: set[tuple[str, str]] = set()
 
@@ -124,25 +140,81 @@ def _build_feature_payloads(
         )
         if feature_payload is None:
             continue
+        selected_entry = feature_entry.get("entry") or feature_entry.get("systems_entry")
+        if isinstance(selected_entry, SystemsEntryRecord):
+            from .character_feature_composition import selected_replacement_claim, CLAIM_FIELD
+            claim = selected_replacement_claim(selected_entry,
+                class_row_id=str(feature_payload.get("class_row_id") or ""))
+            if claim is not None:
+                feature_payload[CLAIM_FIELD] = claim
+        native_acquisition = feature_entry.get("native_acquisition")
+        # Page options use synthetic catalogue entries, not Systems publications.
+        # Keep their ordinary feature identity and effects without manufacturing
+        # a Systems acquisition from that catalogue key.
+        if isinstance(native_acquisition, dict) and not feature_payload.get("page_ref"):
+            feature_payload["native_acquisition"] = deepcopy(native_acquisition)
+            if acquisition_context is not None:
+                if not isinstance(acquisition_context, AcquisitionContext):
+                    raise GrantContractError("Native acquisition context is unavailable.")
+                ref = dict(feature_payload.get("systems_ref") or {})
+                rule_id = native_acquisition.get("grant_rule_id")
+                slot_id = native_acquisition.get("choice_slot_id")
+                if not ref.get("entry_key") or not isinstance(rule_id, str) or not rule_id or not isinstance(slot_id, str) or not slot_id:
+                    raise GrantContractError("This feature needs its exact source rule and acquisition slot.")
+                owner_row_id = str(feature_payload.get("class_row_id") or acquisition_class_row_id or "")
+                acquisition_id = feature_acquisition_id(
+                    acquisition_context, source_ref=ref, grant_rule_id=rule_id,
+                    choice_slot_id=slot_id, class_row_id=owner_row_id,
+                )
+                feature_payload["id"] = owner_occurrence_id(
+                    acquisition_id=acquisition_id, source_ref=ref,
+                    grant_rule_id=rule_id, choice_slot_id=slot_id,
+                )
         feature_name = str(feature_payload.get("name") or "").strip()
-        normalized_name = normalize_lookup(feature_name)
-        row_identity = str(feature_payload.get("class_row_id") or "").strip()
-        feature_identity = (normalized_name, row_identity)
+        feature_identity = _continuation_feature_identity(feature_payload) if defer_trackers else _feature_identity_key(feature_payload)
         if not feature_name or feature_identity in seen_feature_names:
             continue
         seen_feature_names.add(feature_identity)
         features.append(feature_payload)
+    if defer_trackers:
+        return features, []
     return _apply_tracker_templates_to_feature_payloads(
         features,
         ability_scores=ability_scores,
         current_level=current_level,
+        class_row_levels=class_row_levels,
     )
 
 def _feature_identity_key(feature: dict[str, Any]) -> tuple[str, str]:
+    ref = dict(feature.get("systems_ref") or {})
+    if ref.get("entry_key") and ref.get("source_id"):
+        # Exact publication and acquisition are separate from display names.
+        # Legacy rows retain their raw IDs; this key asserts no owner custody.
+        return (
+            json.dumps([
+                ref.get("library_slug"), ref.get("entry_type"), ref["source_id"],
+                ref["entry_key"], feature.get("native_acquisition"),
+                feature.get("id") if "native_acquisition" in feature else None,
+            ], sort_keys=True, ensure_ascii=False, separators=(",", ":")),
+            str(feature.get("class_row_id") or "").strip(),
+        )
+    managed_identity = managed_resource_feature_identity(feature)
+    if managed_identity is not None:
+        return managed_identity
     return (
         normalize_lookup(str(feature.get("name") or "").strip()),
         str(feature.get("class_row_id") or "").strip(),
     )
+
+
+def _tracker_feature_identity_key(feature: dict[str, Any]) -> tuple[str, str]:
+    """Match qualified resource members without merging acquisition owners."""
+    # A generated member may cite its parent's publication, or have its own
+    # attained source/acquisition. Neither makes it the parent's resource.
+    # Proved aliases are reduced by SourceAuthority, never by this key;
+    # competing real owners of one member must still fail the tracker guard.
+    return managed_resource_feature_identity(feature) or _feature_identity_key(feature)
+
 
 def _build_feature_payload(
     feature_entry: dict[str, Any],
@@ -348,25 +420,264 @@ def _proficiency_bonus_for_level(level: int) -> int:
 def _merge_feature_payloads(
     existing_features: list[dict[str, Any]],
     new_features: list[dict[str, Any]],
+    *, preserve_source_aliases: bool = False,
 ) -> list[dict[str, Any]]:
     merged = [dict(feature) for feature in existing_features]
+    identity = (_continuation_feature_identity
+                if preserve_source_aliases and _activated_committed_character_mode() else _feature_identity_key)
     seen_names = {
-        (
-            normalize_lookup(str(feature.get("name") or "").strip()),
-            str(feature.get("class_row_id") or "").strip(),
-        )
+        identity(feature)
         for feature in merged
         if str(feature.get("name") or "").strip()
     }
     for feature in new_features:
         feature_name = str(feature.get("name") or "").strip()
-        normalized_name = normalize_lookup(feature_name)
-        feature_identity = (normalized_name, str(feature.get("class_row_id") or "").strip())
+        feature_identity = identity(feature)
         if not feature_name or feature_identity in seen_names:
             continue
         seen_names.add(feature_identity)
         merged.append(dict(feature))
     return merged
+
+
+def _continuation_feature_identity(feature: dict[str, Any]) -> tuple[str, str]:
+    """Only the same exact source grant may disappear before qualification."""
+    if "native_acquisition" in feature:
+        return _feature_identity_key(feature)
+    ref = dict(feature.get("systems_ref") or {})
+    canonical = {**feature, "source": ref.get("source_id")}
+    if managed_resource_feature_identity(canonical) is not None:
+        return (json.dumps([ref, normalize_lookup(feature.get("name"))], sort_keys=True),
+                str(feature.get("class_row_id") or "").strip())
+    return _feature_identity_key(feature)
+
+
+def _merge_generated_tracker_payloads(
+    existing_features: list[dict[str, Any]],
+    generated_features: list[dict[str, Any]],
+    *, attained_owners: dict[str, frozenset[str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Expose missing children without adding another owner of a retained member."""
+    def member_identity(feature):
+        ref = dict(feature.get("systems_ref") or {})
+        # Planning relation only: retain raw citations and every real owner.
+        # SourceAuthority must subsequently qualify the sources and any aliases.
+        probe = {**feature, "source": ref.get("source_id")}
+        owners = (attained_owners or {}).get(ref.get("entry_key"), frozenset())
+        if not probe.get("class_row_id") and len(owners) == 1:
+            probe["class_row_id"] = next(iter(owners))
+        return managed_resource_feature_identity(probe)
+
+    retained_members = {identity for feature in existing_features
+                        if (identity := member_identity(feature)) is not None}
+    missing_children = [feature for feature in generated_features
+                        if member_identity(feature) not in retained_members]
+    return _merge_feature_payloads(existing_features, missing_children, preserve_source_aliases=True)
+
+
+def _continuation_pool_ids(features) -> set[str]:
+    if not _activated_committed_character_mode():
+        return set()
+    owners, noncanonical = {}, set()
+    for feature in features:
+        canonical = {**feature, "source": dict(feature.get("systems_ref") or {}).get("source_id")}
+        identity = managed_resource_feature_identity(canonical)
+        family, member = resolve_managed_resource_family_and_member(canonical)
+        tracker_id = str(dict((member or {}).get("tracker") or {}).get("id") or "")
+        if identity and family and tracker_id:
+            owners.setdefault(tracker_id, []).append(identity)
+            physical_id = str(feature.get("tracker_ref") or "").strip()
+            if physical_id and physical_id != tracker_id:
+                # Structural preservation only; the authority resolver must
+                # independently authenticate this physical association.
+                noncanonical.add(physical_id)
+            if feature.get("source") != canonical["source"]:
+                noncanonical.add(tracker_id)
+    return noncanonical | {key for key, rows in owners.items() if len(rows) > 1}
+
+
+def _require_known_continuation_resource_observations(definition, state) -> None:
+    """Refuse before legacy state reconciliation can turn UNKNOWN into zero."""
+    from .character_builder_progression import CharacterBuildError
+    managed_ids = _continuation_pool_ids(definition.features)
+    for row in definition.resource_templates:
+        if row.get("id") in managed_ids and "initial_current" in row and (type(row["initial_current"]) is not int or row["initial_current"] < 0):
+            raise CharacterBuildError("A retained resource observation needs manager repair before advancement.")
+    for row in list((state or {}).get("resources") or []):
+        if isinstance(row, dict) and row.get("id") in managed_ids and (type(row.get("current")) is not int or row["current"] < 0):
+            raise CharacterBuildError("Resource play state is unknown. Repair it before advancement.")
+
+
+def _require_preserved_continuation_resource_state(prior, candidate, state, *, allow_new_pools=False) -> None:
+    """Refuse a dependent pool transition that the legacy merge would lose."""
+    from .character_builder_progression import CharacterBuildError
+    from .character_service import build_resource_state
+    _require_known_continuation_resource_observations(candidate, state)
+    managed_ids = _continuation_pool_ids(candidate.features)
+    for resource_id in managed_ids:
+        old = [row for row in list((state or {}).get("resources") or [])
+               if isinstance(row, dict) and row.get("id") == resource_id]
+        templates = [row for row in candidate.resource_templates if row.get("id") == resource_id]
+        if not old:
+            if not allow_new_pools or any(row.get("id") == resource_id for row in prior.resource_templates):
+                raise CharacterBuildError("A retained resource has no current play-state observation. Repair it first.")
+            continue
+        if len(old) != 1 or len(templates) != 1:
+            raise CharacterBuildError("Resource play state needs an exact retained owner before advancement.")
+        current = old[0].get("current")
+        maximum = templates[0].get("max")
+        if (type(current) is not int or current < 0
+                or old[0].get("max") is not None and type(old[0]["max"]) is not int
+                or maximum is not None and (type(maximum) is not int or current > maximum)):
+            raise CharacterBuildError("Advancement would lose a retained resource observation. Repair it first.")
+        projected = build_resource_state(templates[0])
+        projected["current"] = current
+        if any(key not in projected or (key != "max"
+                and json.dumps(value, sort_keys=True) != json.dumps(projected[key], sort_keys=True))
+               for key, value in old[0].items()):
+            raise CharacterBuildError("Advancement would lose retained resource details. Repair them first.")
+
+
+def _retain_continuation_resource_templates(previous, templates, pool_ids):
+    prior = {row.get("id"): row for row in previous}
+    retained = deepcopy(templates)
+    for row in retained:
+        old = prior.get(row.get("id"))
+        if old is not None and row.get("id") in pool_ids:
+            maximum = row.get("max")
+            row.update(deepcopy(old))
+            row["max"] = maximum
+            if "initial_current" not in old:
+                row.pop("initial_current", None)
+    return retained
+
+
+def _derive_continuation_tracker_templates(
+    definition, features, *, profile, ability_scores, current_level,
+    state, state_revision, systems_service, campaign_page_records,
+    verified_manual_actions=(), verified_numeric_actions=(),
+):
+    """Qualify the complete prospective owner frame before strict derivation.
+
+    Missing links/templates are structural scratch only. Prior template bytes
+    remain intact; no scratch capacity or initial count authorizes play state.
+    """
+    from .character_source_authority import (build_reconciled_source_authority,
+        _current_systems_entry, _current_managed_pool_owners, _eligible_page_records)
+    from .character_builder_progression import CharacterBuildError
+
+    if not _activated_committed_character_mode():
+        return _apply_tracker_templates_to_feature_payloads(features, ability_scores=ability_scores,
+            current_level=current_level, class_row_levels=_profile_class_row_level_map(profile))
+    from .character_feature_composition import retain_replacement_continuations
+    rows = retain_replacement_continuations(
+        definition, features, profile=profile, service=systems_service,
+    )
+    levels = _profile_class_row_level_map(profile)
+    attained_owners = {}
+    if isinstance(definition.source.get("native_reconstruction_choices"), dict):
+        from .character_reconstruction_authority import attained_reconstruction_feature_owners
+        planning = CharacterDefinition.from_dict({**definition.to_dict(), "profile": deepcopy(profile)})
+        attained_owners = attained_reconstruction_feature_owners(planning, systems_service)
+    # Expose registered generated children before qualification, so a direct
+    # child source and a parent-derived citation cannot collide later unseen.
+    for original in list(rows):
+        if not dict(original.get("systems_ref") or {}).get("entry_key") or original.get("page_ref"):
+            continue
+        probe = deepcopy(original)
+        family, member = _apply_managed_resource_member_defaults(probe)
+        if family:
+            children = _build_additional_feature_tracker_payloads(probe, ability_scores=ability_scores,
+                current_level=_feature_tracker_current_level(probe, current_level=current_level, class_row_levels=levels),
+                display_order=0, managed_resource_family=family, managed_resource_member=member,
+                total_character_level=current_level)
+            rows = _merge_generated_tracker_payloads(rows, [child for child, _ in children],
+                attained_owners=attained_owners)
+    affected_ids = _continuation_pool_ids(rows)
+    if not affected_ids:
+        try:
+            return _apply_tracker_templates_to_feature_payloads(features, ability_scores=ability_scores,
+                current_level=current_level, class_row_levels=levels)
+        except ValueError as exc:
+            raise CharacterBuildError(str(exc)) from exc
+    if state is None or type(state_revision) is not int or systems_service is None:
+        raise CharacterBuildError("Refresh the Character before deriving advancement resources.")
+    templates = deepcopy(list(definition.resource_templates or []))
+    ids = [str(row.get("id") or "").strip() for row in rows]
+    template_ids = [str(row.get("id") or "").strip() for row in templates]
+    if not all(ids) or len(set(ids)) != len(ids) or len(set(template_ids)) != len(template_ids):
+        raise CharacterBuildError("Resource feature or template identity needs manager repair.")
+    from .character_tracker_associations import qualified as qualified_trackers, physical_id
+    tracker_bindings = qualified_trackers(definition, verified_numeric_actions)
+    managed_ids = set()
+    for row in rows:
+        ref = dict(row.get("systems_ref") or {})
+        if not ref.get("entry_key") or row.get("page_ref"):
+            continue
+        canonical = deepcopy(row)
+        canonical["source"] = ref.get("source_id")
+        family, member = resolve_managed_resource_family_and_member(canonical)
+        tracker = dict((member or {}).get("tracker") or {})
+        tracker_id = physical_id(member, canonical, tracker_bindings)
+        if not family or tracker_id not in affected_ids:
+            continue
+        entry = _current_systems_entry(definition.campaign_slug, "systems", ref["entry_key"], systems_service)
+        if (entry is None or any(str(ref.get(key) or "") != str(getattr(entry, key, ""))
+                                for key in ("entry_key", "entry_type", "source_id", "slug"))
+                or managed_resource_feature_identity(canonical) is None):
+            raise CharacterBuildError("A managed resource source needs repair before advancement.")
+        if row.get("tracker_ref") not in (None, "", tracker_id):
+            raise CharacterBuildError("A managed resource tracker link needs repair before advancement.")
+        row["tracker_ref"] = tracker_id
+        managed_ids.add(tracker_id)
+        if tracker_id not in template_ids:
+            scratch = _build_managed_resource_tracker_template(
+                member, canonical, ability_scores=ability_scores,
+                current_level=_feature_tracker_current_level(row, current_level=current_level, class_row_levels=levels),
+                display_order=len(templates), total_character_level=current_level,
+            )
+            if scratch is None:
+                raise CharacterBuildError("A managed resource scaffold is unavailable.")
+            scratch = deepcopy(scratch)
+            scratch.pop("activation_type", None)
+            scratch["class_row_id"] = row.get("class_row_id")
+            templates.append(scratch)
+            template_ids.append(tracker_id)
+    payload = deepcopy(definition.to_dict())
+    payload.update(profile=deepcopy(profile), features=rows, resource_templates=templates)
+    candidate = CharacterDefinition.from_dict(payload)
+    authority = build_reconciled_source_authority(
+        definition=candidate, state=state, state_revision=state_revision,
+        systems_service=systems_service, campaign_page_records=campaign_page_records,
+        verified_manual_actions=verified_manual_actions, verified_numeric_actions=verified_numeric_actions,
+    )
+    # Repeat the existing structural qualifier over every owner, including a
+    # canonical singleton (which needs no alias entry in SourceAuthority).
+    pools = _current_managed_pool_owners(candidate, systems_service=systems_service,
+        pages=_eligible_page_records(campaign_page_records),
+        verified_class_rows=authority.verified_class_rows, feature_statuses=authority.statuses,
+        tracker_bindings=authority.tracker_associations)
+    if not managed_ids <= pools.keys():
+        raise CharacterBuildError("Managed resource owner closure is incomplete or conflicting.")
+    try:
+        derived, derived_templates = authority.derive_managed_tracker_templates(
+            candidate, rows, build_templates=_apply_tracker_templates_to_feature_payloads,
+            ability_scores=ability_scores, current_level=current_level, class_row_levels=levels,
+        )
+    except ValueError as exc:
+        raise CharacterBuildError(str(exc)) from exc
+    prior_by_id = {row.get("id"): row for row in definition.resource_templates}
+    retained = []
+    for template in derived_templates:
+        old = prior_by_id.get(template.get("id"))
+        if old is not None and template.get("id") in managed_ids:
+            # All historical metadata and bootstrap observations survive. Only
+            # the independently derived capacity changes in this adapter.
+            template = {**deepcopy(template), **deepcopy(old), "max": template.get("max")}
+            if "initial_current" not in old:
+                template.pop("initial_current", None)
+        retained.append(template)
+    return derived, retained
 
 def _apply_tracker_templates_to_feature_payloads(
     features: list[dict[str, Any]],
@@ -379,6 +690,7 @@ def _apply_tracker_templates_to_feature_payloads(
     updated_features: list[dict[str, Any]] = []
     resource_templates: list[dict[str, Any]] = []
     seen_template_ids: set[str] = set()
+    template_owners: dict[str, dict[str, Any]] = {}
     activated = _activated_committed_character_mode()
     feature_payloads_by_identity: dict[tuple[str, str], dict[str, Any]] = {}
     for feature_payload in base_features:
@@ -389,8 +701,11 @@ def _apply_tracker_templates_to_feature_payloads(
             # A derived tracker with the same display name cannot enrich a
             # suppressed history row or a proved page-choice projection.
             continue
-        feature_identity = _feature_identity_key(feature_payload)
+        feature_identity = _tracker_feature_identity_key(feature_payload)
         if feature_identity[0]:
+            if (managed_resource_feature_identity(feature_payload) is not None
+                    and feature_identity in feature_payloads_by_identity):
+                raise ValueError("A managed resource member has more than one feature owner.")
             feature_payloads_by_identity.setdefault(feature_identity, feature_payload)
     seen_feature_identities = set(feature_payloads_by_identity)
     display_order = 0
@@ -399,6 +714,10 @@ def _apply_tracker_templates_to_feature_payloads(
         nonlocal display_order
         template_tracker_id = str(tracker_template.get("id") or "").strip()
         tracker_id = str(feature_payload.get("tracker_ref") or "").strip() or template_tracker_id
+        if tracker_id in template_owners and template_owners[tracker_id] is not feature_payload:
+            raise ValueError("A managed resource tracker has more than one feature owner.")
+        if tracker_id:
+            template_owners[tracker_id] = feature_payload
         if tracker_id:
             feature_payload["tracker_ref"] = tracker_id
         feature_payload["activation_type"] = str(
@@ -442,6 +761,7 @@ def _apply_tracker_templates_to_feature_payloads(
                 current_level=feature_current_level,
                 display_order=display_order,
                 managed_resource_member=managed_resource_member,
+                total_character_level=current_level,
             )
         if tracker_template is not None:
             append_tracker_template(feature_payload, tracker_template)
@@ -453,8 +773,9 @@ def _apply_tracker_templates_to_feature_payloads(
             display_order=display_order,
             managed_resource_family=managed_resource_family,
             managed_resource_member=managed_resource_member,
+            total_character_level=current_level,
         ):
-            feature_identity = _feature_identity_key(derived_feature_payload)
+            feature_identity = _tracker_feature_identity_key(derived_feature_payload)
             if feature_identity[0] and feature_identity in seen_feature_identities:
                 existing_feature_payload = feature_payloads_by_identity.get(feature_identity)
                 if existing_feature_payload is not None:
@@ -508,6 +829,7 @@ def _build_additional_feature_tracker_payloads(
     display_order: int,
     managed_resource_family: dict[str, Any] | None = None,
     managed_resource_member: dict[str, Any] | None = None,
+    total_character_level: int | None = None,
 ) -> list[tuple[dict[str, Any], dict[str, Any] | None]]:
     managed_resource_family = dict(managed_resource_family or {})
     managed_resource_member = dict(managed_resource_member or {})
@@ -562,6 +884,7 @@ def _build_additional_feature_tracker_payloads(
                 ability_scores=ability_scores,
                 current_level=current_level,
                 display_order=display_order + len(derived_payloads),
+                total_character_level=total_character_level,
             )
             derived_payloads.append((derived_feature_payload, derived_tracker_template))
         if derived_payloads:
@@ -714,6 +1037,7 @@ def _round_scaled_level_value(value: float, *, round_mode: str) -> int:
 def _merge_resource_templates(
     existing_templates: list[dict[str, Any]],
     new_templates: list[dict[str, Any]],
+    *, preserve_observation_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = []
     new_by_id = {
@@ -729,7 +1053,24 @@ def _merge_resource_templates(
     for template in existing_templates:
         template_id = str(template.get("id") or "").strip()
         if template_id and template_id in new_by_id:
-            merged.append(dict(new_by_id[template_id]))
+            replacement = dict(new_by_id[template_id])
+            if template_id in (preserve_observation_ids or set()):
+                replacement = {**deepcopy(replacement), **deepcopy(template), "max": replacement.get("max")}
+                if "initial_current" not in template:
+                    replacement.pop("initial_current", None)
+                merged.append(replacement)
+                seen_ids.add(template_id)
+                continue
+            initial_current = template.get("initial_current")
+            maximum = replacement.get("max")
+            if (type(initial_current) is int and initial_current >= 0
+                    and type(maximum) is int and maximum >= 0
+                    and str(template.get("class_row_id") or "").strip()
+                    == str(replacement.get("class_row_id") or "").strip()):
+                # This is the historical bootstrap observation, not an instruction
+                # to refill a pool when its source-derived maximum grows.
+                replacement["initial_current"] = min(initial_current, maximum)
+            merged.append(replacement)
             seen_ids.add(template_id)
             continue
         merged.append(dict(template))
@@ -942,6 +1283,7 @@ def _build_managed_resource_tracker_template(
     ability_scores: dict[str, int],
     current_level: int,
     display_order: int,
+    total_character_level: int | None = None,
 ) -> dict[str, Any] | None:
     return _build_managed_resource_tracker_template_impl(
         member,
@@ -949,6 +1291,7 @@ def _build_managed_resource_tracker_template(
         ability_scores=ability_scores,
         current_level=current_level,
         display_order=display_order,
+        total_character_level=total_character_level,
     )
 
 def _feature_has_effect(effect_keys: set[str], *values: str) -> bool:
@@ -961,6 +1304,7 @@ def _build_feature_tracker_template(
     current_level: int,
     display_order: int,
     managed_resource_member: dict[str, Any] | None = None,
+    total_character_level: int | None = None,
 ) -> dict[str, Any] | None:
     return _build_feature_tracker_template_impl(
         feature_payload,
@@ -969,6 +1313,7 @@ def _build_feature_tracker_template(
         display_order=display_order,
         managed_resource_member=managed_resource_member,
         feat_effect_keys_for_feature=_feat_effect_keys_for_feature,
+        total_character_level=total_character_level,
     )
 
 def _summarize_preview_resource(template: dict[str, Any]) -> str:

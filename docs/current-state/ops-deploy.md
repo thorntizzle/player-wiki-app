@@ -14,6 +14,14 @@ Focused diagnostics are optional when they resolve a concrete uncertainty;
 the retired automated suite and candidate gate are not available. Historical
 acceptance statements below describe completed releases, not current commands.
 
+A local host requested for later browser inspection must outlive its automation
+terminal. Verify the exact isolated database/campaign roots, loopback listener
+and process identity after launch; a background-process ID observed during a
+tool call alone does not prove later availability. Keep the existing signing
+configuration and leave only the explicitly requested host running. A detached
+launch does not grant scheduled startup, installation, credentials, publication
+or live-data authority.
+
 - Work from the confirmed app repository root. Use Python 3.12.12 from
   `.python-version`; do not rely on bare `python` from `PATH`.
 - `requirements.txt` owns direct runtime ranges, `requirements-prod.txt`
@@ -450,6 +458,28 @@ operator procedure. Restart the app after correction so startup recovery retries
 the current conflict entry without replacing a competing file. A missing file
 can be recreated from the committed BLOB by replay. A current mismatch remains
 visible to manager diagnostics even if an older outbox entry was complete.
+
+Activated config/page mirror replay records a safe bounded observation of the
+final primary path after publication and image checks. A successful creation,
+replacement or removal cannot retain the pre-publication observation hash;
+a final differing file is a conflict and is preserved. Existing no-replace,
+retained-draft and image checks remain in force. Completed outbox rows are not
+replayed simply to refresh observation metadata.
+
+For an otherwise matching current config mirror whose observation metadata is
+stale, `committed_publication.reobserve_config_mirror` is a private operator
+service, not a web endpoint or automatic recovery action. A separately
+authorized operation supplies the exact revision/hash and complete mirror and
+outbox preimages. The service uses the configured campaign root and durable
+exclusive source reservation; it proves current admission, completed publication,
+retained prior bytes when replacement required them, and no pending campaign
+publication/recovery. It safely reads the actual file and refuses any mismatch.
+Only the observed primary hash and observation timestamp may change; an already
+correct observation is a no-op. Files, generations, outbox attempts and history
+are preserved, with no new Character audit. Operators must quiesce external file
+writers and retain independent before/after evidence; the observation describes
+one instant. Source availability grants no authority to invoke this data write,
+republish settings, reset an outbox or deploy the change.
 
 
 - On Fly, app code is baked into the image.

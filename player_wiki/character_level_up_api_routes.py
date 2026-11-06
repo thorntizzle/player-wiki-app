@@ -5,14 +5,22 @@ from typing import Any, Callable
 
 from flask import Blueprint, current_app, request
 
+from .auth import get_authenticated_user
 from .character_builder import CharacterBuildError
+from .character_spell_grants import (
+    ACQUISITION_FIELD, TRUSTED_ACQUISITION_KEY, GrantContractError,
+    resolve_acquisition_intent,
+)
 from .character_service import CharacterStateValidationError
 from .character_store import CharacterStateConflictError
 from .character_reconciliation import CharacterPublicationConflict, PendingNativeLevelUpAuthority
 from .character_source_repair import (load_verified_manual_actions, load_verified_numeric_actions,
-                                      record_confirmed_native_level_up_witness)
+                                      record_confirmed_native_level_up_witness,
+                                      prepare_native_spell_choice_audit_metadata)
 from .committed_publication import active
 from .character_source_authority import (build_reconciled_source_authority,
+                                         NativeAdvancementValidationError,
+                                         native_advancement_input_target,
                                          prepare_native_level_up_resource_authorizations)
 
 
@@ -55,16 +63,27 @@ def register_character_level_up_api_routes(
             return dependencies.serialize_character_level_up_response(
                 campaign_slug, campaign, record, readiness=readiness
             )
-        form_values = dependencies.normalize_character_level_up_values(
-            dict(request.args)
-        )
         try:
+            form_values = dependencies.normalize_character_level_up_values(dict(request.args))
+            form_values.pop(ACQUISITION_FIELD, None)
+            form_values.pop(TRUSTED_ACQUISITION_KEY, None)
+            if active():
+                token, acquisition_context = resolve_acquisition_intent(
+                    request.args, campaign_slug=campaign_slug,
+                    actor_id=getattr(get_authenticated_user(), "id", None),
+                    mode="level_up", prior_record=record,
+                    allow_issue="_live_preview" not in request.args,
+                )
+                form_values[ACQUISITION_FIELD] = token
+                form_values[TRUSTED_ACQUISITION_KEY] = acquisition_context
             level_up_context = dependencies.build_character_level_up_context_parts(
                 campaign_slug,
                 campaign,
                 record,
                 form_values=form_values,
             )
+        except GrantContractError as exc:
+            return dependencies.json_error(str(exc), 400, code="acquisition_validation_failed")
         except CharacterBuildError as exc:
             readiness = {"status": "unsupported", "message": str(exc)}
             return dependencies.serialize_character_level_up_response(
@@ -105,7 +124,19 @@ def register_character_level_up_api_routes(
         try:
             payload = dependencies.load_json_object()
             expected_revision = int(payload.get("expected_revision"))
+            raw_values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
             form_values = dependencies.normalize_character_level_up_values(payload)
+            form_values.pop(ACQUISITION_FIELD, None)
+            form_values.pop(TRUSTED_ACQUISITION_KEY, None)
+            acquisition_context = None
+            if active():
+                token, acquisition_context = resolve_acquisition_intent(
+                    raw_values, campaign_slug=campaign_slug,
+                    actor_id=getattr(get_authenticated_user(), "id", None),
+                    mode="level_up", prior_record=record,
+                )
+                form_values[ACQUISITION_FIELD] = token
+                form_values[TRUSTED_ACQUISITION_KEY] = acquisition_context
             level_up_context = dependencies.build_character_level_up_context_parts(
                 campaign_slug,
                 campaign,
@@ -138,6 +169,14 @@ def register_character_level_up_api_routes(
             if active():
                 manual_witnesses = load_verified_manual_actions(campaign_slug, character_slug)
                 numeric_witnesses = load_verified_numeric_actions(campaign_slug, character_slug)
+                prior_choice_authority = build_reconciled_source_authority(
+                    definition=record.definition, state=record.state_record.state or {},
+                    state_revision=record.state_record.revision,
+                    systems_service=current_app.extensions["systems_service"],
+                    campaign_page_records=authority_page_records,
+                    verified_manual_actions=manual_witnesses,
+                    verified_numeric_actions=numeric_witnesses,
+                )
                 definition, new_markers, source_bases, simulated_witnesses, source_digest, authority_state = (
                     prepare_native_level_up_resource_authorizations(
                         prior_definition=record.definition, candidate_definition=definition,
@@ -147,6 +186,7 @@ def register_character_level_up_api_routes(
                         campaign_page_records=authority_page_records,
                         verified_manual_actions=manual_witnesses,
                         verified_numeric_actions=numeric_witnesses,
+                        advancement_intent=level_up_context.get("_validated_native_advancement"),
                     )
                 )
                 prospective_authority = build_reconciled_source_authority(
@@ -179,11 +219,26 @@ def register_character_level_up_api_routes(
                                                   + tuple(witness for witness in simulated_witnesses
                                                           if witness not in numeric_witnesses)),
                     )
+                def prepare_pending_audit():
+                    return prepare_native_spell_choice_audit_metadata(
+                        record, definition, merged_state, actor_id=user.id,
+                        markers=new_markers, source_snapshot_digest=source_digest,
+                        source_basis_digests=source_bases, event_type="character_native_leveled",
+                        systems_service=current_app.extensions["systems_service"],
+                        campaign_page_records=authority_page_records,
+                        acquisition_context=acquisition_context,
+                        advancement_intent=level_up_context.get("_validated_native_advancement"),
+                    )
                 pending_authority = (
                     PendingNativeLevelUpAuthority.from_proof(
                         prior_record=record, definition=definition, desired_state=merged_state,
                         authority=prospective_authority, markers=new_markers,
                         refresh=refresh_pending_authority,
+                        prior_authority=prior_choice_authority,
+                        advancement_intent=level_up_context.get("_validated_native_advancement"),
+                        actor_id=user.id, systems_service=current_app.extensions["systems_service"],
+                        campaign_page_records=authority_page_records,
+                        prepare_audit=prepare_pending_audit,
                     ) if new_markers else None
                 )
             else:
@@ -209,13 +264,21 @@ def register_character_level_up_api_routes(
                         campaign_slug, character_slug)
                     if readback_access_error is not None or readback is None:
                         raise CharacterStateConflictError("Character access changed before source audit.")
+                    readback_pages = dependencies.list_visible_character_page_records(campaign_slug, readback_campaign)
+                    readback_numeric_witnesses = numeric_witnesses + tuple(
+                        witness for witness in simulated_witnesses
+                        if native_advancement_input_target(
+                            witness.get("authorization", {}).get("target_kind"),
+                            witness.get("authorization", {}).get("target_id", ""),
+                            witness.get("authorization", {}).get("metric"))
+                        and witness not in numeric_witnesses)
                     current_source = build_reconciled_source_authority(
                         definition=readback.definition, state=readback.state_record.state or {},
                         state_revision=readback.state_record.revision,
                         systems_service=current_app.extensions["systems_service"],
-                        campaign_page_records=dependencies.list_visible_character_page_records(campaign_slug, readback_campaign),
+                        campaign_page_records=readback_pages,
                         verified_manual_actions=manual_witnesses,
-                        verified_numeric_actions=numeric_witnesses,
+                        verified_numeric_actions=readback_numeric_witnesses,
                     )
                     if (current_source.source_snapshot_digest == source_digest
                             and all(current_source.numeric_basis_digest(target_id) == basis
@@ -226,9 +289,21 @@ def register_character_level_up_api_routes(
                             source_snapshot_digest=source_digest,
                             source_basis_digests=source_bases, actor_id=user.id,
                             auth_store=dependencies.get_auth_store(),
+                            prior_definition=record.definition,
+                            prior_record=record,
+                            systems_service=current_app.extensions["systems_service"],
+                            campaign_page_records=readback_pages,
+                            verified_manual_actions=manual_witnesses,
+                            verified_numeric_actions=readback_numeric_witnesses,
+                            advancement_intent=level_up_context.get("_validated_native_advancement"),
+                            acquisition_context=acquisition_context,
                         )
                 except Exception:
                     resource_witness_confirmed = False
+        except GrantContractError as exc:
+            return dependencies.json_error(str(exc), 400, code="acquisition_validation_failed")
+        except NativeAdvancementValidationError as exc:
+            return dependencies.json_error(str(exc), 400, code="advancement_validation_failed")
         except CharacterPublicationConflict:
             return dependencies.json_error(
                 "The level-up update needs reconciliation. Its saved outcome is uncertain. Inspect the current Character before submitting again.",
@@ -258,19 +333,35 @@ def register_character_level_up_api_routes(
             campaign_slug, campaign, refreshed_record
         )
         refreshed_context = None
+        next_context_unavailable = False
         if dependencies.character_level_up_is_supported(refreshed_readiness):
-            refreshed_context = dependencies.build_character_level_up_context_parts(
-                campaign_slug, campaign, refreshed_record
-            )
+            try:
+                next_values = {}
+                if active():
+                    next_token, next_acquisition_context = resolve_acquisition_intent(
+                        {}, campaign_slug=campaign_slug,
+                        actor_id=getattr(get_authenticated_user(), "id", None),
+                        mode="level_up", prior_record=refreshed_record, allow_issue=True,
+                    )
+                    next_values = {ACQUISITION_FIELD: next_token,
+                                   TRUSTED_ACQUISITION_KEY: next_acquisition_context}
+                refreshed_context = dependencies.build_character_level_up_context_parts(
+                    campaign_slug, campaign, refreshed_record,
+                    form_values=next_values,
+                )
+            except (CharacterBuildError, ValueError):
+                # Publication succeeded. A failed next preview cannot imply a retry.
+                next_context_unavailable = True
         return dependencies.serialize_character_level_up_response(
             campaign_slug,
             campaign,
             refreshed_record,
             readiness=refreshed_readiness,
             level_up_context=refreshed_context,
-            message=(f"{definition.name} advanced to level {target_level}."
+            message=((f"{definition.name} advanced to level {target_level}."
                      if resource_witness_confirmed else
-                     f"{definition.name} advanced to level {target_level}. New resource totals need manager review before use."),
+                     f"{definition.name} advanced to level {target_level}. New resource totals need manager review before use.")
+                     + (" Reload level-up choices before another advancement." if next_context_unavailable else "")),
         )
 
     api.add_url_rule(

@@ -1,0 +1,22 @@
+{% for casting in item.item_casting_modes | default([]) %}
+  <div class="subtle-panel">
+    <strong>{{ casting.title }}</strong>
+    <p class="meta">{{ casting.spell.title if casting.spell else 'Spell source unavailable' }} · {{ 'normal spell casting time' if casting.timing == 'source' else casting.timing }} · {% if casting.slot_cost %}one slot of level {{ casting.minimum_slot_level }} or higher{% else %}level {{ casting.casting_level }}, one item use, no slot{% endif %}</p>
+    <p class="meta">{% if casting.components == 'none' %}No verbal, somatic or material components.{% elif casting.components == 'item_lens' %}Normal components; the item's lens supplies the material component and is not consumed.{% else %}Normal source components.{% endif %} Resolve targets, checks and effects at the table.</p>
+    {% if not casting.enabled %}<p class="meta">{{ casting.disabled_reason }}</p>{% endif %}
+    {% if item_uses_editable | default(false) and casting.enabled %}
+      <form class="session-inline-form" method="post" action="{{ url_for('character_session_inventory', campaign_slug=campaign.slug, character_slug=character.slug, item_id=item.id) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="expected_revision" value="{{ character.state_revision }}">
+        <input type="hidden" name="operation" value="item_cast">
+        <input type="hidden" name="mode_id" value="{{ casting.id }}">
+        <input type="hidden" name="mode" value="{{ session_character_form_mode | default('read') }}">
+        <input type="hidden" name="page" value="{{ session_character_form_page | default(character_subpage, true) }}">
+        {% if session_return_view | default('') %}<input type="hidden" name="return_view" value="{{ session_return_view }}">{% endif %}
+        {% if casting.slot_cost %}<label>Spell slot<select name="slot_selection" required>{% for option in casting.slot_options %}<option value="{{ option.selection }}">{{ option.label }} ({{ option.available }} available)</option>{% endfor %}</select></label>{% endif %}
+        {% if casting.trigger %}<label><input type="checkbox" name="confirm_trigger" value="yes" required>I am seeing the target creature for the first time and can use this reaction.</label>{% endif %}
+        <button type="submit" class="ghost-button">Cast and spend {{ 'slot' if casting.slot_cost else 'use' }}</button>
+      </form>
+    {% endif %}
+  </div>
+{% endfor %}

@@ -21,6 +21,188 @@ ACTIVATION_FIELDS = ("is_equipped", "is_attuned", "weapon_wield_mode")
 ACTIVATION_SCHEMA_VERSION = 1
 
 
+class ActivationPrerequisiteError(ValueError):
+    """An activation prerequisite refused before publication could start."""
+
+
+def activation_frame_digest(value: Any) -> str:
+    """Compare JSON observations without bool/int/float or absence coercion."""
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def native_activation_readiness(prior_record, definition, state, *, final=False):
+    """Non-entitling native facts; never repair or initialize activation.
+
+    The producer has to authenticate its original before calling this helper.
+    Publication additionally requires the genuine pending native proof. Neither
+    these facts nor physical equality establishes current item benefits.
+    """
+    def fail():
+        raise ActivationPrerequisiteError("Native equipment activation needs separate manager repair.")
+
+    def exact_id(value):
+        return type(value) is str and bool(value) and value == value.strip()
+
+    def typed_rows(candidate, frame):
+        payload = candidate.to_dict() if hasattr(candidate, "to_dict") else candidate
+        rows, inventory = payload.get("equipment_catalog"), frame.get("inventory")
+        if type(rows) is not list or type(inventory) is not list:
+            fail()
+        physical = {}
+        for item in rows:
+            if type(item) is not dict or ("is_currency_only" in item
+                    and type(item["is_currency_only"]) is not bool):
+                fail()
+            for key in ("is_equipped", "is_attuned"):
+                if key in item and type(item[key]) is not bool:
+                    fail()
+            check_mode(item)
+            if item.get("is_currency_only", False):
+                continue
+            identity = item.get("id")
+            if not exact_id(identity) or identity in physical:
+                fail()
+            physical[identity] = item
+        seen = set()
+        for item in inventory:
+            if type(item) is not dict:
+                fail()
+            identity, reference = item.get("id"), item.get("catalog_ref")
+            if (not exact_id(identity) or not exact_id(reference) or identity != reference
+                    or identity in seen or identity not in physical):
+                fail()
+            seen.add(identity)
+            if "unlinked_activation_discarded" in item and (
+                    type(item["unlinked_activation_discarded"]) is not bool
+                    or item["unlinked_activation_discarded"]):
+                fail()
+            if any(type(item.get(key)) is not bool for key in ("is_equipped", "is_attuned")):
+                fail()
+            check_mode(item)
+        if seen != set(physical):
+            fail()
+        if "equipment_activation" in frame:
+            marker = frame["equipment_activation"]
+            if (type(marker) is not dict or type(marker.get("schema_version")) is not int
+                    or marker["schema_version"] != ACTIVATION_SCHEMA_VERSION
+                    or type(marker.get("known_definition_ids")) is not list):
+                fail()
+            identities = marker["known_definition_ids"]
+            if (any(not exact_id(value) for value in identities)
+                    or len(identities) != len(set(identities))):
+                fail()
+        analysis = analyze_activation(candidate, frame)
+        allowed = set() if "equipment_activation" in frame else {"activation_migration_required"}
+        if (any(row["status"] != "exact" for row in analysis["rows"])
+                or {warning["code"] for warning in analysis["warnings"]} != allowed):
+            fail()
+        return physical, analysis
+
+    def check_mode(item):
+        if "weapon_wield_mode" not in item or item["weapon_wield_mode"] is None:
+            return
+        value = item["weapon_wield_mode"]
+        if type(value) is not str or (value and re.sub(r"[^a-z0-9]+", "", value.lower())
+                not in {"mainhand", "offhand", "twohanded"}):
+            fail()
+
+    prior_state = prior_record.state_record.state
+    if type(state) is not dict or type(prior_state) is not dict:
+        fail()
+    old, _ = typed_rows(prior_record.definition, prior_state)
+    new, analysis = typed_rows(definition, state)
+    if (activation_frame_digest(old) != activation_frame_digest(new)
+            or activation_frame_digest(prior_state.get("inventory")) != activation_frame_digest(state.get("inventory"))
+            or ("equipment_activation" in prior_state) != ("equipment_activation" in state)
+            or activation_frame_digest(prior_state.get("equipment_activation"))
+               != activation_frame_digest(state.get("equipment_activation"))):
+        fail()
+    legacy = "equipment_activation" not in prior_state
+    if final and legacy and activation_frame_digest(prior_state) != activation_frame_digest(state):
+        fail()
+    return analysis
+
+
+def require_update_activation(prior_record, definition, state, *, reconstruction=None,
+                              actor_id=None, native_proof=None, source_read_owner=None,
+                              feature_class_association=None):
+    """Share ordinary readiness and the proof-bound, exact legacy exception.
+
+    Missing schema evidence needs genuine current reconstruction or the full
+    signed native proof with an exact retained legacy state.
+    This does not project activation, initialize rows, or repair a marker.
+    """
+    if feature_class_association is not None:
+        from .character_feature_class_association import PendingFeatureClassAssociation
+        if (type(feature_class_association) is not PendingFeatureClassAssociation
+                or reconstruction is not None or native_proof is not None):
+            raise ActivationPrerequisiteError("Feature association needs its exact reviewed plan.")
+        feature_class_association.validate_binding(prior_record, definition, state, actor_id)
+        return native_activation_readiness(prior_record, definition, state, final=True)
+    if native_proof is not None:
+        from .character_reconciliation import PendingReviewedSourceProof
+        if reconstruction is not None or not isinstance(native_proof, PendingReviewedSourceProof):
+            raise ActivationPrerequisiteError("Native activation requires its exact reviewed proof.")
+        native_proof.native_activation_binding(prior_record, definition, state, actor_id,
+                                               source_read_owner=source_read_owner)
+        return native_activation_readiness(prior_record, definition, state, final=True)
+    analysis = analyze_activation(definition, state)
+    if reconstruction is not None:
+        from .character_reconstruction_authority import PendingNativeReconstruction
+        try:
+            if not isinstance(reconstruction, PendingNativeReconstruction):
+                raise ValueError("Reconstruction proof is unavailable.")
+            reconstruction.validate_binding(prior_record, definition, state, actor_id)
+            marker = state.get("equipment_activation")
+            # Existing membership/order representations follow analyze_activation;
+            # the sorted producer shape is not a retained-state prerequisite.
+            if "equipment_activation" in state and (
+                    not isinstance(marker, dict)
+                    or type(marker.get("schema_version")) is not int
+                    or marker.get("schema_version") != ACTIVATION_SCHEMA_VERSION):
+                raise ValueError("The retained activation marker needs separate repair.")
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ActivationPrerequisiteError("Equipment activation is incompatible with exact reconstruction; separate manager repair is required.") from exc
+    if not analysis["blocked"]:
+        return analysis
+    if reconstruction is None:
+        raise ActivationPrerequisiteError("Equipment activation identity needs manager repair before this Character update.")
+    try:
+        if ("equipment_activation" in prior_record.state_record.state
+                or "equipment_activation" in state
+                or any(row["status"] != "exact" for row in analysis["rows"])
+                or {warning["code"] for warning in analysis["warnings"]}
+                   != {"activation_migration_required"}):
+            raise ValueError("Only an absent legacy activation marker can be retained.")
+        prior = analyze_activation(prior_record.definition, prior_record.state_record.state)
+        if (any(row["status"] != "exact" for row in prior["rows"])
+                or {warning["code"] for warning in prior["warnings"]}
+                   != {"activation_migration_required"}):
+            raise ValueError("The prior physical activation owners need separate repair.")
+        for row in prior["rows"]:
+            if row["source"] != "sqlite":
+                continue
+            item = row["state"]
+            if any(key in item and item[key] is not None and (
+                    not isinstance(item[key], str) or item[key] != item[key].strip())
+                    for key in ("id", "catalog_ref")):
+                raise ValueError("A physical owner is not an exact retained identifier.")
+            identity = row["definition"].get("id")
+            if not isinstance(identity, str) or not identity or identity != identity.strip():
+                raise ValueError("A physical definition owner is not exact.")
+        old = {row["id"]: row["definition"] for row in prior["rows"] if row["source"] == "sqlite"}
+        new = {row["id"]: row["definition"] for row in analysis["rows"] if row["source"] == "sqlite"}
+        if set(old) != set(new):
+            raise ValueError("Reconstruction cannot change physical activation owners.")
+        for identity in old:
+            if old[identity] != new[identity] and not reconstruction.permits_item_mapping(prior_record, definition, identity):
+                raise ValueError("A changed physical source needs exact reconstruction proof.")
+    except (ValueError, TypeError, KeyError) as exc:
+        raise ActivationPrerequisiteError("Equipment activation is incompatible with exact reconstruction; separate manager repair is required.") from exc
+    return analysis
+
+
 def activation_marker(definition: Any) -> dict[str, Any]:
     payload = definition.to_dict() if hasattr(definition, "to_dict") else definition
     return {"schema_version": ACTIVATION_SCHEMA_VERSION,
@@ -61,8 +243,10 @@ def analyze_activation(definition: Any, state: dict[str, Any]) -> dict[str, Any]
         return {"rows": [], "warnings": [], "blocked": False}
     definition_rows = [item for item in list(definition_payload.get("equipment_catalog") or [])
                        if isinstance(item, dict) and not item.get("is_currency_only")]
-    state_rows = list((state or {}).get("inventory") or [])
-    marker = dict((state or {}).get("equipment_activation") or {})
+    raw_rows = (state or {}).get("inventory")
+    state_rows = raw_rows if isinstance(raw_rows, list) else []
+    raw_marker = (state or {}).get("equipment_activation")
+    marker = raw_marker if isinstance(raw_marker, dict) else {}
     known_ids = marker.get("known_definition_ids")
     marker_valid = (
         marker.get("schema_version") == ACTIVATION_SCHEMA_VERSION
@@ -260,9 +444,9 @@ def suppress_unresolved_linked_sources(
         item["mechanics_suppressed"] = True
         sourced_bonus_fields = {
             "bonus", "bonus_ac", "bonus_attack_rolls", "bonus_damage_rolls",
-            "bonus_weapon", "bonus_weapon_attack", "bonus_weapon_damage",
+            "bonus_weapon", "bonus_weapon_attack", "bonus_weapon_damage", "weapon_extra_damage",
             "defensive_rules", "attack_reminder_rules", "spell_support",
-            "spellcasting_modifiers",
+            "spellcasting_modifiers", "spell_property_modifiers",
             "resource_template_bonuses", "item_use_actions", "item_uses",
         }
         for field in CAMPAIGN_ITEM_METADATA_KEYS:

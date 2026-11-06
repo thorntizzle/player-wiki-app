@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .character_ability_inputs import require_resolved_ability_inputs
+from .character_equipment_activation import ActivationPrerequisiteError, require_update_activation
 
 import base64
 from copy import deepcopy
@@ -16,7 +17,9 @@ import yaml
 
 from .character_models import CharacterDefinition, CharacterImportMetadata, CharacterRecord
 from .character_path_safety import resolve_character_definition_import_paths
-from .character_reconciliation import CharacterPublicationCoordinator, PendingReviewedSourceProof
+from .character_reconciliation import (
+    CharacterPublicationCoordinator, CharacterPublicationPreflightError, PendingReviewedSourceProof,
+)
 from .incident_diagnostics import diagnose_operation
 from .character_repository import load_campaign_character_config
 from .character_store import CharacterStateStore, ExactCharacterState
@@ -91,6 +94,7 @@ class CharacterUpdateApplyClassification(str, Enum):
     CONFIRMED_APPLIED = "confirmed_applied"
     UNCHANGED = "unchanged"
     REFUSED_STALE = "refused_stale"
+    REFUSED_PREREQUISITE = "refused_prerequisite"
     FAILED = "failed"
     UNCERTAIN = "uncertain"
 
@@ -132,6 +136,9 @@ class CharacterUpdateRecompute:
     reviewed_config_revision: int | None = None
     pending_page_feature_markers: tuple[dict[str, Any], ...] = ()
     refresh_review_basis: Callable[[], tuple[str, str]] | None = None
+    pending_native_reconstruction: Any | None = None
+    validate_review_basis: Callable[[], None] | None = None
+    pending_native_elective_decision: Any | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +227,20 @@ def _optional_positive_integer(value: Any) -> int | None:
 
 
 def _operation(value: Any) -> dict[str, Any]:
+    if type(value) is dict and value.get("kind") == "native_language_elective_decision":
+        from .character_language_electives import operation
+        try:
+            return operation(value)
+        except ValueError as exc:
+            raise CharacterUpdateTokenError("Language decision review token is invalid.") from exc
+    if isinstance(value, Mapping) and value.get("kind") == "native_reconstruction":
+        from .character_reconstruction import bounded_inputs
+        if set(value) != {"kind", "inputs"}:
+            raise CharacterUpdateTokenError("Character reconstruction review token is invalid.")
+        try:
+            return {"kind": "native_reconstruction", "inputs": bounded_inputs(value["inputs"])}
+        except ValueError as exc:
+            raise CharacterUpdateTokenError("Character reconstruction review token is invalid.") from exc
     if not isinstance(value, Mapping) or set(value) != _OPERATION_KEYS:
         raise CharacterUpdateTokenError("Character update review token is invalid.")
     kind = _bounded_text(value["kind"])
@@ -244,6 +265,8 @@ def _claims_payload(claims: CharacterUpdateReviewClaims) -> dict[str, Any]:
     operations = tuple(_operation(item) for item in claims.operations)
     if not 1 <= len(operations) <= MAX_OPERATIONS:
         raise CharacterUpdateTokenError("Character update review token is invalid.")
+    if any(row["kind"] in {"native_reconstruction", "native_language_elective_decision"} for row in operations) and len(operations) != 1:
+        raise CharacterUpdateTokenError("Reconstruction cannot be combined with grant or relink operations.")
     actor_user_id = _positive_integer(claims.actor_user_id)
     state_revision = _positive_integer(claims.state_revision)
     planner_version = _positive_integer(claims.planner_version)
@@ -518,6 +541,25 @@ class CharacterUpdateApplyEngine:
         self._now = now or time.time
         self.codec = CharacterUpdateTokenCodec(secret, now=self._now)
 
+    def _validated_candidate(self, recompute: CharacterUpdateRecompute, *, actor_user_id: int):
+        """Use identical candidate, activation and ability prerequisites at Review and Apply."""
+        desired_state = _validated_desired_state(recompute)
+        from .committed_publication import active
+        derived = recompute.plan.derived_character
+        candidate_payload = (
+            derived.get("definition") if active() and isinstance(derived, Mapping)
+            else recompute.plan.candidate_definition
+        )
+        if not isinstance(candidate_payload, Mapping):
+            raise ValueError("Character update candidate is unavailable.")
+        desired_definition = CharacterDefinition.from_dict(dict(candidate_payload))
+        require_update_activation(recompute.record, desired_definition, desired_state,
+            reconstruction=recompute.pending_native_reconstruction, actor_id=actor_user_id)
+        if recompute.pending_native_reconstruction is None:
+            require_resolved_ability_inputs(recompute.record.definition)
+        require_resolved_ability_inputs(desired_definition)
+        return desired_definition, desired_state
+
     def issue_review(
         self,
         recompute: CharacterUpdateRecompute,
@@ -532,11 +574,14 @@ class CharacterUpdateApplyEngine:
             )
         if status is not PlanStatus.READY:
             return CharacterUpdateReviewIssue(None, None)
+        self._validated_candidate(recompute, actor_user_id=actor_user_id)
         evidence = self._current_evidence(
             recompute,
             actor_user_id=actor_user_id,
             issued_at=int(self._now()),
         )
+        if recompute.validate_review_basis is not None:
+            recompute.validate_review_basis()
         return CharacterUpdateReviewIssue(self.codec.issue(evidence.claims), None)
 
     @diagnose_operation("character_update_apply")
@@ -561,6 +606,7 @@ class CharacterUpdateApplyEngine:
                 CharacterUpdateApplyClassification.REFUSED_STALE
             )
 
+        reviewed_source_proof = None
         try:
             current = recompute(reviewed.operations)
             if PlanStatus(current.plan.status) is not PlanStatus.READY:
@@ -572,18 +618,8 @@ class CharacterUpdateApplyEngine:
             )
             if evidence.claims != reviewed:
                 raise CharacterUpdateStaleError("Reviewed inputs changed.")
-            desired_state = _validated_desired_state(current)
+            desired_definition, desired_state = self._validated_candidate(current, actor_user_id=actor_user_id)
             from .committed_publication import active
-            derived = current.plan.derived_character
-            candidate_payload = (
-                derived.get("definition") if active() and isinstance(derived, Mapping)
-                else current.plan.candidate_definition
-            )
-            if not isinstance(candidate_payload, Mapping):
-                raise ValueError("Character update candidate is unavailable.")
-            desired_definition = CharacterDefinition.from_dict(dict(candidate_payload))
-            require_resolved_ability_inputs(current.record.definition)
-            require_resolved_ability_inputs(desired_definition)
             review_digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
             if self._audit_rows(review_digest):
                 raise CharacterUpdateStaleError("Reviewed update was already used.")
@@ -596,13 +632,34 @@ class CharacterUpdateApplyEngine:
                     source_digest=current.source_digest,
                     policy_digest=current.policy_digest,
                     refresh_review_basis=current.refresh_review_basis,
+                    native_reconstruction=current.pending_native_reconstruction,
+                    native_elective_decision=current.pending_native_elective_decision,
+                    elective_review_token=(token if current.pending_native_elective_decision is not None else ""),
+                    elective_review_validator=(lambda: self.codec.verify(token, actor_user_id=actor_user_id,
+                        campaign_slug=campaign_slug, character_slug=character_slug) == reviewed),
+                    refresh_numeric_authority=(
+                        (lambda **_ignored: current.pending_native_elective_decision.recheck(
+                            current.record, desired_definition, desired_state, actor_user_id))
+                        if current.pending_native_elective_decision is not None else
+                        lambda: current.pending_native_reconstruction.recheck(
+                            current.record, desired_definition, desired_state, actor_user_id)
+                    ) if (current.pending_native_reconstruction is not None
+                          or current.pending_native_elective_decision is not None) else None,
                 ) if active() else None
             )
         except CharacterUpdateStaleError:
+            if reviewed_source_proof is not None:
+                reviewed_source_proof.discard_native_admission()
             return CharacterUpdateApplyResult(
                 CharacterUpdateApplyClassification.REFUSED_STALE
             )
+        except ActivationPrerequisiteError:
+            if reviewed_source_proof is not None:
+                reviewed_source_proof.discard_native_admission()
+            return CharacterUpdateApplyResult(CharacterUpdateApplyClassification.REFUSED_PREREQUISITE)
         except Exception:
+            if reviewed_source_proof is not None:
+                reviewed_source_proof.discard_native_admission()
             return CharacterUpdateApplyResult(
                 CharacterUpdateApplyClassification.FAILED
             )
@@ -615,6 +672,17 @@ class CharacterUpdateApplyEngine:
             "state_impact": reviewed.state_impact,
             "operation_count": len(reviewed.operations),
         }
+        if current.pending_native_elective_decision is not None:
+            audit_metadata["plan_digest"] = current.plan.digest
+            audit_metadata["language_review_basis"] = {
+                "actor_user_id": reviewed.actor_user_id, "campaign_slug": reviewed.campaign_slug,
+                "character_slug": reviewed.character_slug, "prior_generation": reviewed.committed_revision,
+                "primary_sha256": reviewed.definition_digest, "secondary_sha256": reviewed.import_digest,
+                "state_revision": reviewed.state_revision, "state_digest": reviewed.state_digest,
+                "source_digest": reviewed.source_digest, "policy_digest": reviewed.policy_digest,
+                "plan_digest": reviewed.candidate_digest, "native_digest": reviewed.native_digest,
+                "semantic_digest": reviewed.semantic_digest,
+            }
         try:
             result_record = self.coordinator.update(
                 current.record,
@@ -629,6 +697,10 @@ class CharacterUpdateApplyEngine:
                 audit_metadata=audit_metadata,
                 reviewed_source_proof=reviewed_source_proof,
             )
+        except ActivationPrerequisiteError:
+            return CharacterUpdateApplyResult(CharacterUpdateApplyClassification.REFUSED_PREREQUISITE)
+        except CharacterPublicationPreflightError:
+            return CharacterUpdateApplyResult(CharacterUpdateApplyClassification.FAILED)
         except BaseException:
             return CharacterUpdateApplyResult(
                 CharacterUpdateApplyClassification.UNCERTAIN,
@@ -806,7 +878,6 @@ class CharacterUpdateApplyEngine:
                              for marker in recompute.pending_page_feature_markers)
             if any(witness not in witnesses for witness in expected):
                 return False
-            # The postcommit source must independently make each exact row effective.
             current_authority = self.coordinator.numeric_authority_provider(
                 result_record, result_record.definition,
             )
@@ -815,6 +886,35 @@ class CharacterUpdateApplyEngine:
                     "resource", marker["target_id"].removeprefix("resource:")
                 ).is_effective for marker in recompute.pending_page_feature_markers
             ):
+                return False
+        if recompute.pending_native_elective_decision is not None:
+            from .character_language_electives import NativeElectiveDecision
+            from .character_reconstruction_authority import reconstruction_mirrors_match
+            from .character_source_repair import load_verified_numeric_actions
+            if not reconstruction_mirrors_match(result_record, self.campaigns_dir):
+                return False
+            proof = recompute.pending_native_elective_decision
+            actions = load_verified_numeric_actions(result_record.definition.campaign_slug,
+                result_record.definition.character_slug, strict=True)
+            if not any(type(witness) is NativeElectiveDecision
+                    and witness.get("outcomes") == list(proof.outcomes) for witness in actions):
+                return False
+            authority = self.coordinator.numeric_authority_provider(result_record, result_record.definition)
+            if authority is None or any(not authority.field_status(path).is_effective for path in proof.bases):
+                return False
+        if recompute.pending_native_reconstruction is not None:
+            from .character_reconstruction_authority import reconstruction_mirrors_match
+            if not reconstruction_mirrors_match(result_record, self.campaigns_dir):
+                return False
+            from .character_source_repair import load_verified_numeric_actions
+            witnesses = load_verified_numeric_actions(
+                result_record.definition.campaign_slug, result_record.definition.character_slug, strict=True)
+            if any(not any(isinstance(witness, dict) and witness.get("authorization") == marker
+                           for witness in witnesses)
+                   for marker in recompute.pending_native_reconstruction.markers):
+                return False
+            authority = self.coordinator.numeric_authority_provider(result_record, result_record.definition)
+            if authority is None or not authority.field_status("stats.max_hp").is_effective:
                 return False
         readback_rows = tuple(recompute.readback_semantic_rows(result_record))
         return canonical_digest(_semantic_rows_payload(readback_rows)) == canonical_digest(

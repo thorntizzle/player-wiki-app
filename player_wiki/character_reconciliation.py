@@ -5,6 +5,7 @@ import json
 import secrets
 import sqlite3
 import stat
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock, RLock
@@ -33,7 +34,7 @@ from .character_store import (
     CharacterStateStore,
     PreparedCharacterState,
 )
-from .db import get_db
+from .db import get_db, SourceReadConnectionFatal
 from .file_publication import (
     atomic_move_file,
     atomic_write_bytes,
@@ -85,6 +86,10 @@ class CharacterPublicationError(RuntimeError):
     pass
 
 
+class CharacterPublicationPreflightError(CharacterPublicationError):
+    """An anticipated domain refusal before any publication attempt."""
+
+
 class CharacterPublicationConflict(FileExistsError, CharacterPublicationError):
     pass
 
@@ -107,6 +112,15 @@ class _AuthorityConflict(RuntimeError):
         super().__init__(error_code)
 
 
+_NATIVE_REVIEW_ADMISSION = object()
+_NATIVE_REVIEW_RECORD_KEYS = frozenset({
+    "issuer", "owner", "request", "token_digest", "actor", "campaign", "character",
+    "prior", "phase", "lock",
+})
+_NATIVE_REVIEW_PHASES = ("REQUEST", "BINDING", "BOUND", "CAPTURING", "COMPLETE", "CLOSED")
+_NATIVE_REVIEW_LOCK_TYPE = type(_CHARACTER_LOCKS_GUARD)
+
+
 @dataclass(frozen=True, slots=True)
 class PendingReviewedSourceProof:
     """The source basis observed during an activated prospective review."""
@@ -122,9 +136,314 @@ class PendingReviewedSourceProof:
     page_feature_markers: tuple[dict[str, Any], ...] = ()
     reviewed_source_digest: str = ""
     reviewed_policy_digest: str = ""
-    refresh_review_basis: Callable[[], tuple[str, str]] | None = field(
+    replacement_relink_target: str = ""
+    same_physical_mapping: Any | None = field(default=None, repr=False, compare=False)
+    feature_class_association: Any | None = field(default=None, repr=False, compare=False)
+    managed_resource_restoration: Any | None = field(default=None, repr=False, compare=False)
+    refresh_review_basis: Callable[[], tuple[Any, ...]] | None = field(
         default=None, repr=False, compare=False,
     )
+    refresh_numeric_authority: Callable[[], Any] | None = field(
+        default=None, repr=False, compare=False,
+    )
+    native_reconstruction: Any | None = field(default=None, repr=False, compare=False)
+    native_elective_decision: Any | None = field(default=None, repr=False, compare=False)
+    elective_review_token: str = field(default="", repr=False, compare=False)
+    native_requalification_markers: tuple[dict[str, Any], ...] = ()
+    native_spell_origin_plan: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    native_actor_id: int | None = None
+    native_result: Any | None = field(default=None, repr=False, compare=False)
+    native_action_id: str = ""
+    native_proof_digest: str = ""
+    native_review_token: str = field(default="", repr=False, compare=False)
+    _native_admission: dict[str, Any] | None = field(default=None, init=False, repr=False, compare=False)
+    _complete: bool = field(default=True, init=False, repr=False, compare=False)
+
+    def require_complete(self):
+        try:
+            if self._requires_native_custody():
+                # Refuse another object's copied slots before even preparing
+                # token facts, and recheck after that fallible preparation.
+                self._native_phase("COMPLETE")
+                record = self._native_record()
+                token, actor = self._custody_credentials()
+                facts = self._request_admission_facts(
+                    token, actor,
+                    record["campaign"], record["character"])
+                self._native_phase("COMPLETE", request_facts=facts)
+            elif self._complete is not True:
+                raise CharacterStateConflictError("Reviewed source proof is not complete.")
+        except BaseException:
+            self.discard_native_admission()
+            raise
+
+    def _requires_native_custody(self):
+        # Reconstruction has its own proof contract and leaves these native
+        # requalification fields at their defaults. Raw Character flags never
+        # decide this family. A CLOSED or malformed record cannot fall through.
+        return (getattr(self, "_native_admission", None) is not None
+                or getattr(self, "native_elective_decision", None) is not None
+                or type(getattr(self, "elective_review_token", "")) is not str
+                or len(getattr(self, "elective_review_token", "")) != 0
+                or self._has_native_payload(
+            getattr(self, "native_result", None), getattr(self, "native_spell_origin_plan", None),
+            getattr(self, "native_requalification_markers", ()), getattr(self, "native_actor_id", None),
+            getattr(self, "native_action_id", ""), getattr(self, "native_proof_digest", ""),
+            getattr(self, "native_review_token", "")))
+
+    def _custody_credentials(self):
+        elective = getattr(self, "native_elective_decision", None)
+        if elective is not None:
+            from .character_language_electives import PendingElectiveDecision
+            if type(elective) is not PendingElectiveDecision:
+                raise CharacterStateConflictError("Language Review custody has an unsupported proof type.")
+            return self.elective_review_token, elective.prior_identity["actor_user_id"]
+        return self.native_review_token, self.native_actor_id
+
+    @staticmethod
+    def _has_native_payload(result, plan, markers, actor, action, digest, token):
+        # Exact default types avoid invoking a malformed stand-in's equality.
+        return (result is not None or plan is not None or actor is not None
+                or type(markers) is not tuple or len(markers) != 0
+                or any(type(value) is not str or len(value) != 0 for value in (action, digest, token)))
+
+    def _native_record_structure(self):
+        # Revocation must remain possible after a partially advanced phase.
+        # This admits no authority: callers still check owner/request identity,
+        # and every live consumer additionally uses the strict reader below.
+        record = getattr(self, "_native_admission", None)
+        if (type(self) is not PendingReviewedSourceProof or type(record) is not dict
+                or len(record) != len(_NATIVE_REVIEW_RECORD_KEYS)
+                or any(type(key) is not str for key in record)
+                or record.keys() != _NATIVE_REVIEW_RECORD_KEYS
+                or record["issuer"] is not _NATIVE_REVIEW_ADMISSION
+                or type(record["lock"]) is not _NATIVE_REVIEW_LOCK_TYPE
+                or (record["owner"] is not None and type(record["owner"]) is not PendingReviewedSourceProof)):
+            raise CharacterStateConflictError("Native Review custody is unavailable.")
+        return record
+
+    def _native_record(self):
+        record = self._native_record_structure()
+        if (type(record["phase"]) is not str or record["phase"] not in _NATIVE_REVIEW_PHASES
+                or type(record["actor"]) is not int or record["actor"] < 1
+                or any(type(record[key]) is not str or not record[key]
+                       for key in ("token_digest", "campaign", "character"))
+                or len(record["token_digest"]) != 64
+                or (record["prior"] is not None and not self._valid_prior_facts(record["prior"]))
+                or (record["phase"] in ("REQUEST", "BINDING") and record["prior"] is not None)
+                or (record["phase"] in ("BOUND", "CAPTURING", "COMPLETE") and record["prior"] is None)):
+            raise CharacterStateConflictError("Native Review custody is unavailable.")
+        return record
+
+    @staticmethod
+    def _valid_prior_facts(facts):
+        return (type(facts) is tuple and len(facts) == 5
+                and type(facts[0]) is int and facts[0] > 0
+                and type(facts[1]) is int and facts[1] > 0
+                and all(type(value) is str and len(value) == 64 for value in facts[2:]))
+
+    def _native_phase(self, expected, *, request_facts=None, prior_facts=None, next_phase=None):
+        """Check/claim only fixed facts under the non-reentrant record lock."""
+        from flask import request
+        record = self._native_record()
+        actual_request = request._get_current_object()
+        if (request_facts is not None and (
+                type(request_facts) is not tuple or len(request_facts) != 4
+                or type(request_facts[0]) is not str or len(request_facts[0]) != 64
+                or type(request_facts[1]) is not int or request_facts[1] < 1
+                or any(type(value) is not str or not value for value in request_facts[2:]))):
+            raise CharacterStateConflictError("Native Review request facts are unavailable.")
+        if prior_facts is not None and not self._valid_prior_facts(prior_facts):
+            raise CharacterStateConflictError("Native Review actual Character facts are unavailable.")
+        with record["lock"]:
+            if (record["owner"] is not self or record["request"] is not actual_request
+                    or record["phase"] != expected
+                    or self._complete is not (expected == "COMPLETE")
+                    or (request_facts is not None and (
+                        record["token_digest"] != request_facts[0]
+                        or record["actor"] != request_facts[1]
+                        or record["campaign"] != request_facts[2]
+                        or record["character"] != request_facts[3]))):
+                raise CharacterStateConflictError("Native Review owner, request or phase changed.")
+            if expected == "BINDING" and next_phase == "BOUND":
+                if record["prior"] is not None or prior_facts is None:
+                    raise CharacterStateConflictError("Native Review actual Character binding is unavailable.")
+            elif prior_facts is not None and record["prior"] != prior_facts:
+                raise CharacterStateConflictError("Native Review actual Character binding changed.")
+            if next_phase is not None:
+                if (expected, next_phase) not in (
+                        ("REQUEST", "BINDING"), ("BINDING", "BOUND"),
+                        ("BOUND", "CAPTURING"), ("CAPTURING", "COMPLETE")):
+                    raise CharacterStateConflictError("Native Review phase cannot be reopened.")
+                if next_phase == "BOUND":
+                    record["prior"] = prior_facts
+                if next_phase == "COMPLETE":
+                    object.__setattr__(self, "_complete", True)
+                record["phase"] = next_phase
+
+    def _native_validation_phase(self):
+        # Shared field validators accept only the actual owner's private
+        # staging phase or its completed phase. Public consumers separately
+        # require COMPLETE; this helper never returns a proof or authority.
+        from flask import request
+        record = self._native_record()
+        actual_request = request._get_current_object()
+        with record["lock"]:
+            phase = record["phase"]
+            if (record["owner"] is not self or record["request"] is not actual_request
+                    or phase not in ("CAPTURING", "COMPLETE")
+                    or self._complete is not (phase == "COMPLETE")):
+                raise CharacterStateConflictError("Native Review validation phase is unavailable.")
+            return phase
+
+    @staticmethod
+    def _new_native_record(owner, facts, prior, phase):
+        from flask import request
+        return {"issuer": _NATIVE_REVIEW_ADMISSION, "owner": owner,
+                "request": request._get_current_object(), "token_digest": facts[0],
+                "actor": facts[1], "campaign": facts[2], "character": facts[3],
+                "prior": prior, "phase": phase, "lock": Lock()}
+
+    @classmethod
+    def admit_native_request(cls, token, actor_id, campaign_slug, character_slug):
+        """Admit normal age before unrelated work, without any prior facts."""
+        from .character_source_repair_routes import _token_serializer, _TTL
+        claims = _token_serializer().loads(token, max_age=_TTL)
+        if not isinstance(claims, dict) or claims.get("action") != "native_requalify":
+            return claims, None
+        cls._require_native_claims(claims, actor_id, campaign_slug, character_slug)
+        from flask import request
+        from werkzeug.exceptions import BadRequest
+        # Only authenticated native classification adds this ambiguity check;
+        # ordinary non-native forms retain their existing validation behavior.
+        if any(len(request.form.getlist(key)) != 1 for key in request.form):
+            raise BadRequest()
+        result = object.__new__(cls)
+        object.__setattr__(result, "_complete", False)
+        object.__setattr__(result, "_native_admission", None)
+        try:
+            object.__setattr__(result, "_native_admission", cls._new_native_record(
+                result, cls._request_admission_facts(token, actor_id, campaign_slug, character_slug),
+                None, "REQUEST"))
+            return claims, result
+        except BaseException:
+            result.discard_native_admission()
+            raise
+
+    def discard_native_admission(self):
+        # A copied slot is not the owner and cannot revoke its genuine issuer.
+        # Keep CLOSED attached so old aliases and slot restoration stay closed.
+        # Cleanup must never replace an original exception/result, even when
+        # invoked without an active Flask request during aborted work. A leaked
+        # owner used from another request cannot revoke the original request.
+        try:
+            from flask import has_request_context, request
+            if not has_request_context():
+                return
+            actual_request = request._get_current_object()
+            record = self._native_record_structure()
+            with record["lock"]:
+                if record["owner"] is self and record["request"] is actual_request:
+                    record["phase"] = "CLOSED"
+                    object.__setattr__(self, "_complete", False)
+                    record["owner"] = None
+                    record["request"] = None
+        except BaseException:
+            pass
+
+    def _require_native_complete_binding(self, prior_record, actor_id):
+        self.require_complete()
+        if self._requires_native_custody():
+            try:
+                token, _actor = self._custody_credentials()
+                facts = self._request_admission_facts(token, actor_id,
+                    prior_record.definition.campaign_slug, prior_record.definition.character_slug)
+                prior = self._prior_admission_facts(prior_record)
+                self._native_phase("COMPLETE", request_facts=facts, prior_facts=prior)
+            except BaseException:
+                self.discard_native_admission()
+                raise
+
+    @staticmethod
+    def _require_native_claims(claims, actor_id, campaign_slug, character_slug):
+        if (type(claims) is not dict or claims.get("v") != 1
+                or claims.get("action") != "native_requalify"
+                or type(actor_id) is not int or actor_id < 1
+                or type(claims.get("actor")) is not int or claims["actor"] != actor_id
+                or (claims.get("campaign"), claims.get("character")) != (campaign_slug, character_slug)):
+            raise CharacterStateConflictError("Native Review belongs to a different manager or Character.")
+
+    @classmethod
+    def admit_manager_review(cls, prior_record, token, actor_id, *, native_review_admission=None):
+        """Seal normal-age route admission on this existing pending proof.
+
+        The incomplete phase contains no invented authority, revision or
+        candidate. Only capture can fill it after genuine native preparation.
+        An early native seal is consumed once to bind independently loaded prior
+        facts. Default and non-native callers retain normal-expiry verification.
+        """
+        from .character_source_repair_routes import _token_serializer, _TTL
+        if native_review_admission is not None:
+            if type(native_review_admission) is not cls:
+                raise CharacterStateConflictError("Native Review was not admitted within normal expiry.")
+            try:
+                native_review_admission._native_phase("REQUEST")
+                facts = cls._request_admission_facts(token, actor_id,
+                    prior_record.definition.campaign_slug, prior_record.definition.character_slug)
+                native_review_admission._native_phase("REQUEST", request_facts=facts, next_phase="BINDING")
+                prior = cls._prior_admission_facts(prior_record)
+                claims = _token_serializer().loads(token)
+                cls._require_native_claims(claims, actor_id, prior_record.definition.campaign_slug,
+                                           prior_record.definition.character_slug)
+                cls._require_native_prior_claims(claims, prior)
+                native_review_admission._native_phase("BINDING", request_facts=facts,
+                    prior_facts=prior, next_phase="BOUND")
+            except BaseException:
+                native_review_admission.discard_native_admission()
+                raise
+            return claims, native_review_admission
+        claims = _token_serializer().loads(token, max_age=_TTL)
+        if not isinstance(claims, dict) or claims.get("action") != "native_requalify":
+            return claims, None
+        cls._require_native_claims(claims, actor_id, prior_record.definition.campaign_slug,
+                                   prior_record.definition.character_slug)
+        facts = cls._request_admission_facts(token, actor_id,
+            prior_record.definition.campaign_slug, prior_record.definition.character_slug)
+        prior = cls._prior_admission_facts(prior_record)
+        cls._require_native_prior_claims(claims, prior)
+        result = object.__new__(cls)
+        object.__setattr__(result, "_complete", False)
+        object.__setattr__(result, "_native_admission", None)
+        try:
+            object.__setattr__(result, "_native_admission", cls._new_native_record(result, facts, prior, "BOUND"))
+            return claims, result
+        except BaseException:
+            result.discard_native_admission()
+            raise
+
+    @staticmethod
+    def _request_admission_facts(token, actor_id, campaign_slug, character_slug):
+        if (type(token) is not str or not token or type(actor_id) is not int or actor_id < 1
+                or type(campaign_slug) is not str or not campaign_slug
+                or type(character_slug) is not str or not character_slug):
+            raise CharacterStateConflictError("Native Review request facts are unavailable.")
+        return (hashlib.sha256(token.encode("utf-8")).hexdigest(), actor_id, campaign_slug, character_slug)
+
+    @classmethod
+    def _prior_admission_facts(cls, prior_record):
+        facts = (prior_record.committed_revision, prior_record.state_record.revision,
+                cls._digest(prior_record.definition.to_dict()), cls._digest(prior_record.state_record.state),
+                cls._digest(prior_record.import_metadata.to_dict()))
+        if not cls._valid_prior_facts(facts):
+            raise CharacterStateConflictError("Native Review actual Character facts are unavailable.")
+        return facts
+
+    @staticmethod
+    def _require_native_prior_claims(claims, prior):
+        if (claims.get("definition_digest") != prior[2] or claims.get("import_digest") != prior[4]
+                or type(claims.get("state_revision")) is not int
+                or claims["state_revision"] != prior[1] or claims.get("state_digest") != prior[3]):
+            raise CharacterStateConflictError("Character or source changed. Refresh and review again.")
 
     @staticmethod
     def _digest(value: Any) -> str:
@@ -137,48 +456,400 @@ class PendingReviewedSourceProof:
                 config_revision: int | None = None,
                 page_feature_markers: tuple[dict[str, Any], ...] = (),
                 source_digest: str = "", policy_digest: str = "",
-                refresh_review_basis: Callable[[], tuple[str, str]] | None = None,
+                replacement_relink_target: str = "",
+                same_physical_mapping: Any | None = None,
+                feature_class_association: Any | None = None,
+                managed_resource_restoration: Any | None = None,
+                refresh_review_basis: Callable[[], tuple[Any, ...]] | None = None,
+                refresh_numeric_authority: Callable[[], Any] | None = None,
+                native_reconstruction: Any | None = None,
+                native_elective_decision: Any | None = None,
+                elective_review_token: str = "",
+                elective_review_validator: Callable[[], bool] | None = None,
+                native_requalification_markers: tuple[dict[str, Any], ...] = (),
+                native_spell_origin_plan: dict[str, Any] | None = None,
+                native_actor_id: int | None = None,
+                native_result: Any | None = None,
+                native_action_id: str = "", native_proof_digest: str = "",
+                native_review_token: str = "",
+                native_review_admission: PendingReviewedSourceProof | None = None,
+                source_read_owner=None,
                 ) -> PendingReviewedSourceProof:
-        from .committed_character_publication import config
-        revision = (config(definition.campaign_slug)[0]["revision"]
-                    if config_revision is None else config_revision)
-        if (authority is None or not authority.identity
-                or not authority.source_snapshot_digest or type(revision) is not int):
-            raise CharacterStateConflictError("Character source proof is unavailable.")
-        return cls(prior_record.committed_revision,
-                   cls._digest(prior_record.definition.to_dict()),
-                   cls._digest(prior_record.state_record.state),
-                   cls._digest(definition.to_dict()), cls._digest(desired_state),
-                   authority.source_snapshot_digest, authority.identity, revision,
-                   tuple(json.loads(json.dumps(marker)) for marker in page_feature_markers),
-                   source_digest, policy_digest, refresh_review_basis)
+        native = (native_review_admission is not None or cls._has_native_payload(
+            native_result, native_spell_origin_plan, native_requalification_markers,
+            native_actor_id, native_action_id, native_proof_digest, native_review_token))
+        if managed_resource_restoration is not None:
+            from .character_managed_resource_restoration import PendingManagedResourceRestoration
+            if (type(managed_resource_restoration) is not PendingManagedResourceRestoration
+                    or native or feature_class_association is not None or same_physical_mapping is not None
+                    or native_reconstruction is not None or native_elective_decision is not None
+                    or page_feature_markers or replacement_relink_target
+                    or not callable(refresh_review_basis) or not callable(refresh_numeric_authority)
+                    or not source_digest or not policy_digest):
+                raise CharacterStateConflictError("Tracker restoration needs its separate complete source Review.")
+            managed_resource_restoration.validate_binding(prior_record, definition, desired_state,
+                                                         managed_resource_restoration.actor_id)
+        if feature_class_association is not None and (native or native_elective_decision is not None
+                or native_reconstruction is not None or same_physical_mapping is not None
+                or not callable(refresh_review_basis) or not source_digest or not policy_digest):
+            raise CharacterStateConflictError("Class association needs its separate complete source Review.")
+        try:
+            if native:
+                if type(native_review_admission) is not cls:
+                    raise CharacterStateConflictError("Native Review was not admitted within normal expiry.")
+                native_review_admission._native_phase("BOUND")
+                facts = cls._request_admission_facts(native_review_token, native_actor_id,
+                    prior_record.definition.campaign_slug, prior_record.definition.character_slug)
+                prior = cls._prior_admission_facts(prior_record)
+                # Claim before configuration, authority or field construction.
+                # Nothing can restore BOUND when any later work fails.
+                native_review_admission._native_phase("BOUND", request_facts=facts,
+                    prior_facts=prior, next_phase="CAPTURING")
+                if native_result is None:
+                    raise CharacterStateConflictError("Native Review requires its genuine prepared result.")
+            if same_physical_mapping is not None:
+                from .character_reconstruction_items import PendingSamePhysicalItemMapping
+                if (type(same_physical_mapping) is not PendingSamePhysicalItemMapping or native
+                        or native_reconstruction is not None or native_elective_decision is not None
+                        or not callable(refresh_review_basis) or not source_digest or not policy_digest):
+                    raise CharacterStateConflictError("Same-physical mapping needs its separate complete source Review.")
+                same_physical_mapping.validate_binding(prior_record, definition, desired_state, same_physical_mapping.actor_id)
+            from .committed_character_publication import config
+            revision = (config(definition.campaign_slug)[0]["revision"]
+                        if config_revision is None else config_revision)
+            if (authority is None or not authority.identity
+                    or not authority.source_snapshot_digest or type(revision) is not int):
+                raise CharacterStateConflictError("Character source proof is unavailable.")
+            values = {
+                "prior_revision": prior_record.committed_revision,
+                "prior_definition_digest": cls._digest(prior_record.definition.to_dict()),
+                "prior_state_digest": cls._digest(prior_record.state_record.state),
+                "candidate_definition_digest": cls._digest(definition.to_dict()),
+                "desired_state_digest": cls._digest(desired_state),
+                "source_snapshot_digest": authority.source_snapshot_digest,
+                "authority_identity": authority.identity, "config_revision": revision,
+                "page_feature_markers": tuple(json.loads(json.dumps(marker)) for marker in page_feature_markers),
+                "reviewed_source_digest": source_digest, "reviewed_policy_digest": policy_digest,
+                "replacement_relink_target": replacement_relink_target,
+                "same_physical_mapping": same_physical_mapping,
+                "feature_class_association": feature_class_association,
+                "managed_resource_restoration": managed_resource_restoration,
+                "refresh_review_basis": refresh_review_basis, "refresh_numeric_authority": refresh_numeric_authority,
+                "native_reconstruction": native_reconstruction,
+                "native_elective_decision": native_elective_decision,
+                "elective_review_token": elective_review_token,
+                "native_requalification_markers": native_requalification_markers,
+                "native_spell_origin_plan": (json.loads(json.dumps(native_spell_origin_plan))
+                    if native_spell_origin_plan is not None else None),
+                "native_actor_id": native_actor_id, "native_result": native_result,
+                "native_action_id": native_action_id, "native_proof_digest": native_proof_digest,
+                "native_review_token": native_review_token,
+            }
+            if native_elective_decision is not None:
+                from .character_language_electives import PendingElectiveDecision
+                if (native or type(native_elective_decision) is not PendingElectiveDecision
+                        or not callable(elective_review_validator) or elective_review_validator() is not True):
+                    raise CharacterStateConflictError("Language Review requires its genuine normal-age Update token.")
+                result = object.__new__(cls)
+                object.__setattr__(result, "_complete", False)
+                object.__setattr__(result, "_native_admission", None)
+                try:
+                    for name, value in values.items():
+                        object.__setattr__(result, name, value)
+                    facts = cls._request_admission_facts(elective_review_token,
+                        native_elective_decision.prior_identity["actor_user_id"],
+                        definition.campaign_slug, definition.character_slug)
+                    prior = cls._prior_admission_facts(prior_record)
+                    object.__setattr__(result, "_native_admission", cls._new_native_record(result, facts, prior, "CAPTURING"))
+                    result._native_phase("CAPTURING", request_facts=facts, prior_facts=prior, next_phase="COMPLETE")
+                    native_elective_decision.bind_review_owner(result)
+                    return result
+                except BaseException:
+                    result.discard_native_admission()
+                    raise
+            if not native:
+                if feature_class_association is not None:
+                    from .character_feature_class_association import PendingFeatureClassAssociation
+                    if (type(feature_class_association) is not PendingFeatureClassAssociation
+                            or same_physical_mapping is not None or native_reconstruction is not None
+                            or native_elective_decision is not None):
+                        raise CharacterStateConflictError("Feature association cannot borrow another proof family.")
+                    feature_class_association.validate_binding(prior_record, definition, desired_state,
+                                                               feature_class_association.actor_id)
+                return cls(**values)
+            # Stage only on the original owner, without constructing any
+            # temporary complete native proof or transferring its record.
+            for name, value in values.items():
+                object.__setattr__(native_review_admission, name, value)
+            native_review_admission._validate_native_activation_fields(
+                prior_record, definition, desired_state, native_actor_id, source_read_owner=source_read_owner)
+            if native_spell_origin_plan is not None:
+                native_review_admission._validate_native_spell_origin_fields(
+                    prior_record, definition, desired_state, native_actor_id, source_read_owner=source_read_owner)
+            if source_read_owner is not None:
+                source_read_owner.checkpoint()
+            native_review_admission._native_phase("CAPTURING", request_facts=facts,
+                prior_facts=prior, next_phase="COMPLETE")
+            return native_review_admission
+        except BaseException:
+            if type(native_review_admission) is cls:
+                native_review_admission.discard_native_admission()
+            raise
+
+    def native_activation_binding(self, prior_record, definition, state, actor_id, *, source_read_owner=None):
+        """Authenticate full native custody, never just its spell subproof.
+
+        Fresh real producer issuance and original/current joins are required at
+        each write gate. The early producer itself never depends on this proof.
+        """
+        try:
+            self.require_complete()
+            result = self._validate_native_activation_fields(prior_record, definition, state, actor_id, source_read_owner=source_read_owner)
+            self.require_complete()
+            return result
+        except BaseException:
+            self.discard_native_admission()
+            raise
+
+    def _validate_native_activation_fields(self, prior_record, definition, state, actor_id, *, source_read_owner=None):
+        try:
+            phase = self._native_validation_phase()
+            facts = self._request_admission_facts(self.native_review_token, actor_id,
+                prior_record.definition.campaign_slug, prior_record.definition.character_slug)
+            prior = self._prior_admission_facts(prior_record)
+            self._native_phase(phase, request_facts=facts, prior_facts=prior)
+            from .character_native_requalification import NativeRequalification, native_requalification_state
+            from .character_equipment_activation import native_activation_readiness
+            from .character_source_repair_routes import _token_serializer
+            from itsdangerous import BadSignature
+            try:
+                # The route enforces normal expiry once at Apply admission. Here
+                # verify the same signed claims without expiring an admitted write
+                # midway through its fresh reserved validation.
+                claims = _token_serializer().loads(self.native_review_token)
+            except (BadSignature, TypeError, ValueError) as exc:
+                raise CharacterStateConflictError("Native activation requires the signed manager Review.") from exc
+            if (not isinstance(self.native_result, NativeRequalification)
+                    or type(actor_id) is not int or actor_id < 1 or actor_id != self.native_actor_id
+                    or not self.native_action_id or not self.native_proof_digest
+                    or not callable(self.refresh_review_basis) or not callable(self.refresh_numeric_authority)
+                    or not self.reviewed_source_digest or not self.reviewed_policy_digest
+                    or prior_record.committed_revision != self.prior_revision
+                    or self._digest(prior_record.definition.to_dict()) != self.prior_definition_digest
+                    or self._digest(prior_record.state_record.state) != self.prior_state_digest
+                    or self._digest(definition.to_dict()) != self.candidate_definition_digest
+                    or self._digest(state) != self.desired_state_digest):
+                raise CharacterStateConflictError("Native activation requires genuine reviewed custody.")
+            if (type(claims) is not dict or claims.get("v") != 1
+                    or claims.get("action") != "native_requalify" or type(claims.get("actor")) is not int
+                    or claims.get("actor") != actor_id
+                    or (claims.get("campaign"), claims.get("character")) != (
+                        definition.campaign_slug, definition.character_slug)
+                    or claims.get("action_id") != self.native_action_id
+                    or claims.get("definition_digest") != self.prior_definition_digest
+                    or claims.get("import_digest") != self._digest(prior_record.import_metadata.to_dict())
+                    or type(claims.get("state_revision")) is not int
+                    or claims["state_revision"] != prior_record.state_record.revision
+                    or claims.get("state_digest") != self.prior_state_digest
+                    or claims.get("candidate_digest") != self.candidate_definition_digest
+                    or claims.get("native_proof_digest") != self.native_proof_digest
+                    or claims.get("source_digest") != self.reviewed_source_digest
+                    or self._digest({"candidate": definition.to_dict(), "effect_delta": claims.get("effect_delta"),
+                                     "context_proof_digest": ""}) != self.reviewed_policy_digest):
+                raise CharacterStateConflictError("Signed native custody changed before publication.")
+            self.native_result.validate_binding(prior_record, actor_id, self.native_action_id)
+            # One real regeneration supplies both the existing source/policy basis
+            # and its issued native result. Never run a second producer here.
+            refreshed = (self.refresh_review_basis(source_read_owner=source_read_owner)
+                         if source_read_owner is not None else self.refresh_review_basis())
+            if (type(refreshed) is not tuple or len(refreshed) != 3
+                    or refreshed[:2] != (self.reviewed_source_digest, self.reviewed_policy_digest)
+                    or not isinstance(refreshed[2], NativeRequalification)):
+                raise CharacterStateConflictError("Native activation producer is unavailable.")
+            fresh = refreshed[2]
+            fresh.validate_binding(prior_record, actor_id, self.native_action_id)
+            for result in (self.native_result, fresh):
+                desired = native_requalification_state(prior_record, result, actor_id)
+                if (self._digest({"provenance": result.provenance, "authorizations": result.authorizations,
+                                 "state": desired}) != self.native_proof_digest
+                        or self._digest(result.candidate.to_dict()) != self.candidate_definition_digest
+                        or self._digest(result.authorizations) != self._digest(self.native_requalification_markers)
+                        or self._digest(result.provenance.get("spell_origin_plan")) != self._digest(self.native_spell_origin_plan)
+                        or self._digest(desired) != self.desired_state_digest):
+                    raise CharacterStateConflictError("Reviewed native result changed before publication.")
+            native_activation_readiness(prior_record, definition, state, final=True)
+            unchanged_state = self._digest(state) == self.prior_state_digest
+            self._native_phase(phase, request_facts=facts, prior_facts=prior)
+            if source_read_owner is not None:
+                source_read_owner.checkpoint()
+            return unchanged_state
+        except BaseException:
+            self.discard_native_admission()
+            raise
+
+    def native_spell_origin_delta(self, prior_record, definition, state, actor_id, *, source_read_owner=None,
+                                  source_read_phase=None):
+        """Authenticate only this pending actor's exact source-derived delta."""
+        try:
+            self._require_native_complete_binding(prior_record, actor_id)
+            if self.native_spell_origin_plan is None:
+                return None
+            plan = self._validate_native_spell_origin_fields(prior_record, definition, state, actor_id,
+                source_read_owner=source_read_owner, source_read_phase=source_read_phase)
+            self.require_complete()
+            return plan
+        except BaseException:
+            self.discard_native_admission()
+            raise
+
+    def _validate_native_spell_origin_fields(self, prior_record, definition, state, actor_id, *, source_read_owner=None,
+                                             source_read_phase=None):
+        try:
+            phase = self._native_validation_phase()
+            facts = self._request_admission_facts(self.native_review_token, actor_id,
+                prior_record.definition.campaign_slug, prior_record.definition.character_slug)
+            prior = self._prior_admission_facts(prior_record)
+            self._native_phase(phase, request_facts=facts, prior_facts=prior)
+            from .auth import get_systems_service
+            from .character_native_requalification import prepare_spell_origin_correction
+            from .character_spell_grants import grant_model_digest
+            if (type(actor_id) is not int or actor_id < 1 or actor_id != self.native_actor_id
+                    or prior_record.committed_revision != self.prior_revision
+                    or self._digest(prior_record.definition.to_dict()) != self.prior_definition_digest
+                    or self._digest(prior_record.state_record.state) != self.prior_state_digest
+                    or self._digest(definition.to_dict()) != self.candidate_definition_digest
+                    or self._digest(state) != self.desired_state_digest
+                    or not callable(self.refresh_review_basis) or not callable(self.refresh_numeric_authority)
+                    or not self.native_requalification_markers):
+                raise CharacterStateConflictError("Reviewed spell-origin correction changed before publication.")
+            try:
+                from .character_source_reads import native_character_source_context
+                with native_character_source_context(prior_record, source_read_owner=source_read_owner,
+                        source_read_phase=source_read_phase,
+                        purpose="pending-spell-origin") as (_source_phase, source_service, _pages, _owner):
+                    checkpoint_result = None
+                    if self.native_spell_origin_plan.get("schema_version") in {3, 4}:
+                        from .character_native_requalification import NativeRequalification
+                        from .character_spell_reconstruction import PendingSpellCheckpoint, validate_saved_spell_checkpoint
+                        result = self.native_result
+                        if (type(result) is not NativeRequalification
+                                or result.provenance.get("schema_version") not in {5, 6}
+                                or result.provenance.get("spell_origin_plan") != self.native_spell_origin_plan
+                                or result.candidate.to_dict() != definition.to_dict()
+                                or tuple(result.authorizations) != self.native_requalification_markers
+                                or type(result.spell_checkpoint) is not PendingSpellCheckpoint
+                                or result.spell_checkpoint.checkpoint != self.native_spell_origin_plan.get("current_checkpoint")
+                                or not result.spell_checkpoint.matches_definition(definition)):
+                            raise ValueError("Current spell confirmation needs its exact reviewed native result.")
+                        checkpoint = result.spell_checkpoint.checkpoint
+                        if (checkpoint.get("actor_id") != actor_id
+                                or checkpoint.get("action_id") != self.native_action_id
+                                or checkpoint.get("prior_generation") != prior_record.committed_revision
+                                or checkpoint.get("prior_state_revision") != prior_record.state_record.revision
+                                or checkpoint.get("prior_definition_digest") != self.prior_definition_digest):
+                            raise ValueError("Current spell confirmation changed its original actor or target.")
+                        result.validate_binding(prior_record, actor_id, self.native_action_id,
+                                                source_read_phase=_source_phase)
+                        validate_saved_spell_checkpoint(prior_record.definition, definition, checkpoint)
+                        checkpoint_result = result
+                    corrected, plan = prepare_spell_origin_correction(
+                        prior_record.definition, source_service, self.native_spell_origin_plan.get("request"),
+                        prior_generation=prior_record.committed_revision,
+                        prior_definition_digest=self.prior_definition_digest,
+                        prior_state_revision=prior_record.state_record.revision,
+                        actor_id=actor_id, action_id=self.native_action_id)
+                    if checkpoint_result is not None:
+                        from .character_spell_reconstruction import prepare_current_spell_checkpoint
+                        # Reproduce the final normalized input scope only after
+                        # authenticating the genuine issuer-bound candidate.
+                        # The original generation still supplies every raw row;
+                        # fresh sources and the complete new grant mapping own
+                        # the recomputed roles. This is not another producer.
+                        checkpoint_candidate, checkpoint, pending = prepare_current_spell_checkpoint(
+                            prior_record.definition, checkpoint_result.candidate, source_service,
+                            actor_id=actor_id, action_id=self.native_action_id,
+                            prior_generation=prior_record.committed_revision,
+                            prior_state_revision=prior_record.state_record.revision,
+                            automatic_ids={row["spell_id"] for row in plan["automatic"]})
+                        if (checkpoint_candidate.to_dict() != checkpoint_result.candidate.to_dict()
+                                or not pending.matches_definition(checkpoint_candidate)):
+                            raise ValueError("The final current spell confirmation changed during reissue.")
+                        plan["current_checkpoint"] = checkpoint
+                        plan["result_spellcasting_digest"] = self._digest(checkpoint_candidate.spellcasting)
+                    if (self._digest(plan) != self._digest(self.native_spell_origin_plan)
+                            or self._digest(corrected.spellcasting) != self._digest(definition.spellcasting)
+                            or grant_model_digest(corrected) != grant_model_digest(definition)
+                            or self._digest(state) != self._digest(prior_record.state_record.state)):
+                        raise ValueError("The exact spell-origin delta changed.")
+                    if checkpoint_result is not None:
+                        validate_saved_spell_checkpoint(prior_record.definition, definition, plan["current_checkpoint"])
+                    for row in plan["automatic"]:
+                        key = ("spell_choice", f"spell_choice:{row['spell_id']}", "selection")
+                        matches = [marker for marker in self.native_requalification_markers
+                                   if isinstance(marker, dict)
+                                   and (marker.get("target_kind"), marker.get("target_id"), marker.get("metric")) == key]
+                        if matches:
+                            raise ValueError("An automatic feature grant cannot mint an elective selection witness.")
+                    self._native_phase(phase, request_facts=facts, prior_facts=prior)
+                    return plan
+
+            except SourceReadConnectionFatal:
+                raise
+            except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+                raise CharacterStateConflictError("Reviewed spell-origin sources or witnesses changed.") from exc
+        except BaseException:
+            self.discard_native_admission()
+            raise
 
     def prospective_authority(self, authority: Any, definition: CharacterDefinition,
-                              prior_state: dict[str, Any]) -> Any:
-        if self.page_feature_markers:
-            from .character_source_authority import with_pending_page_feature_witnesses
-            return with_pending_page_feature_witnesses(
-                authority, definition, prior_state, self.page_feature_markers,
-            )
-        return authority
+                              prior_state: dict[str, Any], *, source_read_owner=None) -> Any:
+        try:
+            self.require_complete()
+            if self.refresh_numeric_authority is not None:
+                if self._digest(definition.to_dict()) != self.candidate_definition_digest:
+                    raise CharacterStateConflictError("Reviewed native inputs changed before publication.")
+                authority = (self.refresh_numeric_authority(source_read_owner=source_read_owner)
+                             if source_read_owner is not None else self.refresh_numeric_authority())
+            if self.page_feature_markers:
+                from .character_source_authority import with_pending_page_feature_witnesses
+                authority = with_pending_page_feature_witnesses(
+                    authority, definition, prior_state, self.page_feature_markers,
+                )
+            self.require_complete()
+            return authority
+        except BaseException:
+            self.discard_native_admission()
+            raise
 
     def recheck(self, prior_record: CharacterRecord, definition: CharacterDefinition,
-                desired_state: dict[str, Any], authority: Any, config_revision: int) -> None:
-        if (prior_record.committed_revision != self.prior_revision
-                or self._digest(prior_record.definition.to_dict()) != self.prior_definition_digest
-                or self._digest(prior_record.state_record.state) != self.prior_state_digest
-                or self._digest(definition.to_dict()) != self.candidate_definition_digest
-                or self._digest(desired_state) != self.desired_state_digest
-                or authority is None or authority.identity != self.authority_identity
-                or authority.source_snapshot_digest != self.source_snapshot_digest
-                or config_revision != self.config_revision):
-            raise CharacterStateConflictError("Reviewed Character source changed before publication.")
-        if self.refresh_review_basis is not None and (
-            self.refresh_review_basis() != (
-                self.reviewed_source_digest, self.reviewed_policy_digest,
-            )
-        ):
-            raise CharacterStateConflictError("Reviewed Character policy changed before publication.")
+                desired_state: dict[str, Any], authority: Any, config_revision: int, *,
+                source_read_owner=None, source_read_refresh=False) -> None:
+        try:
+            _token, actor = self._custody_credentials()
+            self._require_native_complete_binding(prior_record, actor)
+            if (prior_record.committed_revision != self.prior_revision
+                    or self._digest(prior_record.definition.to_dict()) != self.prior_definition_digest
+                    or self._digest(prior_record.state_record.state) != self.prior_state_digest
+                    or self._digest(definition.to_dict()) != self.candidate_definition_digest
+                    or self._digest(desired_state) != self.desired_state_digest
+                    or authority is None or authority.identity != self.authority_identity
+                    or authority.source_snapshot_digest != self.source_snapshot_digest
+                    or config_revision != self.config_revision):
+                raise CharacterStateConflictError("Reviewed Character source changed before publication.")
+            if self.native_result is not None:
+                self.native_activation_binding(prior_record, definition, desired_state, self.native_actor_id,
+                                               source_read_owner=source_read_owner)
+            elif self.refresh_review_basis is not None and (
+                (self.refresh_review_basis(source_read_owner=source_read_owner)
+                 if self.same_physical_mapping is not None or self.feature_class_association is not None or self.managed_resource_restoration is not None or source_read_refresh else self.refresh_review_basis()) != (
+                    self.reviewed_source_digest, self.reviewed_policy_digest,
+                )
+            ):
+                raise CharacterStateConflictError("Reviewed Character policy changed before publication.")
+            self.require_complete()
+        except BaseException:
+            self.discard_native_admission()
+            raise
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +866,8 @@ class PendingNativeLevelUpAuthority:
     refresh: Callable[[], Any] = field(repr=False, compare=False)
     claimed: bool = field(default=False, repr=False, compare=False)
     claim_lock: Lock = field(default_factory=Lock, repr=False, compare=False)
+    prepare_audit: Callable[[], dict[str, Any]] | None = field(default=None, repr=False, compare=False)
+    advancement_intent: Any | None = field(default=None, repr=False, compare=False)
 
     def claim(self) -> None:
         with self.claim_lock:
@@ -207,43 +880,85 @@ class PendingNativeLevelUpAuthority:
         cls, *, prior_record: CharacterRecord, definition: CharacterDefinition,
         desired_state: dict[str, Any], authority: Any,
         markers: tuple[dict[str, Any], ...], refresh: Callable[[], Any],
+        prior_authority: Any | None = None, advancement_intent: Any | None = None,
+        actor_id: int | None = None, systems_service: Any | None = None,
+        campaign_page_records: list[Any] | None = None,
+        prepare_audit: Callable[[], dict[str, Any]] | None = None,
     ) -> PendingNativeLevelUpAuthority:
         from .character_equipment_activation import definition_digest
         from .character_source_authority import numeric_target_values, numeric_value_digest
+        from .character_source_authority import (
+            NativeAdvancementValidationError, native_advancement_input_target,
+        )
 
         if not markers or not callable(refresh) or authority is None:
-            raise CharacterStateConflictError("Native level-up proof is incomplete.")
+            raise NativeAdvancementValidationError("This advancement could not be validated. Review its choices.")
         values = numeric_target_values(definition, desired_state)
         action_ids = {marker.get("action_id") for marker in markers}
         if len(action_ids) != 1 or None in action_ids:
-            raise CharacterStateConflictError("Native level-up action identity is ambiguous.")
+            raise NativeAdvancementValidationError("This advancement could not be validated. Review its choices.")
+        # Capacity is a whole-transition claim, independent of whether a typed
+        # decision changed or an empty decision envelope will be recorded.
+        validate_native_spell_choice_capacity(
+            prior_record, definition, desired_state, systems_service=systems_service,
+            campaign_page_records=campaign_page_records, advancement_intent=advancement_intent,
+        )
+        pending_decisions = set()
+        if any(isinstance(row, dict) and "native_class_choice_state" in row
+               for owner in (prior_record.definition, definition)
+               for row in owner.spellcasting.get("spells") or []):
+            from .character_source_authority import (
+                NativeAdvancementIntent, validate_native_spell_choice_decision_transition,
+            )
+            if (not isinstance(advancement_intent, NativeAdvancementIntent)
+                    or not advancement_intent.matches_resource_readback(prior_record.definition, definition)):
+                raise NativeAdvancementValidationError(
+                    "This advancement could not be validated. Review its choices.")
+            decisions = validate_native_spell_choice_decision_transition(
+                prior_record, definition, desired_state, prior_authority=prior_authority,
+                actor_id=actor_id, operation_kind="interactive_update", allow_progression=True,
+                systems_service=systems_service, campaign_page_records=campaign_page_records,
+            )
+            pending_decisions = {row["spell_id"] for row in decisions}
         for marker in markers:
             target = (marker.get("target_kind"), marker.get("target_id"), marker.get("metric"))
             target_id = str(marker.get("target_id") or "")
             if (marker.get("provenance") != "native_level_up"
                     or target not in values
                     or marker.get("value_digest") != numeric_value_digest(values[target])):
-                raise CharacterStateConflictError("Native level-up target changed before publication.")
+                raise NativeAdvancementValidationError("This advancement could not be validated. Review its choices.")
             if marker.get("target_kind") == "spell_metric":
                 status = None
                 if target_id not in authority.verified_formula_rows:
-                    raise CharacterStateConflictError("Native spell formula owner is unverified.")
+                    raise NativeAdvancementValidationError("This advancement could not be validated. Review its choices.")
             elif marker.get("target_kind") == "spell_choice":
                 status = None
-                if target_id.removeprefix("spell_choice:") not in authority.verified_spell_choices:
-                    raise CharacterStateConflictError("Native spell choice is unverified.")
-            elif target_id == "stats.max_hp":
+                if (target_id.removeprefix("spell_choice:") not in authority.verified_spell_choices
+                        and target_id.removeprefix("spell_choice:") not in pending_decisions):
+                    raise NativeAdvancementValidationError("This advancement could not be validated. Review its choices.")
+            elif marker.get("target_kind") in {"field", "proficiency"}:
                 status = authority.field_status(target_id)
             else:
                 kind, _, stable_id = target_id.partition(":")
                 status = authority.resource_status(kind, stable_id)
-            if status is not None and not status.is_effective:
-                raise CharacterStateConflictError("Native level-up owner is unverified.")
+            # An ability-base witness authorizes the explicit input. Its final
+            # score is projected later from qualified effects, so this status
+            # deliberately does not expose that score as an effective total.
+            verified_base = (
+                status is not None and status.status == "VERIFIED"
+                and status.reason == "baseline_authorized"
+                and marker.get("metric") == "base"
+                and native_advancement_input_target(
+                    marker.get("target_kind"), target_id, marker.get("metric"))
+            )
+            if status is not None and not (status.is_effective or verified_base):
+                raise NativeAdvancementValidationError("This advancement could not be validated. Review its choices.")
         return cls(
             prior_record.state_record.revision,
             definition_digest(prior_record.definition), definition_digest(definition),
             numeric_value_digest(desired_state), authority.identity,
             authority.source_snapshot_digest, tuple(markers), refresh,
+            prepare_audit=prepare_audit, advancement_intent=advancement_intent,
         )
 
     def recheck(
@@ -272,6 +987,205 @@ class PendingNativeLevelUpAuthority:
                 or authority.source_snapshot_digest != self.source_snapshot_digest):
             raise CharacterStateConflictError("Native level-up source changed before publication.")
         return authority
+
+
+def validate_native_spell_choice_capacity(prior_record, definition, state, *,
+        systems_service, campaign_page_records, advancement_intent=None, connection=None,
+        adoption_proof=None, actor_id=None):
+    """Rebuild complete affected pools from actual prior custody and sources."""
+    from .character_source_authority import (
+        build_reconciled_source_authority, native_spell_choice_capacity_affected,
+        numeric_value_digest, validate_native_spell_choice_capacity_transition,
+    )
+    before = prior_record.definition
+    if not native_spell_choice_capacity_affected(before, definition):
+        return ()
+    if systems_service is None or campaign_page_records is None:
+        raise CharacterStateConflictError("The current class choice source context is unavailable.")
+    from .character_source_repair import (
+        _decision_generation, load_verified_manual_actions, load_verified_numeric_actions,
+    )
+    db = connection if connection is not None else get_db()
+    _decision_generation(db, before.campaign_slug, before.character_slug,
+        prior_record.committed_revision, numeric_value_digest(before.to_dict()))
+    numeric = load_verified_numeric_actions(
+        before.campaign_slug, before.character_slug, connection=db, strict=True)
+    manual = load_verified_manual_actions(
+        before.campaign_slug, before.character_slug, connection=db, strict=True)
+    prior_authority = build_reconciled_source_authority(
+        definition=before, state=prior_record.state_record.state,
+        state_revision=prior_record.state_record.revision, systems_service=systems_service,
+        campaign_page_records=campaign_page_records,
+        verified_numeric_actions=numeric, verified_manual_actions=manual,
+    )
+    return validate_native_spell_choice_capacity_transition(
+        before, definition, state, prior_authority=prior_authority,
+        systems_service=systems_service, campaign_page_records=campaign_page_records,
+        verified_numeric_actions=numeric, verified_manual_actions=manual,
+        advancement_intent=advancement_intent,
+        adoption_proof=adoption_proof, prior_record=prior_record, actor_id=actor_id,
+    )
+
+
+def validate_native_grant_transition(prior_record, definition, state, *,
+                                     reviewed_source_proof=None, pending_numeric_authority=None,
+                                     actor_id=None, connection=None, operation_kind=None,
+                                     trusted_spell_choice_authoring=False,
+                                     prior_authority_provider=None, source_context_provider=None,
+                                     capacity_snapshots=None, source_read_owner=None,
+                                     source_read_context_provider=None, _replacement_preview_target=""):
+    """Keep ordinary writes from silently erasing or manufacturing grant custody."""
+    from .character_spell_grants import grant_model_digest, validate_native_grant_model
+    from .character_feature_composition import validate_retained_replacement_transition
+    # This preview parameter is supplied only by the read-only Source Repair
+    # preflight below. Neither update nor the reserved publisher exposes it.
+    relink_target = _replacement_preview_target
+    owner_annotations = {}
+    if type(reviewed_source_proof) is PendingReviewedSourceProof:
+        reviewed_source_proof.require_complete()
+        if (reviewed_source_proof.prior_definition_digest != PendingReviewedSourceProof._digest(prior_record.definition.to_dict())
+                or reviewed_source_proof.candidate_definition_digest != PendingReviewedSourceProof._digest(definition.to_dict())):
+            raise CharacterStateConflictError("Replacement source Review changed before publication.")
+        relink_target = reviewed_source_proof.replacement_relink_target
+        result = reviewed_source_proof.native_result
+        if result is not None:
+            from .character_native_requalification import NativeRequalification, _admission_feature_rows
+            if type(result) is not NativeRequalification:
+                raise CharacterStateConflictError("Replacement owner custody has an unsupported native proof.")
+            if result.provenance.get("schema_version") == 6:
+                reviewed_source_proof._require_native_complete_binding(prior_record, actor_id)
+                result._validate_candidate_binding(prior_record, actor_id, reviewed_source_proof.native_action_id)
+                if (result.candidate.to_dict() != definition.to_dict() or state != prior_record.state_record.state
+                        or PendingReviewedSourceProof._digest(_admission_feature_rows(prior_record.definition, result.provenance))
+                            != PendingReviewedSourceProof._digest(definition.features)):
+                    raise CharacterStateConflictError("Replacement owner annotations changed from their exact native result.")
+                for admission in result.provenance["current_resource_inputs"]:
+                    for identity in admission["feature_ids"]:
+                        if identity in owner_annotations and owner_annotations[identity] != admission["class_row_id"]:
+                            raise CharacterStateConflictError("Replacement owner annotations conflict.")
+                        owner_annotations[identity] = admission["class_row_id"]
+    if relink_target and operation_kind != "character_update_apply":
+        raise CharacterStateConflictError("Replacement relink needs the reviewed manager Update operation.")
+    try:
+        validate_retained_replacement_transition(prior_record.definition, definition,
+            relink_target=relink_target, owner_annotations=owner_annotations)
+    except (TypeError, ValueError) as exc:
+        raise CharacterStateConflictError(str(exc)) from exc
+    old = prior_record.definition
+    present = ("native_spell_grants" in definition.spellcasting
+               or "native_acquisitions" in definition.source)
+    prior_present = ("native_spell_grants" in old.spellcasting or "native_acquisitions" in old.source)
+    try:
+        adoption_proof = None
+        checkpoint_result = None
+        if present and not prior_present:
+            if (operation_kind != "character_update_apply"
+                    or type(reviewed_source_proof) is not PendingReviewedSourceProof):
+                raise CharacterStateConflictError("First native model adoption needs its exact reviewed migration.")
+            plan = reviewed_source_proof.native_spell_origin_delta(prior_record, definition, state, actor_id, source_read_owner=source_read_owner)
+            if not isinstance(plan, dict) or plan.get("schema_version") not in {2, 3, 4}:
+                raise CharacterStateConflictError("First native model adoption needs its exact reviewed migration.")
+            if plan.get("schema_version") in {3, 4}:
+                from .character_native_requalification import NativeRequalification
+                result = reviewed_source_proof.native_result
+                if (type(result) is not NativeRequalification or result.provenance.get("schema_version") not in {5, 6}
+                        or result.provenance.get("spell_origin_plan") != plan):
+                    raise CharacterStateConflictError("Current spell adoption needs its exact reviewed native result.")
+                checkpoint_result = result
+            adoption_proof = reviewed_source_proof
+        if prior_present:
+            # Retention is a custody claim even when there are no occurrences
+            # or the proposed model has exactly the same digest. Reload the
+            # actual saved proof; prospective authority cannot prove old facts.
+            from .character_source_repair import require_confirmed_native_grant_custody
+            require_confirmed_native_grant_custody(prior_record, connection=connection)
+        if present:
+            validate_native_grant_model(definition)
+        from .character_source_authority import native_spell_choice_capacity_affected
+        capacity_affected = native_spell_choice_capacity_affected(old, definition)
+        typed = any(isinstance(row, dict) and "native_class_choice_state" in row
+                    for owner in (old, definition) for row in owner.spellcasting.get("spells") or [])
+        decisions = ()
+        if capacity_affected or typed:
+            if not callable(source_context_provider):
+                raise CharacterStateConflictError("The current class choice source context is unavailable.")
+            from contextlib import nullcontext
+            source_scope = (source_read_context_provider(prior_record, source_read_owner=source_read_owner)
+                if source_read_owner is not None and source_read_context_provider is not None
+                else nullcontext(source_context_provider(prior_record)))
+            prior_authority = (prior_authority_provider()
+                if typed and source_read_owner is not None and prior_authority_provider is not None else None)
+            with source_scope as (systems_service, page_records):
+                if systems_service is None or page_records is None:
+                    raise CharacterStateConflictError("The current class choice source context is unavailable.")
+                pools = validate_native_spell_choice_capacity(
+                    prior_record, definition, state, systems_service=systems_service,
+                    campaign_page_records=page_records, connection=connection,
+                    advancement_intent=(pending_numeric_authority.advancement_intent
+                        if isinstance(pending_numeric_authority, PendingNativeLevelUpAuthority) else None),
+                    adoption_proof=adoption_proof, actor_id=actor_id,
+                )
+                if capacity_snapshots is not None:
+                    capacity_snapshots.extend(pools)
+                if typed:
+                    from .character_source_authority import validate_native_spell_choice_decision_transition
+                    if source_read_owner is None:
+                        prior_authority = prior_authority_provider() if prior_authority_provider is not None else None
+                    decisions = validate_native_spell_choice_decision_transition(
+                        prior_record, definition, state, prior_authority=prior_authority,
+                        actor_id=actor_id, operation_kind=operation_kind,
+                        allow_management=trusted_spell_choice_authoring and operation_kind == "interactive_update",
+                        allow_progression=isinstance(pending_numeric_authority, PendingNativeLevelUpAuthority),
+                        systems_service=systems_service, campaign_page_records=page_records, connection=connection,
+                        checkpoint_proof=checkpoint_result,
+                    )
+        if not present and not prior_present:
+            return decisions
+        if grant_model_digest(old) == grant_model_digest(definition):
+            return decisions
+        if reviewed_source_proof is not None:
+            plan = reviewed_source_proof.native_spell_origin_delta(prior_record, definition, state, actor_id, source_read_owner=source_read_owner)
+            if plan is not None and plan.get("schema_version") in {2, 3, 4}:
+                return decisions
+        if present and isinstance(pending_numeric_authority, PendingNativeLevelUpAuthority):
+            pending_numeric_authority.recheck(prior_record, definition, state)
+            return decisions
+    except SourceReadConnectionFatal:
+        raise
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+        raise CharacterStateConflictError("Native grant custody changed before publication.") from exc
+    raise CharacterStateConflictError("This update needs an authenticated native grant migration or progression.")
+
+
+def validate_native_spell_choice_authorizations(prior_record, definition, state, authority, *, actor_id):
+    """Constrain guarded authoring to exact changed, currently sourced choices."""
+    from .character_source_authority import numeric_target_values, valid_numeric_authorization
+    if type(actor_id) is not int or actor_id < 1 or authority is None:
+        raise CharacterStateConflictError("Spell choice authority is unavailable for this update.")
+    old_values = numeric_target_values(prior_record.definition, prior_record.state_record.state)
+    values = numeric_target_values(definition, state)
+    old_markers = list(prior_record.definition.source.get("source_authorizations") or [])
+    markers = list(definition.source.get("source_authorizations") or [])
+    admitted = []
+    for marker in markers:
+        if not isinstance(marker, dict) or marker.get("provenance") != "native_spell_choice":
+            continue
+        if marker in old_markers:
+            continue
+        key = (marker.get("target_kind"), marker.get("target_id"), marker.get("metric"))
+        matching = [row for row in markers if isinstance(row, dict) and
+                    (row.get("target_kind"), row.get("target_id"), row.get("metric")) == key]
+        if (not all(isinstance(value, str) for value in key)
+                or key[0] != "spell_choice" or key[2] != "selection" or key not in values
+                or old_values.get(key) == values[key] or len(matching) != 1
+                or marker.get("schema_version") != 2
+                or not authority.numeric_basis_digest(key[1])
+                or not valid_numeric_authorization(marker, character_slug=definition.character_slug,
+                    target_kind=key[0], target_id=key[1], metric=key[2], raw_value=values[key],
+                    verified_actions=(marker,))):
+            raise CharacterStateConflictError("A spell choice marker needs its exact current selection.")
+        admitted.append(marker)
+    return tuple(admitted)
 
 
 @dataclass(frozen=True, slots=True)
@@ -484,6 +1398,9 @@ class CharacterPublicationCoordinator:
         self.auth_store = auth_store
         self.hooks = hooks or CharacterReconciliationHooks()
         self.numeric_authority_provider: Callable[[CharacterRecord, CharacterDefinition], Any] | None = None
+        self.native_choice_source_context_provider: Callable[[CharacterRecord], tuple[Any, list[Any]]] | None = None
+        self.source_read_numeric_authority_provider = None
+        self.source_read_native_choice_context_provider = None
 
     def create(
         self,
@@ -520,27 +1437,26 @@ class CharacterPublicationCoordinator:
                 self._event("after_commit", operation.operation_id)
                 return self._continue_operation(operation.operation_id)
 
-    def update(
-        self,
-        prior_record: CharacterRecord,
-        definition: CharacterDefinition,
-        import_metadata: CharacterImportMetadata,
-        desired_state: dict[str, Any],
-        *,
-        expected_revision: int,
-        updated_by_user_id: int | None = None,
-        operation_kind: str = "interactive_update",
-        audit_event_type: str | None = None,
-        audit_actor_user_id: int | None = None,
-        audit_target_user_id: int | None = None,
-        audit_metadata: dict[str, Any] | None = None,
-        pending_numeric_authority: Any | None = None,
-        reviewed_source_proof: PendingReviewedSourceProof | None = None,
-        trusted_spell_choice_authoring: bool = False,
-        explicit_removed_item_id: str | None = None,
-        reconcile_reimport_state: bool = False,
-        reimport_source_authority: Any | None = None,
-    ) -> CharacterRecord:
+    def _validate_update_preconditions(
+        self, prior_record: CharacterRecord, definition: CharacterDefinition,
+        import_metadata: CharacterImportMetadata, desired_state: dict[str, Any], *,
+        expected_revision: int, updated_by_user_id: int | None,
+        operation_kind: str, audit_event_type: str | None,
+        audit_actor_user_id: int | None, pending_numeric_authority: Any | None,
+        reviewed_source_proof: PendingReviewedSourceProof | None,
+        trusted_spell_choice_authoring: bool, reconcile_reimport_state: bool,
+        reimport_source_authority: Any | None,
+        _replacement_preview_target: str = "",
+        _feature_association_preview: Any | None = None,
+        _resource_restoration_preview: Any | None = None,
+    ) -> bool:
+        """Shared current-input checks; publication still rechecks under reservation."""
+        from .character_spell_slots import require_slot_grants_preserved
+        from .character_item_casting import require_storage_preserved
+        require_slot_grants_preserved(prior_record.state_record.state, desired_state)
+        require_storage_preserved(prior_record.state_record.state, desired_state)
+        from .character_item_prepared import require_preserved
+        require_preserved(prior_record.state_record.state, desired_state)
         self._validate_update_input(
             prior_record,
             definition,
@@ -548,6 +1464,13 @@ class CharacterPublicationCoordinator:
             expected_revision=expected_revision,
             operation_kind=operation_kind,
         )
+        if audit_event_type == "character_native_edited" and (
+            type(updated_by_user_id) is not int or audit_actor_user_id != updated_by_user_id
+            or prior_record.definition.system != "DND-5E" or definition.system != "DND-5E"
+            or prior_record.definition.source.get("source_type") != "native_character_builder"
+            or definition.source.get("source_type") != "native_character_builder"
+        ):
+            raise CharacterPublicationError("Native edit audit must match the Character and its writing actor.")
         from .committed_publication import active
         committed_mode = active()
         if reimport_source_authority is not None and (
@@ -567,6 +1490,87 @@ class CharacterPublicationCoordinator:
             not committed_mode or not isinstance(reviewed_source_proof, PendingReviewedSourceProof)
         ):
             raise CharacterStateConflictError("Reviewed source proof is unavailable for this update.")
+        if reviewed_source_proof is not None:
+            reviewed_source_proof.require_complete()
+        if (reviewed_source_proof is not None and reviewed_source_proof.native_result is not None
+                and operation_kind != "character_update_apply"):
+            raise CharacterStateConflictError("Native retention is unavailable for this update.")
+        from .committed_character_publication import _prior_numeric_authority_loader
+        load_prior_authority = _prior_numeric_authority_loader(self, prior_record)
+        validate_native_grant_transition(prior_record, definition, desired_state,
+            reviewed_source_proof=reviewed_source_proof, pending_numeric_authority=pending_numeric_authority,
+            actor_id=updated_by_user_id, operation_kind=operation_kind,
+            trusted_spell_choice_authoring=trusted_spell_choice_authoring,
+            prior_authority_provider=load_prior_authority,
+            source_context_provider=self.native_choice_source_context_provider,
+            _replacement_preview_target=_replacement_preview_target)
+        reconstruction = (reviewed_source_proof.native_reconstruction
+                          if reviewed_source_proof is not None else None)
+        elective = (reviewed_source_proof.native_elective_decision
+                    if reviewed_source_proof is not None else None)
+        from .character_language_electives import PendingElectiveDecision, validate_transition
+        if elective is not None:
+            if operation_kind != "character_update_apply" or type(elective) is not PendingElectiveDecision:
+                raise CharacterStateConflictError("Language decision proof is unavailable for this update.")
+            elective.recheck(prior_record, definition, desired_state, updated_by_user_id)
+        validate_transition(prior_record, definition, elective,
+            actor_id=updated_by_user_id, state=desired_state)
+        from .character_reconstruction_authority import PendingNativeReconstruction
+        if reconstruction is not None:
+            if (operation_kind != "character_update_apply"
+                    or not isinstance(reconstruction, PendingNativeReconstruction)):
+                raise CharacterStateConflictError("Reconstruction proof is unavailable for this update.")
+            reconstruction.recheck(prior_record, definition, desired_state, updated_by_user_id)
+        from .character_feature_proficiency_grants import validate_native_transition
+        validate_native_transition(prior_record, definition, pending_numeric_authority)
+        from .character_skill_adoptions import validate_transition as validate_skill_adoption_transition
+        from .character_infusion_recipes import validate_transition as validate_recipe_transition
+        validate_recipe_transition(prior_record, definition, reconstruction,
+            actor_id=updated_by_user_id, state=desired_state)
+        validate_skill_adoption_transition(prior_record, definition, reconstruction,
+            actor_id=updated_by_user_id, state=desired_state)
+        from .character_feature_proficiency_grants import validate_automatic_transition, validate_condition_transition
+        validate_automatic_transition(prior_record, definition, reconstruction,
+            actor_id=updated_by_user_id, state=desired_state)
+        validate_condition_transition(prior_record, definition, reconstruction,
+            actor_id=updated_by_user_id, state=desired_state)
+        from .character_tracker_associations import validate_transition as validate_tracker_transition
+        validate_tracker_transition(prior_record, definition, reconstruction,
+            actor_id=updated_by_user_id, state=desired_state)
+        prior_origin = dict(prior_record.definition.source or {}).get("native_reconstruction")
+        candidate_origin = dict(definition.source or {}).get("native_reconstruction")
+        if candidate_origin != prior_origin and reconstruction is None:
+            raise CharacterStateConflictError("A native reconstruction origin cannot be copied into this update.")
+        if reconstruction is None and elective is None and pending_numeric_authority is None and prior_origin is not None and (
+                definition.source.get("native_reconstruction_choices") != prior_record.definition.source.get("native_reconstruction_choices")
+                or dict(definition.source.get("native_progression") or {}).get("hp_recipe")
+                != dict(prior_record.definition.source.get("native_progression") or {}).get("hp_recipe")):
+            raise CharacterStateConflictError("Reviewed reconstruction inputs require a new reconstruction review.")
+        from .character_source_authority import numeric_target_values
+        reconstruction_values = numeric_target_values(definition, desired_state)
+        prior_reconstruction_values = numeric_target_values(prior_record.definition, prior_record.state_record.state)
+        for marker in dict(definition.source or {}).get("source_authorizations") or []:
+            if isinstance(marker, dict) and marker.get("provenance") == "native_elective_decision":
+                old = list(dict(prior_record.definition.source or {}).get("source_authorizations") or [])
+                if not (elective is not None and marker in elective.markers) and old.count(marker) != 1:
+                    raise CharacterStateConflictError("A language decision authorization cannot be copied or changed.")
+            if isinstance(marker, dict) and marker.get("provenance") == "native_requalification":
+                key = (marker.get("target_kind"), marker.get("target_id"), marker.get("metric"))
+                old = list(dict(prior_record.definition.source or {}).get("source_authorizations") or [])
+                newly_reviewed = (operation_kind == "character_update_apply" and reviewed_source_proof is not None
+                    and marker in reviewed_source_proof.native_requalification_markers)
+                if not newly_reviewed and (old.count(marker) != 1 or key not in reconstruction_values
+                        or prior_reconstruction_values.get(key) != reconstruction_values[key]):
+                    raise CharacterStateConflictError("A native requalification witness cannot be copied or changed.")
+            if not isinstance(marker, dict) or marker.get("provenance") != "native_reconstruction":
+                continue
+            key = (marker.get("target_kind"), marker.get("target_id"), marker.get("metric"))
+            old = list(dict(prior_record.definition.source or {}).get("source_authorizations") or [])
+            if reconstruction is not None and marker in reconstruction.markers:
+                continue
+            if (old.count(marker) != 1 or key not in reconstruction_values
+                    or prior_reconstruction_values.get(key) != reconstruction_values[key]):
+                raise CharacterStateConflictError("A reconstruction source authorization cannot be copied or changed.")
         if committed_mode:
             prior_markers = list(dict(prior_record.definition.source or {}).get(
                 "source_authorizations") or [])
@@ -585,6 +1589,12 @@ class CharacterPublicationCoordinator:
                     )
         if trusted_spell_choice_authoring and operation_kind != "interactive_update":
             raise CharacterStateConflictError("Spell choice authority is unavailable for this update.")
+        admitted_spell_choice_markers = ()
+        if committed_mode and trusted_spell_choice_authoring:
+            candidate_authority = (self.numeric_authority_provider(prior_record, definition, desired_state)
+                                   if self.numeric_authority_provider is not None else None)
+            admitted_spell_choice_markers = validate_native_spell_choice_authorizations(
+                prior_record, definition, desired_state, candidate_authority, actor_id=updated_by_user_id)
         if committed_mode and operation_kind != "character_update_apply":
             from .character_source_authority import (
                 manual_target_digest, numeric_target_owner_digest, numeric_target_values,
@@ -614,11 +1624,15 @@ class CharacterPublicationCoordinator:
                 if provenance in {"native_creation", "native_level_up", "native_spell_choice"}:
                     if (pending_numeric_authority is not None and provenance == "native_level_up"
                             and marker in pending_numeric_authority.markers
-                            or trusted_spell_choice_authoring and provenance == "native_spell_choice"):
+                            or marker in admitted_spell_choice_markers and provenance == "native_spell_choice"):
                         continue
                     if (marker not in old_numeric or key not in old_numeric_values
                             or key not in new_numeric_values
                             or old_numeric_values[key] != new_numeric_values[key]):
+                        if pending_numeric_authority is not None:
+                            from .character_source_authority import NativeAdvancementValidationError
+                            raise NativeAdvancementValidationError(
+                                "This advancement could not be validated. Review its choices.")
                         raise CharacterStateConflictError(
                             "A native source authorization cannot be copied into this update.")
                     continue
@@ -639,57 +1653,284 @@ class CharacterPublicationCoordinator:
             old_choices = numeric_target_values(prior_record.definition, prior_record.state_record.state)
             new_choices = numeric_target_values(definition, desired_state)
             markers = list(dict(definition.source or {}).get("source_authorizations") or [])
+            origin_plan = (reviewed_source_proof.native_spell_origin_delta(
+                prior_record, definition, desired_state, updated_by_user_id)
+                if operation_kind == "character_update_apply" and reviewed_source_proof is not None else None)
+            automatic_ids = {row["spell_id"] for row in origin_plan["automatic"]} if origin_plan is not None else set()
+            from .character_spell_reconstruction import checkpoint_choice_ids
+            checkpoint_ids = (checkpoint_choice_ids(origin_plan["current_checkpoint"], definition)
+                              if origin_plan is not None and origin_plan.get("schema_version") in {3, 4} else set())
             for key, value in new_choices.items():
                 if key[0] != "spell_choice" or old_choices.get(key) == value:
                     continue
-                if any(isinstance(marker, dict) and
-                       (marker.get("target_kind"), marker.get("target_id"), marker.get("metric")) == key
-                       for marker in markers):
+                matching = [marker for marker in markers if isinstance(marker, dict) and
+                            (marker.get("target_kind"), marker.get("target_id"), marker.get("metric")) == key]
+                if matching and not (len(matching) == 1 and origin_plan is not None
+                        and key[1].removeprefix("spell_choice:") in automatic_ids | checkpoint_ids
+                        and matching[0] in reviewed_source_proof.native_requalification_markers):
                     raise CharacterStateConflictError(
                         "A copied spell choice authorization cannot accompany a raw edit."
                     )
-        from .character_equipment_activation import analyze_activation
+        from .character_equipment_activation import ActivationPrerequisiteError, require_update_activation
         from .system_policy import is_dnd_5e_system
-        if (operation_kind != "activation_repair" and is_dnd_5e_system(definition.system)
-                and analyze_activation(definition, desired_state)["blocked"]):
-            raise CharacterStateConflictError(
-                "Equipment activation identity needs manager repair before this Character update."
+        association = (reviewed_source_proof.feature_class_association
+                       if reviewed_source_proof is not None else _feature_association_preview)
+        restoration = (reviewed_source_proof.managed_resource_restoration
+                       if reviewed_source_proof is not None else _resource_restoration_preview)
+        if restoration is not None:
+            from .character_managed_resource_restoration import PendingManagedResourceRestoration
+            if (type(restoration) is not PendingManagedResourceRestoration
+                    or operation_kind != "character_update_apply" or pending_numeric_authority is not None
+                    or reconstruction is not None or elective is not None or association is not None
+                    or trusted_spell_choice_authoring or reconcile_reimport_state):
+                raise CharacterStateConflictError("Tracker restoration requires its bounded manager operation.")
+            restoration.validate_binding(prior_record, definition, desired_state, updated_by_user_id,
+                                         import_metadata=import_metadata)
+        if association is not None:
+            from .character_feature_class_association import PendingFeatureClassAssociation
+            if (type(association) is not PendingFeatureClassAssociation
+                    or operation_kind != "character_update_apply"
+                    or pending_numeric_authority is not None or reconstruction is not None
+                    or trusted_spell_choice_authoring or reconcile_reimport_state):
+                raise CharacterStateConflictError("Feature association requires its bounded manager operation.")
+            association.validate_binding(prior_record, definition, desired_state, updated_by_user_id,
+                                         import_metadata=import_metadata)
+        if operation_kind != "activation_repair" and is_dnd_5e_system(definition.system):
+            try:
+                require_update_activation(prior_record, definition, desired_state,
+                    reconstruction=reconstruction, actor_id=updated_by_user_id,
+                    native_proof=(reviewed_source_proof if reviewed_source_proof is not None
+                        and reviewed_source_proof.native_result is not None else None),
+                    feature_class_association=association)
+            except ActivationPrerequisiteError as exc:
+                if operation_kind == "character_update_apply":
+                    raise
+                raise CharacterStateConflictError(str(exc)) from exc
+        return committed_mode
+
+    def prepare_source_repair_item_transition(
+        self, prior_record: CharacterRecord, definition: CharacterDefinition,
+        desired_state: dict[str, Any], *, actor_id: int, source_read_owner=None,
+        source_read_phase=None,
+    ) -> tuple[CharacterDefinition, dict[str, Any]]:
+        """Issue the publisher's exact item frame before Review/proof sealing.
+
+        This prepares no write authority. Publication still independently
+        rebuilds the baseline and normalization, including under reservation.
+        Review refresh also reaches this helper under reservation, so both
+        authority calls preserve original numeric errors. Only the phase-owning
+        publisher may classify a refusal as certainly prepublication; neither
+        source-read ownership nor this shared helper establishes that phase.
+        """
+        if type(actor_id) is not int or actor_id < 1:
+            raise CharacterStateConflictError("Item source preparation needs its current actor.")
+        from .committed_character_publication import (
+            _exact_item_transition_baseline, _prior_numeric_authority_loader,
+            _update_numeric_authority, _withhold_item_transition_aggregates,
+        )
+        from .character_source_reads import native_character_source_context
+        with native_character_source_context(prior_record, source_read_owner=source_read_owner,
+                source_read_phase=source_read_phase,
+                purpose="ordinary-item-normalization") as (phase, _service, _pages, owner):
+            phase_owner = owner if phase is not None else source_read_owner
+            prior_authority = _prior_numeric_authority_loader(
+                self, prior_record, prepublication=False, source_read_owner=phase_owner,
+                source_read_phase=phase,
             )
+            authority = _update_numeric_authority(
+                self, prior_record, definition, desired_state,
+                prepublication=False, source_read_owner=phase_owner, source_read_phase=phase,
+            )
+            if authority is None:
+                raise CharacterStateConflictError("Item source preparation needs current source authority.")
+            baseline = _exact_item_transition_baseline(
+                prior_record.definition, definition, None, authority, prior_record.state_record.state,
+                prior_record=prior_record, actor_id=actor_id,
+                prior_authority_provider=prior_authority, source_read_owner=phase_owner,
+                source_read_phase=phase,
+            )
+            if not baseline[0]:
+                return definition, deepcopy(desired_state)
+            return _withhold_item_transition_aggregates(
+                prior_record.definition, definition, desired_state, prior_authority(), authority, baseline,
+                source_read_phase=phase,
+            )
+
+    def source_repair_review_authority(
+        self, prior_record: CharacterRecord, definition: CharacterDefinition,
+        desired_state: dict[str, Any], *, actor_id: int,
+        same_physical_mapping: Any | None = None,
+        source_read_owner=None,
+    ) -> Any:
+        """Detached item authority, matching fresh publication providers."""
+        if same_physical_mapping is None and source_read_owner is None:
+            return (self.numeric_authority_provider(prior_record, definition, desired_state)
+                    if self.numeric_authority_provider is not None else None)
+        from .character_reconstruction_items import PendingSamePhysicalItemMapping
+        from .character_source_reads import SourceReadOwner
+        if same_physical_mapping is not None and type(same_physical_mapping) is not PendingSamePhysicalItemMapping:
+            raise CharacterStateConflictError("Same-physical mapping needs its actual source producer.")
+        if same_physical_mapping is not None:
+            same_physical_mapping.validate_binding(prior_record, definition, desired_state, actor_id)
+        provider = getattr(self, "source_read_numeric_authority_provider", None)
+        if not callable(provider):
+            raise CharacterStateConflictError("Same-physical source authority is unavailable.")
+        owned = source_read_owner is None
+        owner = source_read_owner if source_read_owner is not None else SourceReadOwner.owned(
+            get_db(), definition.campaign_slug, definition.character_slug)
+        try:
+            authority = provider(prior_record, definition, desired_state, source_read_owner=owner)
+            if owner._declined:
+                raise CharacterStateConflictError("Same-physical authority requires a current source snapshot.")
+            owner.checkpoint()
+            return authority
+        finally:
+            if owned:
+                owner.close()
+
+    def check_source_repair_review(
+        self, prior_record: CharacterRecord, definition: CharacterDefinition,
+        import_metadata: CharacterImportMetadata, desired_state: dict[str, Any], *,
+        actor_id: int, replacement_relink_target: str = "",
+        same_physical_mapping: Any | None = None,
+        source_read_owner=None, feature_class_association=None, managed_resource_restoration=None,
+    ) -> None:
+        """Check an ordinary source repair without issuing or retaining write authority."""
+        if same_physical_mapping is not None:
+            from .character_reconstruction_items import PendingSamePhysicalItemMapping
+            if type(same_physical_mapping) is not PendingSamePhysicalItemMapping:
+                raise CharacterStateConflictError("Same-physical mapping needs its actual source producer.")
+            same_physical_mapping.validate_binding(prior_record, definition, desired_state, actor_id)
+        self._validate_update_input(prior_record, definition, import_metadata,
+            expected_revision=prior_record.state_record.revision,
+            operation_kind="character_update_apply")
+        from .character_equipment_activation import require_update_activation
+        from .system_policy import is_dnd_5e_system
+        if is_dnd_5e_system(definition.system):
+            require_update_activation(prior_record, definition, desired_state, actor_id=actor_id,
+                                      feature_class_association=feature_class_association)
+        committed_mode = self._validate_update_preconditions(
+            prior_record, definition, import_metadata, desired_state,
+            expected_revision=prior_record.state_record.revision,
+            updated_by_user_id=actor_id, operation_kind="character_update_apply",
+            audit_event_type="character_update_applied", audit_actor_user_id=actor_id,
+            pending_numeric_authority=None, reviewed_source_proof=None,
+            trusted_spell_choice_authoring=False, reconcile_reimport_state=False,
+            reimport_source_authority=None, _replacement_preview_target=replacement_relink_target,
+            _feature_association_preview=feature_class_association,
+            _resource_restoration_preview=managed_resource_restoration)
+        authority = (self.source_repair_review_authority(prior_record, definition, desired_state,
+                         actor_id=actor_id, same_physical_mapping=same_physical_mapping,
+                         source_read_owner=source_read_owner)
+                     if committed_mode else None)
+        if committed_mode and authority is None:
+            raise CharacterStateConflictError("Character source proof is unavailable.")
+        if managed_resource_restoration is not None:
+            from .character_managed_resource_restoration import prepare_restoration_state
+            prepared = prepare_restoration_state(prior_record, definition, desired_state,
+                managed_resource_restoration, actor_id, import_metadata=import_metadata)
+        elif feature_class_association is not None:
+            from .character_feature_class_association import prepare_association_state
+            prepared = prepare_association_state(prior_record, definition, desired_state,
+                feature_class_association, actor_id, import_metadata=import_metadata)
+        else:
+            prepared = self.state_store.prepare_initial_state(definition, desired_state,
+                source_authority=authority, previous_state=prior_record.state_record.state)
+        from .character_equipment_activation import activation_frame_digest
+        if (same_physical_mapping is not None
+                and activation_frame_digest(prepared.validated_state) != activation_frame_digest(prior_record.state_record.state)):
+            raise CharacterStateConflictError("Same-physical mapping preparation changed retained play facts.")
         if committed_mode:
-            from .committed_character_publication import publish_update
-            return publish_update(
-                self, prior_record, definition, import_metadata, desired_state,
+            from .committed_character_publication import _pair
+            from .committed_publication import CommittedSourceConflict
+            try:
+                _pair(definition, import_metadata)
+            except CommittedSourceConflict as exc:
+                raise CharacterPublicationError(str(exc)) from exc
+        else:
+            primary = render_character_yaml("definition.yaml", definition.to_dict()).encode("utf-8")
+            secondary = render_character_yaml("import.yaml", import_metadata.to_dict()).encode("utf-8")
+            if not primary or not secondary or len(primary) + len(secondary) > MAX_RECOVERY_PAYLOAD:
+                raise CharacterPublicationError("Character recovery payload exceeds the durable storage limit.")
+
+    def update(
+        self,
+        prior_record: CharacterRecord,
+        definition: CharacterDefinition,
+        import_metadata: CharacterImportMetadata,
+        desired_state: dict[str, Any],
+        *,
+        expected_revision: int,
+        updated_by_user_id: int | None = None,
+        operation_kind: str = "interactive_update",
+        audit_event_type: str | None = None,
+        audit_actor_user_id: int | None = None,
+        audit_target_user_id: int | None = None,
+        audit_metadata: dict[str, Any] | None = None,
+        pending_numeric_authority: Any | None = None,
+        reviewed_source_proof: PendingReviewedSourceProof | None = None,
+        trusted_spell_choice_authoring: bool = False,
+        native_choice_audit: Callable[[], dict[str, Any]] | None = None,
+        explicit_removed_item_id: str | None = None,
+        reconcile_reimport_state: bool = False,
+        reimport_source_authority: Any | None = None,
+    ) -> CharacterRecord:
+        native_lifetime = False
+        try:
+            if type(reviewed_source_proof) is PendingReviewedSourceProof:
+                native_lifetime = reviewed_source_proof._requires_native_custody()
+                if native_lifetime:
+                    reviewed_source_proof._require_native_complete_binding(prior_record, updated_by_user_id)
+            committed_mode = self._validate_update_preconditions(
+                prior_record, definition, import_metadata, desired_state,
                 expected_revision=expected_revision, updated_by_user_id=updated_by_user_id,
                 operation_kind=operation_kind, audit_event_type=audit_event_type,
                 audit_actor_user_id=audit_actor_user_id,
-                audit_target_user_id=audit_target_user_id, audit_metadata=audit_metadata,
                 pending_numeric_authority=pending_numeric_authority,
                 reviewed_source_proof=reviewed_source_proof,
                 trusted_spell_choice_authoring=trusted_spell_choice_authoring,
-                explicit_removed_item_id=explicit_removed_item_id,
                 reconcile_reimport_state=reconcile_reimport_state,
                 reimport_source_authority=reimport_source_authority,
             )
-        key = (definition.campaign_slug, definition.character_slug)
-        with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
-            with self._character_lock(key):
-                operation = self._prepare_update_operation(
-                    prior_record,
-                    definition,
-                    import_metadata,
-                    desired_state,
-                    expected_revision=expected_revision,
-                    updated_by_user_id=updated_by_user_id,
-                    operation_kind=operation_kind,
-                    audit_event_type=audit_event_type,
+            if committed_mode:
+                from .committed_character_publication import publish_update
+                return publish_update(
+                    self, prior_record, definition, import_metadata, desired_state,
+                    expected_revision=expected_revision, updated_by_user_id=updated_by_user_id,
+                    operation_kind=operation_kind, audit_event_type=audit_event_type,
                     audit_actor_user_id=audit_actor_user_id,
-                    audit_target_user_id=audit_target_user_id,
-                    audit_metadata=audit_metadata,
+                    audit_target_user_id=audit_target_user_id, audit_metadata=audit_metadata,
                     pending_numeric_authority=pending_numeric_authority,
+                    reviewed_source_proof=reviewed_source_proof,
                     trusted_spell_choice_authoring=trusted_spell_choice_authoring,
+                    native_choice_audit=native_choice_audit,
+                    explicit_removed_item_id=explicit_removed_item_id,
+                    reconcile_reimport_state=reconcile_reimport_state,
+                    reimport_source_authority=reimport_source_authority,
                 )
-                self._event("after_commit", operation.operation_id)
-                return self._continue_operation(operation.operation_id)
+            key = (definition.campaign_slug, definition.character_slug)
+            with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
+                with self._character_lock(key):
+                    operation = self._prepare_update_operation(
+                        prior_record,
+                        definition,
+                        import_metadata,
+                        desired_state,
+                        expected_revision=expected_revision,
+                        updated_by_user_id=updated_by_user_id,
+                        operation_kind=operation_kind,
+                        audit_event_type=audit_event_type,
+                        audit_actor_user_id=audit_actor_user_id,
+                        audit_target_user_id=audit_target_user_id,
+                        audit_metadata=audit_metadata,
+                        pending_numeric_authority=pending_numeric_authority,
+                        trusted_spell_choice_authoring=trusted_spell_choice_authoring,
+                    )
+                    self._event("after_commit", operation.operation_id)
+                    return self._continue_operation(operation.operation_id)
+        finally:
+            if native_lifetime:
+                reviewed_source_proof.discard_native_admission()
 
     def update_equipment_activation(
         self,
@@ -792,50 +2033,59 @@ class CharacterPublicationCoordinator:
         desired_asset_bytes: bytes = b"",
         reviewed_source_proof: PendingReviewedSourceProof | None = None,
     ) -> CharacterRecord:
-        if operation_kind not in PORTRAIT_OPERATION_KINDS:
-            raise CharacterPublicationError("Unsupported character portrait operation.")
-        from .committed_publication import active
-        if active():
-            old_markers = [row for row in list(dict(prior_record.definition.source or {}).get(
-                "source_authorizations") or []) if isinstance(row, dict)
-                and row.get("provenance") == "page_feature_update"]
-            new_markers = [row for row in list(dict(definition.source or {}).get(
-                "source_authorizations") or []) if isinstance(row, dict)
-                and row.get("provenance") == "page_feature_update"]
-            if new_markers != old_markers:
-                raise CharacterStateConflictError("Portrait updates cannot change page feature witnesses.")
-        self._validate_update_input(
-            prior_record,
-            definition,
-            import_metadata,
-            expected_revision=expected_revision,
-            operation_kind=operation_kind,
-        )
-        if active():
-            from .committed_character_publication import publish_update
-            return publish_update(
-                self, prior_record, definition, import_metadata, desired_state,
-                expected_revision=expected_revision, updated_by_user_id=updated_by_user_id,
-                operation_kind=operation_kind, desired_asset_ref=desired_asset_ref,
-                desired_asset_bytes=desired_asset_bytes,
-                reviewed_source_proof=reviewed_source_proof,
+        native_lifetime = False
+        try:
+            if type(reviewed_source_proof) is PendingReviewedSourceProof:
+                native_lifetime = reviewed_source_proof._requires_native_custody()
+                if native_lifetime:
+                    reviewed_source_proof._require_native_complete_binding(prior_record, updated_by_user_id)
+            if operation_kind not in PORTRAIT_OPERATION_KINDS:
+                raise CharacterPublicationError("Unsupported character portrait operation.")
+            from .committed_publication import active
+            if active():
+                old_markers = [row for row in list(dict(prior_record.definition.source or {}).get(
+                    "source_authorizations") or []) if isinstance(row, dict)
+                    and row.get("provenance") == "page_feature_update"]
+                new_markers = [row for row in list(dict(definition.source or {}).get(
+                    "source_authorizations") or []) if isinstance(row, dict)
+                    and row.get("provenance") == "page_feature_update"]
+                if new_markers != old_markers:
+                    raise CharacterStateConflictError("Portrait updates cannot change page feature witnesses.")
+            self._validate_update_input(
+                prior_record,
+                definition,
+                import_metadata,
+                expected_revision=expected_revision,
+                operation_kind=operation_kind,
             )
-        key = (definition.campaign_slug, definition.character_slug)
-        with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
-            with self._character_lock(key):
-                operation = self._prepare_update_operation(
-                    prior_record,
-                    definition,
-                    import_metadata,
-                    desired_state,
-                    expected_revision=expected_revision,
-                    updated_by_user_id=updated_by_user_id,
-                    operation_kind=operation_kind,
-                    desired_asset_ref=desired_asset_ref,
+            if active():
+                from .committed_character_publication import publish_update
+                return publish_update(
+                    self, prior_record, definition, import_metadata, desired_state,
+                    expected_revision=expected_revision, updated_by_user_id=updated_by_user_id,
+                    operation_kind=operation_kind, desired_asset_ref=desired_asset_ref,
                     desired_asset_bytes=desired_asset_bytes,
+                    reviewed_source_proof=reviewed_source_proof,
                 )
-                self._event("after_commit", operation.operation_id)
-                return self._continue_operation(operation.operation_id)
+            key = (definition.campaign_slug, definition.character_slug)
+            with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
+                with self._character_lock(key):
+                    operation = self._prepare_update_operation(
+                        prior_record,
+                        definition,
+                        import_metadata,
+                        desired_state,
+                        expected_revision=expected_revision,
+                        updated_by_user_id=updated_by_user_id,
+                        operation_kind=operation_kind,
+                        desired_asset_ref=desired_asset_ref,
+                        desired_asset_bytes=desired_asset_bytes,
+                    )
+                    self._event("after_commit", operation.operation_id)
+                    return self._continue_operation(operation.operation_id)
+        finally:
+            if native_lifetime:
+                reviewed_source_proof.discard_native_admission()
 
     def recover_key(self, campaign_slug: str, character_slug: str) -> bool:
         validate_character_slug(character_slug)
@@ -919,6 +2169,10 @@ class CharacterPublicationCoordinator:
     ) -> None:
         if operation_kind not in CREATE_OPERATION_KINDS:
             raise CharacterPublicationError("Unsupported character publication operation.")
+        if (definition.source.get("native_reconstruction") is not None
+                or any(isinstance(row, dict) and row.get("provenance") == "native_reconstruction"
+                       for row in definition.source.get("source_authorizations", []))):
+            raise CharacterPublicationError("An existing-target reconstruction origin cannot be imported into a new Character.")
         self._validate_identity(definition, import_metadata)
 
     @staticmethod
@@ -1504,6 +2758,13 @@ class CharacterPublicationCoordinator:
                 audit_metadata,
             )
         )
+        if (operation_kind == "interactive_update"
+                and audit_event_type == "character_native_edited"
+                and audit_metadata == {"source": "native_edit_confirmed"}
+                and self.auth_store is not None
+                and type(audit_actor_user_id) is int and audit_actor_user_id > 0
+                and audit_target_user_id is None):
+            return audit_event_type, audit_actor_user_id, None, json.dumps(audit_metadata, sort_keys=True)
         if operation_kind != "character_update_apply":
             if supplied:
                 raise CharacterPublicationError(

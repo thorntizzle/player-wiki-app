@@ -123,6 +123,14 @@ class CharacterStateStore:
         *, source_authority: Any | None = None,
         previous_state: dict[str, Any] | None = None,
     ) -> PreparedCharacterState:
+        from .character_spell_slots import require_slot_grants_preserved
+        from .character_item_casting import require_storage_preserved
+        require_slot_grants_preserved(previous_state, state)
+        require_storage_preserved(previous_state, state)
+        from .character_item_prepared import require_preserved
+        require_preserved(previous_state, state)
+        from .character_artificer_assignments import require_preserved as preserve_assignments
+        preserve_assignments(previous_state, state)
         validated = validate_state(
             definition, state, source_authority=source_authority,
             previous_state=previous_state,
@@ -378,14 +386,61 @@ class CharacterStateStore:
         commit: bool = True,
         source_authority: Any | None = None,
         previous_state: dict[str, Any] | None = None,
+        initial_item_charge_id: str | None = None,
+        slot_grant_intent: Any | None = None,
+        item_spell_intent: Any | None = None,
+        item_action_intent: Any | None = None,
+        prepared_item_intent: Any | None = None,
+        assignment_intent: Any | None = None,
     ) -> CharacterStateRecord:
         from .committed_publication import active
         if active() and not source_writer_reserved(get_db()):
             raise CharacterStateConflictError("Character source writer reservation is unavailable.")
+        # Activation callers may omit previous_state. The durable preimage,
+        # never a caller-supplied copy, owns contribution preservation.
+        from .character_spell_slots import validate_slot_grant_transition
+        current = get_db().execute("""SELECT revision,state_json FROM character_state
+            WHERE campaign_slug=? AND character_slug=?""",
+            (definition.campaign_slug, definition.character_slug)).fetchone()
+        if current is None or current["revision"] != expected_revision:
+            raise CharacterStateConflictError("Character state changed before the slot action.")
+        prior = json.loads(current["state_json"])
+        from .character_artificer_assignments import validate_transition as validate_assignments
+        if assignment_intent is not None and (not active()
+                or type(updated_by_user_id) is not int or updated_by_user_id < 1
+                or assignment_intent.actor_id != updated_by_user_id
+                or any(value is not None for value in (item_spell_intent, slot_grant_intent,
+                    initial_item_charge_id, item_action_intent, prepared_item_intent))):
+            raise ValueError("Assignment custody needs its authenticated actor and exclusive transaction.")
+        validate_assignments(prior, state, definition, source_authority, assignment_intent)
+        from .character_item_actions import validate_transition as validate_item_action
+        if item_action_intent is not None and (not active()
+                or type(updated_by_user_id) is not int or updated_by_user_id < 1):
+            raise ValueError("A noncasting item action requires an authenticated actor and committed source state.")
+        if item_action_intent is not None and any(value is not None for value in (
+                item_spell_intent, slot_grant_intent, initial_item_charge_id, prepared_item_intent)):
+            raise ValueError("A noncasting item use owns one exact counter transition.")
+        if prepared_item_intent is not None and (not active()
+                or type(updated_by_user_id) is not int or updated_by_user_id < 1
+                or any(value is not None for value in (item_spell_intent, slot_grant_intent, initial_item_charge_id, item_action_intent))):
+            raise ValueError("Prepared ammunition requires its authenticated actor and exclusive transaction.")
+        from .character_item_prepared import validate_transition as validate_prepared
+        validate_prepared(prior, state, definition, source_authority, prepared_item_intent)
+        validate_item_action(prior, state, definition, source_authority, item_action_intent)
+        from .character_item_casting import validate_transition
+        validate_transition(prior, state, definition, source_authority, item_spell_intent)
+        if item_spell_intent is None and prepared_item_intent is None:
+            validate_slot_grant_transition(prior, state, definition, source_authority, slot_grant_intent)
+        elif slot_grant_intent is not None:
+            raise ValueError("An item spell action owns its exact combined slot/storage transition.")
         validated = validate_state(
             definition, state, source_authority=source_authority,
             previous_state=previous_state,
+            initial_item_charge_id=initial_item_charge_id,
         )
+        validate_item_action(prior, validated, definition, source_authority, item_action_intent)
+        validate_prepared(prior, validated, definition, source_authority, prepared_item_intent)
+        validate_assignments(prior, validated, definition, source_authority, assignment_intent)
         connection = get_db()
         updated_at = isoformat(utcnow())
         cursor = connection.execute(

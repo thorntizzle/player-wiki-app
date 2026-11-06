@@ -216,7 +216,51 @@ def register_db(app: Flask) -> None:
     app.teardown_appcontext(close_db)
 
 
+class SourceReadConnectionFatal(RuntimeError):
+    """The application must dispose its unusable connection before more work."""
+
+
+def quarantine_source_read_connection(connection) -> None:
+    """Latch only this application owner's exact handle; teardown alone closes."""
+    current = g.get("db_connection")
+    quarantined = g.get("_source_read_fatal_connection")
+    if current is not connection and quarantined is not connection:
+        raise SourceReadConnectionFatal("Source cleanup cannot quarantine an unowned connection.")
+    g._source_read_fatal_connection = connection
+    raise SourceReadConnectionFatal("The Character source connection requires disposal.")
+
+
+def rollback_source_read_connection(connection, *, primary=None) -> None:
+    """End known application-owned work once, or quarantine without fallback.
+
+    Callers establish the transaction boundary before entering this cleanup.
+    A fatal latch is checked before touching the handle, including when an
+    outer publication handler receives an already-fatal inner failure.
+    """
+    if g.get("_source_read_fatal_connection") is not None:
+        raise SourceReadConnectionFatal("Source cleanup already failed; no rollback retry.") from primary
+    if g.get("db_connection") is not connection:
+        raise SourceReadConnectionFatal("Source cleanup cannot end an unowned connection.") from primary
+    try:
+        connection.rollback()
+        if connection.in_transaction:
+            raise SourceReadConnectionFatal("Source rollback left an open transaction.")
+    except BaseException as cleanup:
+        failures = ([primary] if primary is not None else []) + [cleanup]
+        try:
+            quarantine_source_read_connection(connection)
+        except SourceReadConnectionFatal as fatal:
+            raise fatal from BaseExceptionGroup("Source primary and rollback failures", failures)
+        except BaseException as quarantine_error:
+            failures.append(quarantine_error)
+        # A failed quarantine notification must not turn cleanup into success.
+        raise SourceReadConnectionFatal("Source connection requires disposal.") from BaseExceptionGroup(
+            "Source cleanup and quarantine failures", failures)
+
+
 def get_db() -> sqlite3.Connection | _InstrumentedConnection:
+    if g.get("_source_read_fatal_connection") is not None:
+        raise SourceReadConnectionFatal("The Character source connection requires disposal.")
     if "db_connection" not in g:
         db_path = Path(current_app.config["DB_PATH"])
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -233,8 +277,32 @@ def get_db() -> sqlite3.Connection | _InstrumentedConnection:
 
 def close_db(_: object | None = None) -> None:
     connection = g.pop("db_connection", None)
-    if connection is not None:
-        connection.close()
+    fatal = g.get("_source_read_fatal_connection")
+    # Quarantine is not permission to reconnect if another caller popped the
+    # ordinary binding. The original application owner still disposes its handle.
+    handles = []
+    for handle in (connection, fatal):
+        if handle is not None and all(handle is not prior for prior in handles):
+            handles.append(handle)
+    attempted = g.get("_source_read_disposal_attempted", set())
+    errors = []
+    for owned in handles:
+        if id(owned) in attempted:
+            errors.append(SourceReadConnectionFatal("Source connection disposal already failed; no retry."))
+            continue
+        attempted.add(id(owned))
+        g._source_read_disposal_attempted = attempted
+        try:
+            owned.close()
+        except BaseException as exc:
+            g._source_read_fatal_connection = owned
+            errors.append(exc)
+    if errors:
+        if len(errors) == 1:
+            raise errors[0]
+        raise BaseExceptionGroup("Application source connection cleanup failed.", errors)
+    g.pop("_source_read_fatal_connection", None)
+    g.pop("_source_read_disposal_attempted", None)
 
 
 def init_database(

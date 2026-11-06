@@ -10,6 +10,8 @@ from typing import Any
 
 from .repository import normalize_lookup, slugify
 from .item_spell_support import SpellSupportRecord, parse_item_spell_support
+from .character_item_capabilities import normalize_item_capabilities, validate_capability_spell_support
+from .character_spell_properties import normalize_item_spell_properties as _normalize_item_spell_properties
 
 CAMPAIGN_ITEM_MECHANICS_VERSION = "2026-06-25"
 
@@ -52,6 +54,7 @@ CAMPAIGN_ITEM_METADATA_KEYS = (
     "dmg1",
     "dmg2",
     "item_uses",
+    "item_capabilities",
     "item_use_actions",
     "properties",
     "property",
@@ -61,13 +64,59 @@ CAMPAIGN_ITEM_METADATA_KEYS = (
     "resource_template_bonuses",
     "spell_support",
     "spellcasting_modifiers",
+    "spell_property_modifiers",
     "stealth_disadvantage",
     "strength",
     "type",
     "versatile_damage",
     "weapon_category",
     "weapon_profile",
+    "weapon_extra_damage",
 )
+
+_WEAPON_DAMAGE_TYPES = frozenset({
+    "acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic",
+    "piercing", "poison", "psychic", "radiant", "slashing", "thunder",
+})
+
+
+def normalize_weapon_extra_damage(value: Any, *, strict: bool = False) -> list[dict[str, str]]:
+    """Only unconditional, typed per-hit weapon dice are supported here."""
+    if value in (None, []):
+        return []
+    valid: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    if isinstance(value, list) and len(value) <= 4:
+        for row in value:
+            if not isinstance(row, dict) or set(row) != {"dice", "damage_type"}:
+                break
+            dice = str(row.get("dice") or "").strip().lower()
+            damage_type = str(row.get("damage_type") or "").strip().lower()
+            match = re.fullmatch(r"([1-9]|1[0-2])d(4|6|8|10|12|20)", dice)
+            if match is None or damage_type not in _WEAPON_DAMAGE_TYPES:
+                break
+            identity = (dice, damage_type)
+            if identity not in seen:
+                valid.append({"dice": dice, "damage_type": damage_type})
+                seen.add(identity)
+        else:
+            return valid
+    if strict:
+        raise ValueError("Weapon extra damage needs at most four unconditional dice/type records.")
+    return []
+
+
+def retained_curated_campaign_item_mechanics(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """Carry explicit stored choices on omission; refresh inferred body fields."""
+    payload = dict(metadata or {})
+    provenance = dict(payload.get("campaign_item_mechanics_field_provenance") or {})
+    review = dict(payload.get("campaign_item_mechanics") or {})
+    provenance = {**dict(review.get("field_provenance") or {}), **provenance}
+    inferred = {"body", "classification", "base_weapon_profile", "base_armor_profile"}
+    return {
+        key: deepcopy(payload[key]) for key in CAMPAIGN_ITEM_METADATA_KEYS
+        if key in payload and str(dict(provenance.get(key) or {}).get("source") or "") not in inferred
+    }
 
 _CLASSIFICATION_RARITY_PATTERN = re.compile(
     r"\b(very rare|legendary|artifact|uncommon|common|rare)\b",
@@ -98,6 +147,15 @@ _CAST_SPELL_PATTERN = re.compile(
 )
 _ONCE_REST_PATTERN = re.compile(r"\bonce per (short|long) rest\b|\bonce .*? finish a (short|long) rest\b", re.IGNORECASE)
 _AT_WILL_PATTERN = re.compile(r"\bat will\b", re.IGNORECASE)
+_DAILY_ITEM_PATTERN = re.compile(r"\bonce (?:per|a|each) day\b|\bonce daily\b", re.IGNORECASE)
+_DAWN_ITEM_PATTERN = re.compile(
+    r"\bonce (?:at|each) dawn\b|\b(?:can't|cannot) (?:be used|cast (?:it|the spell)|use (?:it|this property)) again until (?:the )?next dawn\b",
+    re.IGNORECASE,
+)
+_BOUNDED_ITEM_PATTERN = re.compile(
+    r"\b(?:once|twice|thrice|charges?|recharges?|uses?|daily|weekly|monthly|dawn|day|week|month|rest)\b|\b\d+\s+times?\b",
+    re.IGNORECASE,
+)
 
 
 @lru_cache(maxsize=1)
@@ -219,6 +277,8 @@ def build_campaign_item_mechanics_metadata(
         ):
             if "spell_support" in contribution:
                 _strict_spell_records(contribution["spell_support"], origin=label)
+            if "spell_property_modifiers" in contribution:
+                normalize_item_spell_properties(contribution["spell_property_modifiers"])
     mechanics_metadata = _merge_item_metadata(interpreted_metadata, page_metadata)
     mechanics_metadata = _merge_item_metadata(mechanics_metadata, explicit_metadata)
     if normalized_review == CAMPAIGN_ITEM_REVIEW_APPROVED:
@@ -233,8 +293,40 @@ def build_campaign_item_mechanics_metadata(
             )
     for key in page_metadata:
         provenance.setdefault(key, {"source": "published_page_metadata"})
+    for key, value in explicit_metadata.items():
+        if key != "spell_support":
+            # Explicit fields replace the reviewed field as a whole. Carrying
+            # a prior curated list alongside the same page list must not apply
+            # a resource bonus, reminder or damage rider twice.
+            mechanics_metadata[key] = deepcopy(value)
     for key in explicit_metadata:
         provenance[key] = {"source": "manual_review"}
+    for key, value in dict(explicit_mechanics or {}).items():
+        if key in CAMPAIGN_ITEM_METADATA_KEYS and value in (None, "", [], {}):
+            # A named empty value is an explicit clear, including a value that
+            # would otherwise be contributed by the linked page/body.
+            if key == "spell_support" and value == [] and mechanics_metadata.get("spell_property_modifiers"):
+                # Retain this explicit non-entitlement choice across ordinary
+                # prose edits; otherwise cast-clause inference would revive it.
+                mechanics_metadata[key] = []
+                provenance[key] = {"source": "manual_review"}
+            else:
+                mechanics_metadata.pop(key, None)
+                provenance.pop(key, None)
+    if normalized_review == CAMPAIGN_ITEM_REVIEW_APPROVED and mechanics_metadata.get("spell_property_modifiers"):
+        properties = normalize_item_spell_properties(mechanics_metadata["spell_property_modifiers"])
+        records = _strict_spell_records(mechanics_metadata.get("spell_support", []), origin="reviewed_metadata")
+        legacy_ids = {effect["legacy_source_row_id"] for effect in properties if effect.get("legacy_source_row_id")}
+        if any(record.source_row_id in legacy_ids for record in records):
+            _raise_spell_support_conflict("Clear the superseded item spell grant before adopting its conditional modifier.")
+    if "item_capabilities" in mechanics_metadata:
+        mechanics_metadata["item_capabilities"] = normalize_item_capabilities(mechanics_metadata["item_capabilities"])
+        if normalized_review == CAMPAIGN_ITEM_REVIEW_APPROVED:
+            validate_capability_spell_support(mechanics_metadata["item_capabilities"], mechanics_metadata.get("spell_support", []))
+            from .character_item_capabilities import validate_capability_source
+            validate_capability_source(mechanics_metadata["item_capabilities"], mechanics_metadata)
+    if mechanics_metadata.get("weapon_extra_damage"):
+        flags = [flag for flag in flags if flag.get("code") != "extra_damage"]
 
     support_state = _support_state_for_review(normalized_review, mechanics_metadata, flags)
     modeled_fields = [
@@ -339,7 +431,7 @@ def interpret_campaign_item_mechanics(
     if armor_bonus_match is not None:
         set_field("bonus_ac", int(armor_bonus_match.group(1) or 0), "body", armor_bonus_match.group(0))
 
-    _stamp_spell_support(metadata, provenance, title, body_text)
+    _stamp_spell_support(metadata, provenance, title, str(body_markdown or ""))
     special_effect_metadata = campaign_item_special_effect_metadata(title)
     if special_effect_metadata:
         metadata = _merge_item_metadata(metadata, special_effect_metadata)
@@ -350,6 +442,14 @@ def interpret_campaign_item_mechanics(
     return metadata, provenance, flags
 
 
+def normalize_item_spell_properties(value):
+    try:
+        return _normalize_item_spell_properties(value)
+    except (ValueError, TypeError) as error:
+        from .systems_service import SystemsPolicyValidationError
+        raise SystemsPolicyValidationError("Item spell property metadata needs review.") from error
+
+
 def normalize_explicit_campaign_item_mechanics(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -358,6 +458,13 @@ def normalize_explicit_campaign_item_mechanics(value: Any) -> dict[str, Any]:
         if key not in value:
             continue
         raw_value = value.get(key)
+        if key == "spell_property_modifiers" and raw_value not in (None, "", [], {}):
+            normalized[key] = normalize_item_spell_properties(raw_value)
+            continue
+        if key == "weapon_extra_damage":
+            # Validate explicit empties too: [] is a supported reviewed clear.
+            normalized[key] = normalize_weapon_extra_damage(raw_value, strict=True)
+            continue
         if raw_value in (None, "", [], {}):
             continue
         normalized[key] = _normalize_explicit_value(key, raw_value)
@@ -463,26 +570,72 @@ def _stamp_spell_support(
     title: str,
     body_text: str,
 ) -> None:
-    matches = list(_CAST_SPELL_PATTERN.finditer(body_text))
-    if not matches:
-        return
     grants = []
-    for match in matches[:3]:
-        spell = str(match.group(1) or "").strip()
-        spell = re.sub(r"\s+", " ", spell).strip()
+    # Keep casting cadence inside its actual paragraph. A nearby unrelated
+    # Hit Die/rest clause must never supply the spell's reset rule.
+    for paragraph in re.split(r"\n\s*\n", body_text):
+        matches = list(_CAST_SPELL_PATTERN.finditer(paragraph))
+        if len(matches) != 1:
+            continue  # Compound clauses require explicit reviewed spell support.
+        match = matches[0]
+        spell = re.sub(r"\s+", " ", str(match.group(1) or "")).strip()
         if not spell:
             continue
-        access_type = "at_will" if _AT_WILL_PATTERN.search(_nearby_text(body_text, match.start())) else "free_cast"
-        grant: dict[str, Any] = {
-            "spell": spell,
-            "access_type": access_type,
-        }
-        rest_match = _ONCE_REST_PATTERN.search(_nearby_text(body_text, match.start()))
-        if rest_match is not None:
-            grant["access_uses"] = 1
-            rest_kind = rest_match.group(1) or rest_match.group(2) or "long"
-            grant["access_reset_on"] = f"{rest_kind.lower()}_rest"
+        sentence_start = max(paragraph.rfind(mark, 0, match.start()) for mark in ".!?") + 1
+        sentence_end = re.search(r"[.!?](?:\s|$)", paragraph[match.start():])
+        sentence_end = match.start() + sentence_end.end() if sentence_end else len(paragraph)
+        clause = paragraph[sentence_start:sentence_end]
+        outside = paragraph[:sentence_start] + paragraph[sentence_end:]
+        if any(pattern.search(outside) for pattern in (
+                _AT_WILL_PATTERN, _ONCE_REST_PATTERN, _DAILY_ITEM_PATTERN, _DAWN_ITEM_PATTERN)):
+            continue  # Exact explicit/retained support can resolve separated clauses.
+        cadence_matches = [match for pattern in (
+            _AT_WILL_PATTERN, _ONCE_REST_PATTERN, _DAILY_ITEM_PATTERN, _DAWN_ITEM_PATTERN)
+            for match in pattern.finditer(clause)]
+        if not cadence_matches:
+            continue  # No implicit unlimited entitlement from unspecified cadence.
+        rest_matches = list(_ONCE_REST_PATTERN.finditer(clause))
+        ambiguous_rest = False
+        for rest in rest_matches:
+            if rest.group(2) is not None:
+                # Do not let the legacy once.*finish wildcard conceal another
+                # finite limit before masking its supported fixed syntax.
+                ending = re.search(r"\bfinish a (?:short|long) rest\b", rest.group(), re.IGNORECASE)
+                if ending is None or _BOUNDED_ITEM_PATTERN.search(rest.group()[4:ending.start()]):
+                    ambiguous_rest = True
+        if ambiguous_rest:
+            continue
+        rest_kinds = {(match.group(1) or match.group(2)).lower() for match in rest_matches}
+        at_will = _AT_WILL_PATTERN.search(clause) is not None
+        daily = _DAILY_ITEM_PATTERN.search(clause) is not None
+        dawn = _DAWN_ITEM_PATTERN.search(clause) is not None
+        if len(rest_kinds) > 1:
+            _raise_spell_support_conflict("A casting clause has conflicting recovery rules.")
+        residue = list(clause)
+        for cadence in cadence_matches:
+            residue[cadence.start():cadence.end()] = " " * (cadence.end() - cadence.start())
+        if _BOUNDED_ITEM_PATTERN.search("".join(residue)):
+            continue  # Recognized syntax never hides an unsupported finite limit.
+        if at_will and (rest_matches or daily or dawn):
+            _raise_spell_support_conflict("A casting clause has conflicting use limits.")
+        if "short" in rest_kinds and (daily or dawn):
+            _raise_spell_support_conflict("A casting clause has conflicting recovery rules.")
+        if len(cadence_matches) > 1:
+            continue  # Compatible compounds need explicit independently reviewed support.
+        rest_match = rest_matches[0] if rest_matches else None
+        if _BOUNDED_ITEM_PATTERN.search(outside):
+            continue  # A separate bounded clause needs explicit reviewed support.
+        grant: dict[str, Any] = {"spell": spell, "access_type": "at_will" if at_will else "free_cast"}
+        if daily or dawn:
+            # Existing campaign convention: daily/dawn item recovery uses LR.
+            # Retain the original clause in source text/provenance, not a clock.
+            grant.update(access_uses=1, access_reset_on="long_rest")
+        elif rest_match is not None:
+            rest_kind = rest_match.group(1) or rest_match.group(2)
+            grant.update(access_uses=1, access_reset_on=f"{rest_kind.lower()}_rest")
         grants.append(grant)
+        if len(grants) == 3:
+            break
     if not grants:
         return
     ability_key = _infer_spellcasting_ability(body_text)
@@ -572,7 +725,10 @@ def _support_state_for_review(review_status: str, metadata: dict[str, Any], flag
 def _extract_supported_page_metadata(value: dict[str, Any] | None) -> dict[str, Any]:
     payload = dict(value or {})
     return {
-        key: deepcopy(payload[key])
+        key: (normalize_weapon_extra_damage(payload[key], strict=True)
+              if key == "weapon_extra_damage" else
+              normalize_item_spell_properties(payload[key]) if key == "spell_property_modifiers" else
+              normalize_item_capabilities(payload[key]) if key == "item_capabilities" else deepcopy(payload[key]))
         for key in CAMPAIGN_ITEM_METADATA_KEYS
         if key in payload and payload[key] not in (None, "", [], {})
     }
@@ -586,6 +742,7 @@ def _merge_item_metadata(base: dict[str, Any], extra: dict[str, Any] | None) -> 
         if key in {
             "spell_support",
             "spellcasting_modifiers",
+    "spell_property_modifiers",
             "defensive_rules",
             "resource_template_bonuses",
             "attack_reminder_rules",
@@ -827,6 +984,8 @@ def _normalize_explicit_value(key: str, value: Any) -> Any:
     }:
         parsed = _optional_int(value)
         return parsed if parsed is not None else value
+    if key == "item_capabilities":
+        return normalize_item_capabilities(value)
     if key == "stealth_disadvantage":
         if isinstance(value, bool):
             return value

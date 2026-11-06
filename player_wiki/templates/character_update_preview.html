@@ -23,6 +23,7 @@
         href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}"
       >Back to character</a>
       {% if not preview_only %}
+        <a class="ghost-button" href="{{ url_for('character_update_preview_view', campaign_slug=campaign.slug, character_slug=character.character_slug, mode='reconstruction') }}">Reconstruct this Character's native build</a>
         <a class="ghost-button" href="{{ url_for('character_source_repair_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Repair a source or attest a Character value</a>
       {% endif %}
     </header>

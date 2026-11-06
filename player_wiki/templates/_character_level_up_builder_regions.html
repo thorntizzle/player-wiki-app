@@ -11,12 +11,12 @@
           data-live-preview-debounce-ms="{{ level_up.field_live_preview.advancement_mode.live_preview_debounce_ms }}"
         >
           {% for option in level_up.mode_options %}
-            <option value="{{ option.value }}" {% if level_up.values.advancement_mode == option.value %}selected{% endif %}>{{ option.label }}</option>
+            <option value="{{ option.value }}" {% if level_up['values'].advancement_mode == option.value %}selected{% endif %}>{{ option.label }}</option>
           {% endfor %}
         </select>
       </label>
 
-      {% if level_up.values.advancement_mode == "add_class" %}
+      {% if level_up['values'].advancement_mode == "add_class" %}
         <label class="field">
           <span>New Class</span>
           <select
@@ -25,9 +25,9 @@
             data-live-preview-regions="{{ level_up.field_live_preview.new_class_slug.live_preview_regions }}"
             data-live-preview-debounce-ms="{{ level_up.field_live_preview.new_class_slug.live_preview_debounce_ms }}"
           >
-            <option value="" {% if not level_up.values.new_class_slug %}selected{% endif %}>Choose an option</option>
+            <option value="" {% if not level_up['values'].new_class_slug %}selected{% endif %}>Choose an option</option>
             {% for option in level_up.new_class_options %}
-              <option value="{{ option.value }}" {% if level_up.values.new_class_slug == option.value %}selected{% endif %}>{{ option.label }}</option>
+              <option value="{{ option.value }}" {% if level_up['values'].new_class_slug == option.value %}selected{% endif %}>{{ option.label }}</option>
             {% endfor %}
           </select>
           {% if level_up.multiclass_requirement_text %}
@@ -46,9 +46,9 @@
               data-live-preview-regions="{{ level_up.field_live_preview.new_subclass_slug.live_preview_regions }}"
               data-live-preview-debounce-ms="{{ level_up.field_live_preview.new_subclass_slug.live_preview_debounce_ms }}"
             >
-              <option value="" {% if not level_up.values.new_subclass_slug %}selected{% endif %}>No subclass yet</option>
+              <option value="" {% if not level_up['values'].new_subclass_slug %}selected{% endif %}>No subclass yet</option>
               {% for option in level_up.new_subclass_options %}
-                <option value="{{ option.value }}" {% if level_up.values.new_subclass_slug == option.value %}selected{% endif %}>{{ option.label }}</option>
+                <option value="{{ option.value }}" {% if level_up['values'].new_subclass_slug == option.value %}selected{% endif %}>{{ option.label }}</option>
               {% endfor %}
             </select>
           </label>
@@ -63,7 +63,7 @@
             data-live-preview-debounce-ms="{{ level_up.field_live_preview.target_class_row_id.live_preview_debounce_ms }}"
           >
             {% for option in level_up.target_row_options %}
-              <option value="{{ option.value }}" {% if level_up.values.target_class_row_id == option.value %}selected{% endif %}>{{ option.label }}</option>
+              <option value="{{ option.value }}" {% if level_up['values'].target_class_row_id == option.value %}selected{% endif %}>{{ option.label }}</option>
             {% endfor %}
           </select>
           {% if level_up.selected_class %}
@@ -79,18 +79,18 @@
       {% endif %}
 
       <label class="field">
-        <span>Hit Point Gain</span>
+        <span>{{ 'Physical Hit Die contribution' if level_up.physical_hp_input else 'Hit Point Gain' }}</span>
         <input
           type="number"
           name="hp_gain"
           min="1"
-          value="{{ level_up.values.hp_gain }}"
+          value="{{ level_up['values'].hp_gain }}"
           placeholder="6"
           data-live-preview-trigger="{{ level_up.field_live_preview.hp_gain.live_preview_trigger }}"
           data-live-preview-regions="{{ level_up.field_live_preview.hp_gain.live_preview_regions }}"
           data-live-preview-debounce-ms="{{ level_up.field_live_preview.hp_gain.live_preview_debounce_ms }}"
         >
-        <small>Enter the HP increase for this level based on your table's method.</small>
+        <small>{{ 'Enter the physical die contribution only; current Constitution is applied separately by the retained recipe.' if level_up.physical_hp_input else "Enter the HP increase for this level based on your table's method." }}</small>
       </label>
     </div>
   </section>
@@ -98,6 +98,24 @@
 
 {% if "choice-sections" in requested_regions %}
   <div data-live-builder-region="choice-sections">
+{% if level_up.restored_resource_fields %}
+    <section class="builder-section">
+      <h3>Restore missing resources</h3>
+      <p>Enter the current amounts for these missing resources. Existing resource amounts are preserved.</p>
+      <div class="builder-field-grid">
+        {% for field in level_up.restored_resource_fields %}
+          <label class="field">
+            <span>{{ field.label }} current</span>
+            <input type="number" name="{{ field.name }}" min="0" max="{{ field.max }}" step="1" value="{{ field.value }}" required
+                    data-live-preview-trigger="{{ level_up.field_live_preview.hp_gain.live_preview_trigger }}"
+                    data-live-preview-regions="{{ level_up.preview_regions_csv }}"
+                    data-live-preview-debounce-ms="{{ level_up.field_live_preview.hp_gain.live_preview_debounce_ms }}">
+            <small>Maximum {{ field.max }}. Advancing does not restore spent uses.</small>
+          </label>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
     {% for section in level_up.choice_sections %}
       <section class="builder-section">
         <h3>{{ section.title }}</h3>

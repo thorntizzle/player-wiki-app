@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Reconstruct native build | {{ character.name }}{% endblock %}
+{% block content %}
+<div class="page-stack">
+  <header class="card">
+    <p class="eyebrow">Character Update · Native reconstruction</p>
+    <h1>Reconstruct {{ character.name }}'s current build</h1>
+    <p>Confirm original ability inputs, permanent choices and exact HP contributions. The same Character, personal content and entire current play state are retained.</p>
+    <a class="ghost-button" href="{{ url_for('character_update_preview_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Other Character updates</a>
+    <a class="ghost-button" href="{{ url_for('character_read_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Back to Character</a>
+  </header>
+  {% if error %}<div class="callout callout--error" role="alert"><p>{{ error }}</p></div>{% endif %}
+  {% if preview_only %}<div class="callout"><p>View As is read-only. Reconstruction cannot be submitted here.</p></div>{% endif %}
+  {% if available and language_elective_fields %}
+  <section class="card"><h2>Source-owned language electives</h2>
+    <p>Adopt an already observed language for its exact source choice without changing the saved language list. An exotic language outside a standard-language domain requires explicit DM permission for that source choice. A DM may also decline an unresolved optional language; a later legal selection requires its own reviewed decision. Original observations and play state stay unchanged.</p>
+    <form method="post">{{ csrf_input() }}<input type="hidden" name="mode" value="reconstruction"><input type="hidden" name="intent" value="review_languages">
+      <fieldset {% if preview_only %}disabled{% endif %}><legend>Current optional language slots</legend>
+      {% for field in language_elective_fields %}<div class="field"><label for="language-slot-{{ field.slot_id }}">{{ field.owner_id }} language elective {{ field.position + 1 }}</label><p class="meta">{{ field.status }}</p>
+      <select id="language-slot-{{ field.slot_id }}" name="language_slot_{{ field.slot_id }}"><option value="keep">Keep current outcome</option>{% for option in field.adoption_options %}<option value="{{ option.value }}">Adopt observed {{ option.label }}{% if option.requires_permission %} (DM permits this exotic source-slot choice){% endif %}</option>{% endfor %}{% if field.can_decline %}<option value="declined">DM declines this optional language; no grant</option>{% endif %}{% if field.can_select %}{% for label in field.options %}<option value="selected:{{ label }}">Select {{ label }} instead of this decline</option>{% endfor %}{% endif %}</select></div>{% endfor %}
+      </fieldset>{% if not preview_only %}<button type="submit">Review language decisions without saving</button>{% endif %}
+    </form>
+  </section>
+  {% endif %}
+  {% if review %}
+    <section class="card"><h2>Review the complete reconstruction</h2><p>{{ review.state_impact_label }}</p>
+      {% for category in review.categories if category.has_changes %}
+      <h3>{{ category.label }}</h3>
+      {% for group in category.groups %}{% for row in group.rows %}
+        <details><summary>{{ row.label }}</summary><p><strong>Before</strong></p><pre class="pre-wrap">{{ row.before }}</pre><p><strong>After</strong></p><pre class="pre-wrap">{{ row.after }}</pre></details>
+      {% endfor %}{% endfor %}{% endfor %}
+    </section>
+    <form method="post" action="{{ url_for('character_update_preview_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}" class="card">
+      {{ csrf_input() }}<input type="hidden" name="intent" value="apply"><input type="hidden" name="review_token" value="{{ review.review_token }}">
+      <p>Apply once while this review remains current. Current HP, temporary HP, spent uses, inventory, prepared marks and unknown observations are preserved exactly.</p>
+      {% if review.review_token and not preview_only %}<button type="submit">Apply reviewed reconstruction once</button>{% endif %}
+    </form>
+  {% elif available and reconstruction %}
+    <form method="post" class="card page-stack">
+      {{ csrf_input() }}<input type="hidden" name="mode" value="reconstruction"><input type="hidden" name="intent" value="review">
+      <fieldset {% if preview_only %}disabled{% endif %}><legend>Original abilities and confirmed permanent allocations</legend>
+        <p>Enter original scores before species, feats and advancement. Feat ability choices appear separately below. Unknown acquisition dates remain unknown.</p>
+        <table><thead><tr><th>Ability</th><th>Original score</th><th>Species allocation</th><th>Advancement allocation</th><th>Evidence</th></tr></thead><tbody>
+        {% for key in keys %}<tr><th scope="row">{{ key|upper }}</th>
+          {% for prefix, maximum in [('base', 30), ('species', 2), ('advancement', 10)] %}<td><label class="sr-only" for="{{ prefix }}-{{ key }}">{{ key|upper }} {{ prefix }}</label><input id="{{ prefix }}-{{ key }}" name="{{ prefix }}_{{ key }}" type="number" min="{{ 1 if prefix == 'base' else 0 }}" max="{{ maximum }}" step="1" value="{{ values.get(prefix ~ '_' ~ key, '') }}" required></td>{% endfor %}
+          <td><label class="sr-only" for="provenance-{{ key }}">{{ key|upper }} evidence</label><select id="provenance-{{ key }}" name="provenance_{{ key }}" required><option value="">Choose evidence</option>{% for option in ['original', 'confirmed', 'reconstructed'] %}<option value="{{ option }}" {% if values.get('provenance_' ~ key) == option %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select></td>
+        </tr>{% endfor %}</tbody></table>
+      </fieldset>
+      {% for section in reconstruction.choice_sections %}<fieldset {% if preview_only %}disabled{% endif %}><legend>{{ section.title }}</legend>{% for field in section.fields %}<div class="field"><label for="reconstruction-{{ field.name }}">{{ field.label }}</label><select id="reconstruction-{{ field.name }}" name="{{ field.name }}" required><option value="">Choose explicitly</option>{% for option in field.options %}<option value="{{ option.value }}" {% if values.get(field.name) == option.value %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select><p class="meta">{{ field.help_text }}</p></div>{% endfor %}</fieldset>{% endfor %}
+      {% if reconstruction.skill_adoption_fields %}<fieldset {% if preview_only %}disabled{% endif %}><legend>Explicit skill corrections</legend>
+        <p>For an already-settled source choice missing from the imported observation, confirm its exact skill slot here and select the same skill in that source's choices above. Keep leaves the saved level unchanged. Review derives the bonus and retains the complete original row in history.</p>
+        {% for field in reconstruction.skill_adoption_fields %}<div class="field"><label for="{{ field.name }}">{{ field.label }}</label><p class="meta">Saved observation: {{ field.prior.proficiency_level }}; bonus {{ field.prior.bonus if field.prior.bonus is defined else 'unknown' }}.</p>
+          <select id="{{ field.name }}" name="{{ field.name }}"><option value="keep" {% if values.get(field.name, 'keep') == 'keep' %}selected{% endif %}>Keep this observation; no correction</option>{% for option in field.options %}<option value="{{ option.value }}" {% if values.get(field.name) == option.value %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select>
+        </div>{% endfor %}
+      </fieldset>{% endif %}
+      {% for fields, title, explanation in [(reconstruction.automatic_expertise_fields, 'Automatic tool expertise', 'Adopt the current source rule for every qualified tool proficiency, retaining the complete original expertise observation. Later proficient tools follow the same rule.'), (reconstruction.tracker_association_fields, 'Existing physical tracker ownership', 'Associate an existing tracker with its exact source feature and class. Its identifier, current count, notes and all play state remain unchanged.')] %}
+      {% if fields %}<fieldset {% if preview_only %}disabled{% endif %}><legend>{{ title }}</legend><p>{{ explanation }}</p>
+        {% for field in fields %}<div class="field"><label for="{{ field.name }}">{{ field.label }}</label>{% if field.reason is defined %}<p class="meta">{{ field.reason }}</p>{% endif %}{% if field.tracker_id is defined %}<p class="meta">Existing tracker: {{ field.tracker_id }}</p>{% endif %}<select id="{{ field.name }}" name="{{ field.name }}"><option value="keep" {% if values.get(field.name, 'keep') == 'keep' %}selected{% endif %}>Keep the current observation without adoption</option>{% for option in field.options %}<option value="{{ option.value }}" {% if values.get(field.name) == option.value %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></div>{% endfor %}
+      </fieldset>{% endif %}{% endfor %}
+      {% if reconstruction.item_mapping_fields %}<fieldset {% if preview_only %}disabled{% endif %}><legend>Existing physical item source links</legend>
+        <p>These choices retain the same physical item, page evidence and all current inventory state. A link authenticates only supported current source clauses; incomplete item mechanics remain pending.</p>
+        {% for field in reconstruction.item_mapping_fields %}<div class="field"><label for="{{ field.name }}">{{ field.label }} · {{ field.item_id }}</label><p class="meta">Retained page: {{ field.page_ref }}</p><select id="{{ field.name }}" name="{{ field.name }}" required><option value="">Choose explicitly</option>{% for option in field.options %}<option value="{{ option.value }}" {% if values.get(field.name) == option.value %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select>{% if not field.available %}<p>No unique current approved Systems relation is available. Dependent item mechanics remain unqualified.</p>{% endif %}</div>{% endfor %}
+      </fieldset>{% endif %}
+      <fieldset {% if preview_only %}disabled{% endif %}><legend>Exact accepted HP pool</legend>
+        <p>Levels one through three use the accepted maximum Hit Die policy. Enter the exact aggregate physical contribution for levels four through the boundary; a fractional mean is retained without rounding. Later recorded whole gains remain recorded whole gains.</p>
+        {% for key, label, low, high in [('hp_boundary', 'Pool boundary level', 4, 20), ('hp_pool_numerator', 'Exact aggregate numerator', 1, 1000), ('hp_pool_denominator', 'Exact aggregate denominator', 1, 1000), ('hp_reference_con', 'Reference Constitution', 1, 30)] %}<div class="field"><label for="{{ key }}">{{ label }}</label><input id="{{ key }}" name="{{ key }}" type="number" min="{{ low }}" max="{{ high }}" step="1" value="{{ values.get(key, '') }}" required></div>{% endfor %}
+        <div class="field"><label for="hp-history-boundary">Retained actual level gains</label><select id="hp-history-boundary" name="hp_history_start" required><option value="">Choose the accepted level boundary</option>{% for boundary in reconstruction.hp_boundaries %}<option value="{{ boundary.value }}" {% if values.get('hp_history_start') == boundary.value %}selected{% endif %}>{{ boundary.label }}</option>{% endfor %}</select></div>
+        <label><input type="checkbox" name="confirm_hp_effects" value="yes" {% if values.get('confirm_hp_effects') == 'yes' %}checked{% endif %} required> I have checked the reference Constitution and current continuing HP effects; this physical pool excludes their contributions and includes no invented rolls.</label>
+        {% if reconstruction.historical_hp_adjustment is integer and reconstruction.historical_hp_adjustment != 0 %}
+        <label><input type="checkbox" name="confirm_hp_adjustment_absorbed" value="yes" {% if values.get('confirm_hp_adjustment_absorbed') == 'yes' %}checked{% endif %}> The existing HP adjustment ({{ reconstruction.historical_hp_adjustment }}) corrects historical HP and is already included in the physical pool above. Remove only this continuing adjustment.</label>
+        <div class="field"><label for="hp-adjustment-absorbed-value">If absorbing it, repeat the exact signed adjustment; otherwise leave blank</label><input id="hp-adjustment-absorbed-value" name="hp_adjustment_absorbed_value" type="number" step="1" value="{{ values.get('hp_adjustment_absorbed_value', '') }}"></div>
+        {% endif %}
+      </fieldset>
+      <fieldset {% if preview_only %}disabled{% endif %}><legend>Retained current owners and content</legend><ul>{% for owner in reconstruction.owners %}<li>{{ owner.label }} · {{ owner.source }}</li>{% endfor %}</ul>
+        <label><input type="checkbox" name="confirm_build" value="yes" {% if values.get('confirm_build') == 'yes' %}checked{% endif %} required> Confirm the retained class, species/background, current skills/tools/languages, feat and spell owners. Preserve unknown history and manual clauses honestly.</label>
+      </fieldset>
+      {% if not preview_only %}<button type="submit">Review reconstruction without saving</button>{% endif %}
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

@@ -34,6 +34,7 @@ VALID_CAMPAIGN_MECHANIC_EFFECT_KINDS = {
     "state_gate",
     "rule_reference",
     "divine_avatar_form_grant",
+    "feature_replacement_grant",
 }
 CAMPAIGN_MECHANIC_EFFECT_KIND_ALIASES = {
     "ability_floor": "ability_minimum",
@@ -210,9 +211,13 @@ def build_campaign_base_rule_modification_summary(
     if not normalize_campaign_base_rule_refs(candidate_option.get("base_rule_refs")):
         return None
     hook_keys = _campaign_base_rule_reuse_hook_keys(candidate_option, extra_hooks=extra_hooks)
+    from .character_feature_composition import replacement_summary
+    replacement = replacement_summary(candidate_option.get("mechanic_effects"))
     return {
         "reused_hooks": [deepcopy(CAMPAIGN_BASE_RULE_REUSE_HOOKS[key]) for key in hook_keys],
-        "missing_metadata": [deepcopy(item) for item in CAMPAIGN_BASE_RULE_MISSING_METADATA],
+        "missing_metadata": ([] if replacement is not None else
+                             [deepcopy(item) for item in CAMPAIGN_BASE_RULE_MISSING_METADATA]),
+        **({"replacement": replacement, "current_source_owner_required": True} if replacement is not None else {}),
     }
 
 

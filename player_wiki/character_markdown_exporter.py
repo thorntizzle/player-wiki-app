@@ -69,7 +69,7 @@ def render_dnd_character_markdown(
     _write_resources_section(lines, character)
     _write_spellcasting_section(lines, character)
     _write_attacks_section(lines, character)
-    _write_features_section(lines, character, definition.features)
+    _write_features_section(lines, character)
     _write_inventory_section(lines, character)
     unverified = [
         (path, row) for path, row in dict(character.get("numeric_statuses") or {}).items()
@@ -319,24 +319,21 @@ def _write_attacks_section(lines: list[str], character: dict[str, Any]) -> None:
 def _write_features_section(
     lines: list[str],
     character: dict[str, Any],
-    definition_features: list[dict[str, Any]],
 ) -> None:
     feature_groups = list(character.get("feature_groups") or [])
     if not feature_groups:
         return
-    raw_lookup = _build_raw_feature_lookup(definition_features)
     _heading(lines, 2, "Features")
     for group in feature_groups:
         _heading(lines, 3, group.get("title") or "Features")
         for feature in list(group.get("entries") or []):
-            _write_feature_entry(lines, feature, raw_lookup=raw_lookup, level=4)
+            _write_feature_entry(lines, feature, level=4)
 
 
 def _write_feature_entry(
     lines: list[str],
     feature: dict[str, Any],
     *,
-    raw_lookup: dict[str, dict[str, Any]],
     level: int,
 ) -> None:
     _heading(lines, level, _format_link(feature.get("name"), feature.get("href")))
@@ -350,13 +347,13 @@ def _write_feature_entry(
     if metadata or availability:
         lines.append("")
 
-    description = _feature_description_markdown(feature, raw_lookup)
+    description = _feature_description_markdown(feature)
     if description:
         lines.append(description)
         lines.append("")
 
     for child in list(feature.get("children") or []):
-        _write_feature_entry(lines, child, raw_lookup=raw_lookup, level=min(level + 1, 6))
+        _write_feature_entry(lines, child, level=min(level + 1, 6))
 
 
 def _write_inventory_section(lines: list[str], character: dict[str, Any]) -> None:
@@ -384,6 +381,30 @@ def _write_inventory_section(lines: list[str], character: dict[str, Any]) -> Non
             for item in inventory
         ],
     )
+
+    for item in inventory:
+        modes = item.get("item_casting_modes") or []
+        storage = item.get("spell_storage")
+        if not modes and not storage:
+            continue
+        _heading(lines, 3, _clean_text(item.get("name")))
+        for mode in modes:
+            cost = (f"one slot of level {mode['minimum_slot_level']} or higher" if mode["slot_cost"]
+                    else f"one item use; level {mode['casting_level']}; no slot")
+            availability = "Available" if mode["enabled"] else mode["disabled_reason"]
+            lines.append(f"- {_clean_text(mode['title'])}: {cost}. {_clean_text(availability)} Effects and eligibility are table managed.")
+        if modes:
+            lines.append("")
+        if storage:
+            if not storage["known"]:
+                lines.append(f"{_clean_text(storage['reason'])} Capacity: {storage['capacity']} spell levels.")
+            else:
+                lines.append(f"Stored: {storage['occupied']} / {storage['capacity']} spell levels." + (" Empty." if not storage["spells"] else ""))
+                for spell in storage["spells"]:
+                    metrics = spell["metrics"]
+                    lines.append(f"- {_clean_text(spell['spell_ref']['title'])}, stored level {spell['slot_level']}; original caster {_clean_text(spell['caster'])}; "
+                        f"{metrics['ability'].upper()} modifier {metrics['ability_modifier']:+d}, save DC {metrics['save_dc']}, attack {metrics['attack_bonus']:+d}.")
+            lines.append("")
 
     if currency or other_currency:
         _heading(lines, 3, "Currency")
@@ -477,30 +498,9 @@ def _write_named_rule_cards(lines: list[str], title: str, records: Any) -> None:
     lines.append("")
 
 
-def _build_raw_feature_lookup(features: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    lookup: dict[str, dict[str, Any]] = {}
-    for feature in list(features or []):
-        payload = dict(feature or {})
-        feature_id = _clean_text(payload.get("id"))
-        if feature_id:
-            lookup[f"id:{feature_id}"] = payload
-        name = _clean_text(payload.get("name")).casefold()
-        if name:
-            lookup.setdefault(f"name:{name}", payload)
-    return lookup
-
-
-def _feature_description_markdown(
-    feature: dict[str, Any],
-    raw_lookup: dict[str, dict[str, Any]],
-) -> str:
-    raw = raw_lookup.get(f"id:{_clean_text(feature.get('id'))}")
-    if raw is None:
-        raw = raw_lookup.get(f"name:{_clean_text(feature.get('name')).casefold()}")
-    for key in ("description_markdown", "body_markdown", "markdown"):
-        text = _clean_block((raw or {}).get(key))
-        if text:
-            return text
+def _feature_description_markdown(feature: dict[str, Any]) -> str:
+    # Current presented rules and explicit historical rows have already been
+    # separated by the shared presenter. Raw saved prose is not an override.
     return _html_to_markdown(feature.get("description_html"))
 
 

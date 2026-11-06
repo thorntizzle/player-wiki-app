@@ -412,6 +412,10 @@ STANDARD_LANGUAGE_OPTIONS = [
     "Halfling",
     "Orc",
 ]
+# Ordinary 2014 language vocabulary. Secret class communications are fixed
+# grants and are deliberately absent from unrestricted language pickers.
+UNRESTRICTED_LANGUAGE_OPTIONS = [*STANDARD_LANGUAGE_OPTIONS,
+    "Abyssal", "Celestial", "Draconic", "Deep Speech", "Infernal", "Primordial", "Sylvan", "Undercommon"]
 COMMON_TOOL_PROFICIENCY_OPTIONS = [
     "Alchemist's Supplies",
     "Bagpipes",
@@ -777,6 +781,7 @@ __all__ = [
     'SKILL_ABILITY_KEYS',
     'SKILL_PROFICIENCY_LEVEL_RANKS',
     'STANDARD_LANGUAGE_OPTIONS',
+    'UNRESTRICTED_LANGUAGE_OPTIONS',
     'COMMON_TOOL_PROFICIENCY_OPTIONS',
     'FEATURE_EXPERTISE_TOOL_VALUE_PREFIX',
     'THIEVES_TOOLS_PROFICIENCY',

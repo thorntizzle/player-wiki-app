@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from .character_catalog_operations import (catalog_snapshot, catalog_index, catalog_aux,
+    catalog_rows, catalog_field, catalog_record, catalog_is_record)
+
+from .character_source_reads import source_active, phase_of
+
 from copy import deepcopy
 import re
 from typing import Any, Callable
@@ -43,6 +48,7 @@ from .character_builder_equipment import (
     _normalize_equipment_payloads,
     _normalize_explicit_link_identity,
     _normalize_page_ref_payload,
+    _qualified_dual_wielder_ac_bonus,
     _resolve_armor_profile,
     _resolve_item_support_metadata,
     _resolved_armor_profiles,
@@ -1028,7 +1034,21 @@ def _derive_definition_max_hp(
     definition: CharacterDefinition,
     *,
     current_level: int,
+    constitution: int | None = None,
 ) -> int | None:
+    from .character_hp_recipe import evaluate_recipe, recipe_for_source
+    recipe = recipe_for_source(definition.source)
+    if recipe is not None:
+        from .character_hit_dice import _hit_die_faces_for_class_row
+        from .character_profile import profile_class_rows
+        rows = profile_class_rows(definition.profile)
+        if len(rows) != 1:
+            raise ValueError("Reconstructed HP currently requires one class owner.")
+        con = constitution if constitution is not None else dict(dict(
+            definition.stats.get("ability_scores") or {}).get("con") or {}).get("score")
+        return evaluate_recipe(recipe, dict(definition.source.get("native_progression") or {}).get("history", []),
+                               level=current_level, constitution=con,
+                               faces=_hit_die_faces_for_class_row(rows[0]))
     hp_baseline = _native_progression_hp_baseline_for_derivation(definition.source)
     if hp_baseline is None:
         return None
@@ -1084,7 +1104,7 @@ def _derive_definition_skills(
         existing_rows if source_authority is None else [
             row for row in existing_rows
             if source_authority.field_status(
-                f"skills.{normalize_lookup(row.get('name'))}"
+                f"skills.{str(row.get('name') or '').strip().casefold()}"
             ).is_effective
         ]
     )
@@ -1092,6 +1112,8 @@ def _derive_definition_skills(
         owned_rows,
         ability_scores=dict(proficiency_ability_scores or ability_scores),
         proficiency_bonus=proficiency_bonus,
+        prefer_explicit=(source_authority is not None or
+                         (definition.source or {}).get("source_type") == "native_character_builder"),
     )
     campaign_option_proficiencies = collect_campaign_option_proficiency_grants(
         _campaign_option_payloads_from_definition(definition)
@@ -1144,7 +1166,43 @@ def _derive_definition_stats(
     proficiency_ability_scores: dict[str, int] | None = None,
     historical_option_payloads: list[dict[str, Any]] | None = None,
     source_authority: Any | None = None,
+    reconstruction_feat_selections: list[dict[str, Any]] | None = None,
+    reconstruction_feat_choices: dict[str, list[str]] | None = None,
+    qualified_aggregate_paths: frozenset[str] | None = None,
 ) -> dict[str, Any]:
+    def aggregate_allowed(key: str) -> bool:
+        if qualified_aggregate_paths is not None:
+            return f"stats.{key}" in qualified_aggregate_paths
+        if source_authority is None:
+            return True
+        abilities: set[str] = set()
+        needs_proficiency = False
+        if key == "initiative_bonus":
+            abilities.add("dex")
+            for effect_key in effect_keys:
+                parts = _split_effect_key(effect_key)
+                kind = normalize_lookup(parts[0]) if parts else ""
+                if (kind == normalize_lookup("initiative-bonus-ability") and len(parts) == 2
+                        and normalize_lookup(parts[1]) in ABILITY_KEYS):
+                    abilities.add(normalize_lookup(parts[1]))
+                if kind == normalize_lookup("half-proficiency") and len(parts) >= 2:
+                    target = normalize_lookup(parts[1])
+                    needs_proficiency = needs_proficiency or target == normalize_lookup("all") or (
+                        target == normalize_lookup("abilities") and len(parts) >= 3
+                        and "dex" in _parse_effect_ability_keys(parts[2]))
+        elif key in {"carrying_capacity", "push_drag_lift"}:
+            abilities.add("str")
+        elif key in {"passive_perception", "passive_insight", "passive_investigation"}:
+            skill = key.removeprefix("passive_")
+            if not source_authority.field_status(f"skills.{skill}").is_effective:
+                return False
+            abilities.add("int" if skill == "investigation" else "wis")
+            needs_proficiency = True
+        if any(not source_authority.field_status(f"stats.ability_scores.{ability}.score").is_effective
+               for ability in abilities):
+            return False
+        return not needs_proficiency or source_authority.field_status("stats.proficiency_bonus").is_effective
+
     stats, manual_adjustments = strip_manual_stat_adjustments(dict(definition.stats or {}))
     stats, recoverable_penalties = strip_recoverable_stat_penalties(stats)
     existing_ability_scores = dict(stats.get("ability_scores") or {})
@@ -1169,25 +1227,30 @@ def _derive_definition_stats(
     save_proficiencies.update(
         _extract_feat_saving_throw_proficiencies(campaign_feat_selections, feat_selected_choices)
     )
+    save_proficiencies.update(_extract_feat_saving_throw_proficiencies(
+        list(reconstruction_feat_selections or []), dict(reconstruction_feat_choices or {})))
     effect_keys = _extract_character_effect_keys(features)
     save_bonus_map = _effect_save_bonus_map(effect_keys)
     skill_lookup = {normalize_lookup(skill.get("name")): dict(skill) for skill in list(skills or [])}
-    if skill_lookup:
+    if skill_lookup and aggregate_allowed("passive_perception"):
         stats["passive_perception"] = 10 + score_value(
             (skill_lookup.get("perception") or {}).get("bonus"), _ability_modifier(ability_scores["wis"])
         ) + _effect_passive_bonus(effect_keys, skill_name="Perception")
+    if skill_lookup and aggregate_allowed("passive_insight"):
         stats["passive_insight"] = 10 + score_value(
             (skill_lookup.get("insight") or {}).get("bonus"), _ability_modifier(ability_scores["wis"])
         ) + _effect_passive_bonus(effect_keys, skill_name="Insight")
+    if skill_lookup and aggregate_allowed("passive_investigation"):
         stats["passive_investigation"] = 10 + score_value(
             (skill_lookup.get("investigation") or {}).get("bonus"), _ability_modifier(ability_scores["int"])
         ) + _effect_passive_bonus(effect_keys, skill_name="Investigation")
     stats["proficiency_bonus"] = proficiency_bonus
-    stats["initiative_bonus"] = _ability_modifier(ability_scores["dex"]) + _effect_initiative_bonus(
-        effect_keys,
-        proficiency_bonus=proficiency_bonus,
-        ability_scores=ability_scores,
-    )
+    if aggregate_allowed("initiative_bonus"):
+        stats["initiative_bonus"] = _ability_modifier(ability_scores["dex"]) + _effect_initiative_bonus(
+            effect_keys,
+            proficiency_bonus=proficiency_bonus,
+            ability_scores=ability_scores,
+        )
     normalized_ability_scores = {
         ability_key: {
             "score": score,
@@ -1213,7 +1276,8 @@ def _derive_definition_stats(
         subclass_names=_character_profile_subclass_names(definition),
         item_catalog=item_catalog,
         allow_plain_unarmored_base=_definition_source_type(definition) == "native_character_builder",
-    )
+        source_authority=source_authority,
+    ) if aggregate_allowed("armor_class") else None
     if derived_armor_class is not None:
         stats["armor_class"] = derived_armor_class
     stats["attack_reminder_state"] = _derive_attack_reminder_state_from_character_inputs(
@@ -1222,6 +1286,7 @@ def _derive_definition_stats(
         item_catalog=item_catalog,
         ability_scores=ability_scores,
         proficiency_bonus=proficiency_bonus,
+        source_authority=source_authority,
     )
     stats["defensive_state"] = _derive_defensive_state_from_character_inputs(
         equipment_catalog=list(definition.equipment_catalog or []),
@@ -1229,24 +1294,27 @@ def _derive_definition_stats(
         item_catalog=item_catalog,
     )
     derived_speed = ""
-    if selected_species is not None:
+    if selected_species is not None and aggregate_allowed("speed"):
         derived_speed = _apply_speed_bonus_to_label(
             _extract_speed_label(selected_species),
             _effect_speed_bonus(effect_keys),
         )
     if derived_speed:
         stats["speed"] = derived_speed
-    stats.update(
-        _derive_carrying_capacity_stats(
+    if aggregate_allowed("carrying_capacity") or aggregate_allowed("push_drag_lift"):
+        carrying = _derive_carrying_capacity_stats(
             strength_score=ability_scores["str"],
             size_label=_definition_size_label(definition, selected_species=selected_species),
             effect_keys=effect_keys,
         )
-    )
+        stats.update({key: value for key, value in carrying.items() if aggregate_allowed(key)})
+    hp_input_qualified = (source_authority is None or source_authority.field_status(
+        "stats.ability_scores.con.score").is_effective)
     derived_max_hp = _derive_definition_max_hp(
         definition,
         current_level=max(_resolve_native_character_level(definition), 0),
-    )
+        constitution=ability_scores["con"],
+    ) if aggregate_allowed("max_hp") and hp_input_qualified else None
     if derived_max_hp is not None:
         stats["max_hp"] = derived_max_hp
     stats = apply_stat_adjustments(stats, campaign_option_adjustments)
@@ -1259,6 +1327,7 @@ def _current_spell_source_rows(
     features: list[dict[str, Any]],
     ability_scores: dict[str, int],
     proficiency_bonus: int,
+    source_read_phase=None,
 ) -> list[dict[str, Any]]:
     """Use current grants and managers, never a saved row alone, as source liveness."""
     saved = {
@@ -1288,7 +1357,7 @@ def _current_spell_source_rows(
     review_source_ids -= effective_source_ids
     current_ids = {str(row.get("source_row_id") or "").strip() for row in current}
     from .committed_publication import active
-    closed_legacy = not active()
+    closed_legacy = not source_active(phase=source_read_phase)
     rows = [
         reconcile_formula_row(
             saved.get(str(row.get("source_row_id") or "").strip()), row,
@@ -1378,6 +1447,7 @@ def _derive_definition_spellcasting(
     baseline_ability_scores: dict[str, int] | None = None,
     effective_spellcasting_profiles_by_row: dict[str, dict[str, Any]] | None = None,
     shared_multiclass_slot_progression: list[Any] | None = None,
+    source_read_phase=None,
 ) -> dict[str, Any]:
     spellcasting = dict(definition.spellcasting or {})
     saved_spellcasting_rows = [
@@ -1399,7 +1469,7 @@ def _derive_definition_spellcasting(
     ]
     saved_by_id = {str(row.get("class_row_id") or ""): row for row in saved_spellcasting_rows}
     from .committed_publication import active
-    closed_legacy = not active()
+    closed_legacy = not source_active(phase=source_read_phase)
     saved_slot_lanes = (
         spell_slot_lanes_from_spellcasting(spellcasting)
         if saved_spellcasting_rows or list(spellcasting.get("slot_lanes") or [])
@@ -1466,6 +1536,7 @@ def _derive_definition_spellcasting(
     )
     spellcasting["source_rows"] = _current_spell_source_rows(
         spellcasting,
+        source_read_phase=source_read_phase,
         features=list(definition.features or []),
         ability_scores=ability_scores,
         proficiency_bonus=proficiency_bonus,
@@ -1537,6 +1608,7 @@ def _derive_definition_spellcasting_math(
     ability_scores: dict[str, int],
     proficiency_bonus: int,
     transient_spellcasting_adjustments: Any = None,
+    source_read_phase=None,
 ) -> dict[str, Any]:
     """Project spell save/attack math without rebuilding spell state."""
     spellcasting = deepcopy(dict(definition.spellcasting or {}))
@@ -1546,7 +1618,7 @@ def _derive_definition_spellcasting_math(
         or _proficiency_bonus_for_level(_resolve_native_character_level(definition))
     )
     from .committed_publication import active
-    closed_legacy = not active()
+    closed_legacy = not source_active(phase=source_read_phase)
     def ability_key(value: Any) -> str:
         normalized = normalize_lookup(str(value or ""))
         for key, label in ABILITY_LABELS.items():
@@ -1715,7 +1787,9 @@ def _derive_definition_core_sheet_payloads(
     automatic_prepared_spell_flags_func: Callable[..., list[dict[str, Any]]] | None = None,
     transient_effects: dict[str, Any] | None = None,
     source_authority: Any | None = None,
+    source_read_phase=None, feature_composition=None,
 ) -> dict[str, Any]:
+    source_read_phase = source_read_phase if source_read_phase is not None else phase_of(systems_service)
     selected_derivation_components = (
         FULL_DND_DERIVATION_COMPONENTS
         if derivation_components is None
@@ -1729,6 +1803,14 @@ def _derive_definition_core_sheet_payloads(
             "Unknown DND derivation components: "
             + ", ".join(sorted(unknown_derivation_components))
         )
+    # Identity provenance must precede callbacks and effective projections,
+    # which may coalesce duplicate IDs. This detached snapshot is read-only;
+    # current grants, never these historical observations, supply benefits.
+    prior_item_spell_payloads = (
+        deepcopy(list((definition.spellcasting or {}).get("spells") or []))
+        if {"spellcasting", "item_spell_grants"} <= selected_derivation_components
+        else []
+    )
     resolved_entries = dict(resolved_entries or {})
     if (
         "sheet_entries" in selected_derivation_components
@@ -1744,6 +1826,11 @@ def _derive_definition_core_sheet_payloads(
             resolved_species=resolved_species,
             resolved_background=resolved_background,
         )
+    try:
+        retained_modifier_history = (source_authority.retained_spell_modifier_history(definition)
+                                     if source_authority is not None else [])
+    except ValueError as error:
+        raise _character_build_error(str(error)) from error
     if source_authority is None:
         historical_option_payloads = _campaign_option_payloads_from_definition(definition)
         sanitized_definition = _strip_definition_campaign_feat_effects(
@@ -1756,6 +1843,14 @@ def _derive_definition_core_sheet_payloads(
         # copies remain raw evidence for manager repair only.
         historical_option_payloads = []
         sanitized_definition = source_authority.effective_definition(definition)
+    from .character_feature_composition import resolve_feature_composition, apply_effective_composition
+    composition = feature_composition if feature_composition is not None else getattr(source_authority, "feature_composition", None)
+    if composition is None:
+        reader = source_read_phase.systems_view() if source_read_phase is not None else systems_service
+        composition = resolve_feature_composition(definition, reader)
+    sanitized_payload = deepcopy(sanitized_definition.to_dict())
+    sanitized_payload["features"] = apply_effective_composition(sanitized_definition.features, composition)
+    sanitized_definition = CharacterDefinition.from_dict(sanitized_payload)
     effective_item_catalog = (
         effective_item_catalog_for_definition_func(
             sanitized_definition,
@@ -1764,7 +1859,7 @@ def _derive_definition_core_sheet_payloads(
             campaign_page_records=campaign_page_records,
         )
         if effective_item_catalog_for_definition_func is not None
-        else dict(item_catalog or _empty_item_catalog())
+        else catalog_snapshot(item_catalog or _empty_item_catalog())
     )
     effective_spell_catalog = _empty_spell_catalog()
     if "spellcasting" in selected_derivation_components:
@@ -1776,12 +1871,31 @@ def _derive_definition_core_sheet_payloads(
                 campaign_page_records=campaign_page_records,
             )
             if effective_spell_catalog_for_definition_func is not None
-            else dict(spell_catalog or _empty_spell_catalog())
+            else catalog_snapshot(spell_catalog or _empty_spell_catalog())
         )
     normalized_equipment = _normalize_equipment_payloads(
         list(sanitized_definition.equipment_catalog or []),
         item_catalog=effective_item_catalog,
     )
+    if source_authority is None:
+        # Historical/import callers may not have current native custody. Refuse
+        # only a real retained legacy match, never a fresh item/spell creation.
+        from .character_spell_properties import normalize_item_spell_properties
+        declared = set()
+        has_item_history = any(isinstance(row, dict) and row.get("spell_source_row_kind") == "item"
+            and row.get("spell_source_row_id") for row in definition.spellcasting.get("spells", []))
+        for item in normalized_equipment:
+            metadata = _resolve_item_support_metadata(item, effective_item_catalog)
+            if "spell_property_modifiers" not in metadata or not has_item_history:
+                continue
+            try:
+                effects = normalize_item_spell_properties(metadata["spell_property_modifiers"])
+            except (ValueError, TypeError) as error:
+                raise _character_build_error("Historical spell retention needs valid current modifier declarations.") from error
+            declared.update(effect["legacy_source_row_id"] for effect in effects if "legacy_source_row_id" in effect)
+        if any(isinstance(row, dict) and row.get("spell_source_row_id") in declared - {None}
+               for row in definition.spellcasting.get("spells", [])):
+            raise _character_build_error("Retaining historical item spell observations requires current source authority.")
     item_effect_entries = _active_item_effect_entries_with_legacy_spell_review(
         normalized_equipment,
         item_catalog=effective_item_catalog,
@@ -1831,11 +1945,21 @@ def _derive_definition_core_sheet_payloads(
         # and provenance until a complete normalization knows every layer.
         ability_scores = effective_scores(dict(definition.stats or {}))
     durable_ability_scores = dict(ability_scores)
+    if source_authority is not None and complete_ability_layers:
+        source_authority = source_authority._with_resolved_ability_inputs(
+            definition, durable_ability_scores, ability_inputs)
+    final_ability_owners = set()
+    if source_authority is not None:
+        for key in ABILITY_KEYS:
+            status = source_authority.field_status(f"stats.ability_scores.{key}.score")
+            if status.is_effective and status.reason != "baseline_authorized" and type(status.effective) is int:
+                durable_ability_scores[key] = status.effective
+                ability_scores[key] = status.effective
+                final_ability_owners.add(key)
     transient_payload = dict(transient_effects or {}) if isinstance(transient_effects, dict) else {}
     ability_scores.update(
-        _transient_ability_score_overrides(
-            transient_payload.get("ability_score_overrides")
-        )
+        {key: value for key, value in _transient_ability_score_overrides(
+            transient_payload.get("ability_score_overrides")).items() if key not in final_ability_owners}
     )
     current_level = _resolve_native_character_level(sanitized_definition)
     proficiency_bonus = (
@@ -1843,12 +1967,18 @@ def _derive_definition_core_sheet_payloads(
         if current_level > 0
         else int((sanitized_definition.stats or {}).get("proficiency_bonus") or 2)
     )
-    normalized_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
-        _normalize_feature_payloads(list(sanitized_definition.features or [])),
-        ability_scores=durable_ability_scores,
-        current_level=max(current_level, 1),
-        class_row_levels=_profile_class_row_level_map(sanitized_definition.profile),
-    )
+    tracker_features = _normalize_feature_payloads(list(sanitized_definition.features or []))
+    tracker_inputs = dict(ability_scores=durable_ability_scores, current_level=max(current_level, 1),
+                         class_row_levels=_profile_class_row_level_map(sanitized_definition.profile))
+    if source_authority is not None:
+        normalized_features, derived_resource_templates = source_authority.derive_managed_tracker_templates(
+            definition, tracker_features, build_templates=_apply_tracker_templates_to_feature_payloads,
+            **tracker_inputs,
+        )
+    else:
+        normalized_features, derived_resource_templates = _apply_tracker_templates_to_feature_payloads(
+            tracker_features, **tracker_inputs,
+        )
     normalized_payload = deepcopy(sanitized_definition.to_dict())
     normalized_payload["features"] = normalized_features
     normalized_payload["equipment_catalog"] = normalized_equipment
@@ -1860,6 +1990,9 @@ def _derive_definition_core_sheet_payloads(
         proficiency_ability_scores=durable_ability_scores,
         source_authority=source_authority,
     )
+    from .character_reconstruction_authority import current_reconstruction_feat_choices
+    reconstruction_feats, reconstruction_choices = current_reconstruction_feat_choices(
+        normalized_definition, systems_service, source_authority)
     stats = _derive_definition_stats(
         normalized_definition,
         ability_scores=ability_scores,
@@ -1872,6 +2005,8 @@ def _derive_definition_core_sheet_payloads(
         proficiency_ability_scores=durable_ability_scores,
         historical_option_payloads=historical_option_payloads,
         source_authority=source_authority,
+        reconstruction_feat_selections=reconstruction_feats,
+        reconstruction_feat_choices=reconstruction_choices,
     )
     if complete_ability_layers:
         write_inputs(stats, ability_inputs)
@@ -1900,6 +2035,7 @@ def _derive_definition_core_sheet_payloads(
             derived_definition.spellcasting = initial_spellcasting
         derived_spellcasting = _derive_definition_spellcasting(
             derived_definition,
+            source_read_phase=source_read_phase,
             ability_scores=ability_scores,
             baseline_ability_scores=durable_ability_scores,
             proficiency_bonus=proficiency_bonus,
@@ -1940,6 +2076,7 @@ def _derive_definition_core_sheet_payloads(
                 known_source_row_ids=item_effect_source_row_ids,
                 spell_catalog=effective_spell_catalog,
                 current_level=current_level,
+                prior_spell_payloads=prior_item_spell_payloads,
             )
         derived_spellcasting["spells"] = _canonicalize_legacy_spell_payload_marks(
             list(derived_spellcasting.get("spells") or []),
@@ -1953,6 +2090,7 @@ def _derive_definition_core_sheet_payloads(
         )
         derived_spellcasting["source_rows"] = _current_spell_source_rows(
             derived_spellcasting,
+            source_read_phase=source_read_phase,
             features=normalized_features,
             ability_scores=ability_scores,
             proficiency_bonus=proficiency_bonus,
@@ -1964,6 +2102,7 @@ def _derive_definition_core_sheet_payloads(
     elif "spellcasting_math" in selected_derivation_components:
         derived_spellcasting = _derive_definition_spellcasting_math(
             sanitized_definition,
+            source_read_phase=source_read_phase,
             ability_scores=ability_scores,
             proficiency_bonus=proficiency_bonus,
             transient_spellcasting_adjustments=transient_payload.get(
@@ -1972,6 +2111,11 @@ def _derive_definition_core_sheet_payloads(
         )
     else:
         derived_spellcasting = deepcopy(dict(sanitized_definition.spellcasting or {}))
+    from .character_spell_properties import preserve_modifier_history
+    try:
+        derived_spellcasting = preserve_modifier_history(derived_spellcasting, definition, retained_modifier_history)
+    except ValueError as error:
+        raise _character_build_error(str(error)) from error
     merged_resource_templates = _merge_resource_templates(
         list(sanitized_definition.resource_templates or []),
         derived_resource_templates,
@@ -2014,6 +2158,12 @@ def _supported_feature_expertise_blocks(entry: SystemsEntryRecord | None) -> lis
     if not isinstance(entry, SystemsEntryRecord):
         return []
     metadata = dict(entry.metadata or {})
+    from .character_feature_proficiency_grants import normalize_metadata
+    try:
+        if entry.entry_type in {"classfeature", "subclassfeature"}:
+            metadata = normalize_metadata(metadata)
+    except (ValueError, TypeError):
+        return []
     expertise_blocks = [dict(block) for block in list(metadata.get("expertise") or []) if isinstance(block, dict)]
     if expertise_blocks:
         return expertise_blocks
@@ -2141,6 +2291,54 @@ def _apply_item_effect_ability_score_minimums(
             adjusted_scores[normalized_ability] = max(adjusted_scores[normalized_ability], int(minimum or 0))
     return adjusted_scores
 
+
+def _item_spell_occurrence_key(payload: dict[str, Any]) -> tuple[str, ...] | None:
+    """Exact source/publication identity, never a display-name fallback."""
+    source_id = payload.get("spell_source_row_id")
+    source_kind = payload.get("spell_source_row_kind")
+    ref = payload.get("systems_ref")
+    if (type(ref) is not dict or payload.get("class_row_id")
+            or not (payload.get("spell_grant_origin") == "item_effect"
+                    or type(source_id) is str and source_id.startswith("spell-source:item:")
+                    and source_kind == "item")):
+        return None
+    identity = (source_kind, source_id, ref.get("entry_key"), ref.get("entry_type"), ref.get("source_id"))
+    if (any(type(value) is not str or not value or value != value.strip() for value in identity)
+            or ref.get("entry_type") != "spell"):
+        return None
+    return identity
+
+
+def _retained_item_spell_id(
+    payload: dict[str, Any], prior_spells: list[dict[str, Any]], *,
+    source_owners: set[str], prior_id_counts: dict[str, int], used_ids: set[str],
+) -> str | None:
+    """Retain only occurrence identity; every benefit still comes from the new grant."""
+    key = _item_spell_occurrence_key(payload)
+    owners = payload.get("item_owner_ids")
+    if (key is None or len(source_owners) != 1
+            or not all(owner.startswith("systems-key:") for owner in source_owners)
+            or type(owners) is not list or len(owners) != 1
+            or type(owners[0]) is not str or not owners[0] or owners[0] != owners[0].strip()
+            or any(payload.get(flag) for flag in (
+                "item_spell_review_only", "spell_source_review_only", "spell_access_needs_review"))):
+        return None
+    matches = [row for row in prior_spells if isinstance(row, dict)
+               and _item_spell_occurrence_key(row) == key]
+    if len(matches) != 1:
+        return None
+    prior = matches[0]
+    identity = prior.get("id")
+    if (type(identity) is not str or not identity or identity != identity.strip()
+            or prior_id_counts.get(identity) != 1 or identity in used_ids):
+        return None
+    # Older rows have no physical-owner array. Their exact source/publication
+    # can bind to the one current owner, but an explicit contrary claim cannot.
+    if "item_owner_ids" in prior and prior["item_owner_ids"] != owners:
+        return None
+    return identity
+
+
 def _apply_item_effect_spell_grants(
     spell_payloads: list[dict[str, Any]] | None,
     *,
@@ -2148,7 +2346,15 @@ def _apply_item_effect_spell_grants(
     known_source_row_ids: set[str] | None = None,
     spell_catalog: dict[str, Any],
     current_level: int,
+    prior_spell_payloads: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    prior_spells = list(prior_spell_payloads if prior_spell_payloads is not None else spell_payloads or [])
+    prior_id_counts: dict[str, int] = {}
+    for row in prior_spells:
+        identity = row.get("id") if isinstance(row, dict) else None
+        if type(identity) is str and identity.strip():
+            identity = identity.strip()
+            prior_id_counts[identity] = prior_id_counts.get(identity, 0) + 1
     spells_by_key: dict[str, dict[str, Any]] = {}
     # Arbitrary source IDs alone cannot prove a legacy row came from an item.
     # The effective ID inventory is retained for current source reconciliation.
@@ -2158,6 +2364,7 @@ def _apply_item_effect_spell_grants(
         if payload_key:
             spells_by_key[payload_key] = dict(spell_payload)
     non_item_spells = list(spells_by_key.values())
+    used_ids = {row["id"] for row in non_item_spells if type(row.get("id")) is str and row["id"]}
     item_source_owners: dict[str, set[str]] = {}
     for entry_index, entry in enumerate(list(item_effect_entries or [])):
         definition_identity = str(entry.get("item_definition_identity") or "").strip()
@@ -2239,6 +2446,23 @@ def _apply_item_effect_spell_grants(
                 _quarantine_item_spell_entitlement(payload)
                 continue
             payload["spell_grant_origin"] = "item_effect"
+            retained_id = _retained_item_spell_id(
+                payload, prior_spells,
+                source_owners=item_source_owners.get(candidate_source_id, set()),
+                prior_id_counts=prior_id_counts, used_ids=used_ids,
+            )
+            if retained_id is None:
+                # A new/unmatched occurrence must not steal another old ID,
+                # including an old item row that could not be matched safely.
+                stem = slugify(str(payload.get("name") or "Item spell")) or "item-spell"
+                base = f"{stem}-{len(spells_by_key) + 1}"
+                retained_id = base
+                suffix = 1
+                while retained_id in prior_id_counts or retained_id in used_ids:
+                    retained_id = f"{base}-item-{suffix}"
+                    suffix += 1
+            payload["id"] = retained_id
+            used_ids.add(retained_id)
             spells_by_key[_spell_payload_map_key(payload)] = payload
     return _normalize_spell_payloads(list(spells_by_key.values()))
 
@@ -2347,6 +2571,36 @@ def _character_profile_subclass_names(
         subclasses.append(fallback)
     return subclasses
 
+def _armor_class_ability_dependencies(
+    *, equipment_catalog, features, class_names, subclass_names,
+    item_catalog=None, allow_plain_unarmored_base,
+) -> frozenset[str]:
+    """Include every applicable AC competitor, before evaluating its numbers."""
+    profiles = [profile for _, profile in _equipped_armor_profiles(equipment_catalog, item_catalog=item_catalog)]
+    armor = [profile for profile in profiles if not bool(profile.get("is_shield"))]
+    if armor:
+        return frozenset({"dex"} if any(
+            str(profile.get("armor_category") or "").strip().lower() in {"light", "medium"}
+            for profile in armor) else ())
+    classes = {normalize_lookup(name) for name in list(class_names or [])}
+    subclasses = {normalize_lookup(name) for name in list(subclass_names or [])}
+    shield = any(int(profile.get("base_ac") or 0) + int(profile.get("bonus_ac") or 0) > 0
+                 for profile in profiles if bool(profile.get("is_shield")))
+    dependencies = set()
+    if (allow_plain_unarmored_base
+            or _imported_character_can_prove_plain_unarmored_base(equipment_catalog, item_catalog=item_catalog)
+            or normalize_lookup("Barbarian") in classes
+            or normalize_lookup("Draconic Bloodline") in subclasses
+            or _character_has_named_feature(features, "Draconic Resilience")
+            or normalize_lookup("Monk") in classes and not shield):
+        dependencies.add("dex")
+    if normalize_lookup("Barbarian") in classes:
+        dependencies.add("con")
+    if normalize_lookup("Monk") in classes and not shield:
+        dependencies.add("wis")
+    return frozenset(dependencies)
+
+
 def _derive_armor_class_from_character_inputs(
     *,
     ability_scores: dict[str, int],
@@ -2356,10 +2610,21 @@ def _derive_armor_class_from_character_inputs(
     subclass_names: list[str] | None,
     item_catalog: dict[str, Any] | None = None,
     allow_plain_unarmored_base: bool,
+    source_authority: Any | None = None,
 ) -> int | None:
-    dex_modifier = _ability_modifier(int(ability_scores.get("dex", DEFAULT_ABILITY_SCORE)))
-    con_modifier = _ability_modifier(int(ability_scores.get("con", DEFAULT_ABILITY_SCORE)))
-    wis_modifier = _ability_modifier(int(ability_scores.get("wis", DEFAULT_ABILITY_SCORE)))
+    dependencies = _armor_class_ability_dependencies(
+        equipment_catalog=equipment_catalog, features=features,
+        class_names=class_names, subclass_names=subclass_names, item_catalog=item_catalog,
+        allow_plain_unarmored_base=allow_plain_unarmored_base,
+    )
+    if source_authority is not None and any(not source_authority.field_status(
+            f"stats.ability_scores.{key}.score").is_effective for key in dependencies):
+        return None
+    modifiers = {key: _ability_modifier(int(ability_scores.get(key, DEFAULT_ABILITY_SCORE)))
+                 for key in dependencies}
+    dex_modifier = modifiers.get("dex", 0)
+    con_modifier = modifiers.get("con", 0)
+    wis_modifier = modifiers.get("wis", 0)
     normalized_classes = {normalize_lookup(name) for name in list(class_names or []) if str(name or "").strip()}
     normalized_subclasses = {normalize_lookup(name) for name in list(subclass_names or []) if str(name or "").strip()}
     effect_keys = _extract_character_effect_keys(features)
@@ -2431,7 +2696,22 @@ def _derive_armor_class_from_character_inputs(
 
     if not candidate_values:
         return None
-    return max(candidate_values) + structured_ac_bonus
+    # The new conditional clause requires current owner/state custody. Legacy
+    # and raw no-authority arithmetic cannot acquire it from a copied feat or
+    # historical quantity. Direct fixed MANUAL AC keeps its existing contract.
+    conditional_ac = 0
+    if (source_authority is not None
+            and source_authority.field_status("stats.armor_class").status != "MANUAL"):
+        conditional_ac = _qualified_dual_wielder_ac_bonus(
+            equipment_catalog=all_items, features=list(features or []),
+            item_catalog=item_catalog or {},
+            inventory_rows=getattr(source_authority, "equipment_hand_rows", None),
+            qualified_feature_ids=frozenset(
+                str(row.get("id") or "") for row in list(features or [])
+                if source_authority.status_for("feature", str(row.get("id") or "")) == "VERIFIED"
+            ),
+        )
+    return max(candidate_values) + structured_ac_bonus + conditional_ac
 
 def _recalculate_definition_armor_class(
     definition: CharacterDefinition,
@@ -2483,7 +2763,7 @@ def _recalculate_definition_attacks(
     *,
     item_catalog: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    effective_item_catalog = dict(item_catalog or _empty_item_catalog())
+    effective_item_catalog = catalog_snapshot(item_catalog or _empty_item_catalog())
     equipment_catalog = list(definition.equipment_catalog or [])
     existing_attacks = list(definition.attacks or [])
     feature_only_attacks = _build_level_one_attacks(
@@ -2789,6 +3069,7 @@ def _skill_proficiency_levels_from_rows(
     *,
     ability_scores: dict[str, int],
     proficiency_bonus: int,
+    prefer_explicit: bool = False,
 ) -> dict[str, str]:
     levels: dict[str, str] = {}
     for row in list(skills or []):
@@ -2797,7 +3078,13 @@ def _skill_proficiency_levels_from_rows(
         if normalized_skill not in SKILL_LABELS:
             continue
         explicit_level = _normalize_skill_proficiency_level(row.get("proficiency_level"))
-        inferred_level = _skill_proficiency_level_from_bonus(
+        # A stored native/qualified choice is an input; its numeric total is
+        # an output and must not invent a stronger choice during recalculation.
+        # Missing or unrecognized legacy labels still need bonus recovery.
+        has_explicit_level = isinstance(row.get("proficiency_level"), str) and normalize_lookup(
+            row["proficiency_level"]
+        ) in {"none", "halfproficient", "halfproficiency", "proficient", "proficiency", "expertise"}
+        inferred_level = "none" if prefer_explicit and has_explicit_level else _skill_proficiency_level_from_bonus(
             skill_name,
             bonus=row.get("bonus"),
             ability_scores=ability_scores,
@@ -3455,7 +3742,7 @@ def _apply_feature_expertise_to_skill_proficiency_levels(
         instance_key = str(selection.get("instance_key") or "").strip()
         for block in expertise_blocks:
             for skill_name, value in dict(block).items():
-                if skill_name == "anyProficientSkill":
+                if skill_name in {"anyProficientSkill", "allProficientTools"}:
                     continue
                 if normalize_lookup(skill_name) == normalize_lookup(THIEVES_TOOLS_PROFICIENCY):
                     continue

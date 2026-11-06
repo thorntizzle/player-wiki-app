@@ -21,9 +21,20 @@ Before a tracked edit or implementation validation:
 5. State a Role Lock at each program/cycle boundary, implementation-wave
    boundary, or ownership/authority change.
 
-The main checkout is the integration lane by default. A lone writer may use it
-only after confirming exclusive ownership; concurrent writers require distinct
-worktrees.
+Use the [proportionate delivery route](docs/workflows/agent-operating-model.md#proportionate-delivery):
+documentation, compact bounded local tooling, or the canonical product
+lifecycle. Executable helpers are never documentation-only. Compact tooling
+retains exact independent acceptance and all applicable cumulative controls.
+
+The main checkout is the sole active worktree by default. Confirm exclusive
+write ownership and keep task deltas separable. Additional active worktrees
+require explicit operator authorization for a named need; use read-only review
+without another checkout when possible. Do not leave completed lanes active.
+
+Before assigning or resuming a lane, apply
+[Instruction Delivery And Reuse](docs/workflows/worktrees.md#instruction-delivery-and-reuse):
+confirm its current governance explicitly, separately from frozen authority.
+Workflow closeout includes delivery to active consumers or a deferred-reuse note.
 
 ## Context And Routing Safeguards
 
@@ -34,7 +45,8 @@ worktrees.
   storage-boundary, or shared-architecture uncertainty. Open `.local/roadmaps/`
   only for unresolved or explicitly named future work.
 - Delegate worker-shaped tasks with `fork_turns="none"` and one current
-  replace-only 300-500 word capsule by default. An explicitly approved
+  replace-only capsule; 300-500 words is a target, not a fill quota.
+  An explicitly approved
   full-history fork receives no capsule.
 - Parse the full worktree inventory but report only the current checkout,
   integration lane, active conflicts, aggregate retained count, and retained
@@ -71,26 +83,45 @@ Stable Program ID and cumulative budgets
   -> Repair Cycle 2 follows the same edges; failure requires operator review
 ```
 
-Each candidate-producing cycle has exactly one Scout pass, one approved
-Requirements Freeze, one wave, one assembled candidate, and one independent
-precommit review. Implementers own L1 code/diff inspection; L2 focused manual
-drills are optional when a concrete question needs one. An independent Verifier
-owns exact-candidate L3 adversarial review of every changed path and affected
-entry-to-side-effect path. It challenges access, visibility, data custody,
-privacy, compatibility, concurrency, and failure assumptions as applicable.
-Acceptance requires no unresolved blocking finding. L4 hosted/live checks
-require separate authority. No automated test, routine drill, or candidate-gate
-is a required acceptance gate. The retired automated suite and dedicated
-commands are unavailable. A failed review closes the cycle with a Frozen Failure
-Inventory. Repair starts only after the next cycle's Scout brief and approved
-Repair Requirements Freeze.
+The [Agent Operating Model](docs/workflows/agent-operating-model.md) owns the
+lifecycle, discovery/change control, review coverage/reuse, and bounded
+evidence rules. Each product candidate-producing cycle has one accountable Scout,
+approved Requirements Freeze, mutable wave, assembled candidate, and
+independent exact-candidate review. Discovery may iterate before approval;
+ordinary technical feedback inside the freeze does not create another cycle.
+The Verifier accounts for every changed path and affected entry-to-side-effect
+path, using fresh inspection or explicitly valid prior coverage. Complete
+release review is required before protected integration; an exact review may
+satisfy both candidate and release coverage without a duplicate pass.
+Acceptance requires no unresolved blocking finding. Failed candidates retain
+their verdict and Frozen Failure Inventory; repairs follow the next approved
+cycle. Compact local tooling uses the operating model's shorter route. Establish
+critical execution capabilities and interface compatibility before assembling
+an operational packet; use bounded permitted diagnostics when inspection is
+insufficient. Other L2 checks are optional; L4 needs separate authority. Retired
+automated suites and dedicated gate commands remain unavailable.
 
 Default cumulative limit: one initial candidate plus two repair candidates.
 Renaming tasks, chats, branches, lanes, batches, waves, or cycles never resets
-it. Any candidate byte change after candidate freeze or review start creates a
-repair candidate. An unchanged-candidate environment rerun is separately
-bounded, requires a changed diagnosis, and preserves every relevant test,
-fixture, configuration, lock, toolchain, and target input.
+it. A change to frozen product bytes or relevant semantic inputs after
+assembled freeze creates a repair candidate. Source, diagnostic/evidence, and
+operational identities are distinguished in
+[Repo Guardrails](docs/workflows/repo-guardrails.md#identity-and-evidence-changes).
+An administrative pointer correction is not permission to alter a frozen
+artifact or cure failed evidence. Unchanged-candidate environment reruns remain
+separately bounded and require a changed diagnosis and preserved relevant inputs.
+
+Workflow amendments take effect prospectively after their authorized
+documentation review. An already frozen candidate retains its exact bound
+authority revision and historical verdicts. A proposed policy file is not
+authority merely because it appears in a candidate. Direct matching owner
+decisions retain their stated scope; no lower artifact or launcher expands it.
+
+Simplification changes future work only. An existing stopped/frozen packet needs
+an explicit forward disposition identifying replaced controls, retained outcome
+guarantees, exact successor/review scope and unchanged consumption before it can
+use a new route. Workflow approval alone grants no helper candidate, retry,
+protected operation or tool-policy workaround for that packet.
 
 There is no persistent Program Overseer or heartbeat layer. The current task's
 Orchestrator owns the bounded program and delegates Scouts, Implementers, and
@@ -141,6 +172,9 @@ architecture, compatibility, privacy, or security-policy decisions. A code
 request does not imply deployment; a content task does not imply publication.
 
 ## Close-Out
+
+Maintain affected current-state and skill guidance as part of the change under
+[Current-State And Skill Maintenance](docs/workflows/agent-operating-model.md#current-state-and-skill-maintenance).
 
 Report role/authority; stable IDs when applicable; branch/worktree and exact
 candidate; changed files; validation/evidence and failure classification;

@@ -51,6 +51,7 @@ from .auth import (
     can_access_campaign_scope,
     can_access_own_character,
     can_access_campaign_systems_entry,
+    prepare_campaign_systems_entry_access,
     campaign_systems_search_visibilities,
     can_access_campaign_systems_source,
     can_edit_character,
@@ -228,6 +229,7 @@ from .character_presenter import (
     present_character_detail,
     present_dnd_character_section,
     present_dnd_character_section_counts,
+    present_character_directory,
     present_character_roster,
     render_campaign_markdown,
     resolve_item_description_html,
@@ -920,8 +922,12 @@ def build_dm_custom_systems_entry_form(
     form_data=None,
     visibility: str = "players",
 ) -> dict[str, str]:
+    from .systems_spell_authoring import spell_profile_for_editor
     data = form_data if form_data is not None else {}
     if data:
+        higher = data.get("custom_entry_spell_higher_level_markdown")
+        if higher is None and entry is not None:
+            higher = dict(entry.metadata or {}).get("spell_higher_level_markdown", "")
         return {
             "title": str(data.get("custom_entry_title") or ""),
             "slug_leaf": str(data.get("custom_entry_slug") or ""),
@@ -930,6 +936,8 @@ def build_dm_custom_systems_entry_form(
             "provenance": str(data.get("custom_entry_provenance") or ""),
             "search_metadata": str(data.get("custom_entry_search_metadata") or ""),
             "body_markdown": str(data.get("custom_entry_body_markdown") or ""),
+            "spell_profile_json": str(data.get("custom_entry_spell_profile") or ""),
+            "spell_higher_level_markdown": str(higher or ""),
         }
     if entry is not None:
         metadata = dict(entry.metadata or {})
@@ -942,6 +950,8 @@ def build_dm_custom_systems_entry_form(
             "provenance": str(metadata.get("provenance") or entry.source_path or ""),
             "search_metadata": str(metadata.get("search_metadata") or ""),
             "body_markdown": str(body.get("markdown") or metadata.get("body_markdown") or ""),
+            "spell_profile_json": json.dumps(spell_profile_for_editor(entry), indent=2, sort_keys=True) if spell_profile_for_editor(entry) else "",
+            "spell_higher_level_markdown": str(metadata.get("spell_higher_level_markdown") or ""),
         }
     return {
         "title": "",
@@ -951,6 +961,8 @@ def build_dm_custom_systems_entry_form(
         "provenance": "",
         "search_metadata": "",
         "body_markdown": "",
+        "spell_profile_json": "",
+        "spell_higher_level_markdown": "",
     }
 
 
@@ -1645,6 +1657,7 @@ def create_app() -> Flask:
             "campaign_session_closeout_reopen",
             "campaign_session_closeout_delete_session_history",
             "campaign_source_health_view",
+            "character_update_preview_view",
         } or re.fullmatch(
             r"/campaigns/[^/]+/(?:manager-tools(?:/session-readiness|/session-closeouts(?:/.*)?)?|source-health|systems/mechanics-impact(?:/review)?)",
             request.path,
@@ -3009,6 +3022,7 @@ def create_app() -> Flask:
 
     def present_roster_with_current_context(records, campaign):
         from .committed_publication import active
+        from flask import has_request_context
 
         if not active() or not any(is_dnd_5e_system(row.definition.system) for row in records):
             return present_character_roster(records)
@@ -3016,28 +3030,52 @@ def create_app() -> Flask:
             records, campaign=campaign,
             systems_service=get_systems_service(),
             campaign_page_records=list_visible_character_page_records(campaign.slug, campaign),
+            use_source_phases=has_request_context() and request.method in {"GET", "HEAD"},
         )
 
-    def prospective_character_numeric_authority(campaign, definition, state, state_revision):
+    def prospective_character_numeric_authority(campaign, definition, state, state_revision, *, source_read_phase=None):
         from .committed_publication import active
-        if not active():
+        from .character_mechanics_projection import (
+            CharacterNumericProjectionError, _CharacterProjectionDiagnostics,
+            build_character_numeric_projection,
+        )
+        from .character_source_reads import source_active
+        if not source_active(phase=source_read_phase):
             return None
         if is_xianxia_system(definition.system):
             return None
-        projection = build_character_mechanics_projection(
+        failure_diagnostics = None
+        try:
+            failure_diagnostics = _CharacterProjectionDiagnostics()
+        except BaseException:
+            pass
+        projection = build_character_numeric_projection(
             campaign=campaign,
             definition=definition,
             state=state,
             state_revision=state_revision,
-            systems_service=get_systems_service(),
-            campaign_page_records=list_visible_character_page_records(campaign.slug, campaign),
+            systems_service=source_read_phase.systems_view() if source_read_phase is not None else get_systems_service(),
+            campaign_page_records=source_read_phase.character_pages() if source_read_phase is not None else list_visible_character_page_records(campaign.slug, campaign),
+            _failure_diagnostics=failure_diagnostics,
         )
         if any(row.get("code") in {"read_time_projection_failed", "transient_mechanics_projection_failed"}
                for row in list(projection.get("projection_warnings") or [])):
-            raise ValueError("Character numeric authority could not be projected.")
+            failure = CharacterNumericProjectionError("Character numeric authority could not be projected.")
+            try:
+                warning_mask = 0
+                for warning in list(projection.get("projection_warnings") or []):
+                    code = warning.get("code")
+                    if code == "read_time_projection_failed":
+                        warning_mask |= 1
+                    elif code == "transient_mechanics_projection_failed":
+                        warning_mask |= 2
+                failure._attach_projection_diagnostic(warning_mask, failure_diagnostics)
+            except BaseException:
+                pass
+            raise failure
         authority = projection.get("source_authority")
         if authority is None or authority.state_revision != state_revision:
-            raise ValueError("Character numeric authority is unavailable.")
+            raise CharacterNumericProjectionError("Character numeric authority is unavailable.")
         return authority
 
     def current_character_numeric_authority(record):
@@ -3060,6 +3098,36 @@ def create_app() -> Flask:
             current.state_record.revision,
         )
 
+    def present_assignment_read(record, *, campaign=None):
+        """Finish a current read phase before exposing assignment display data."""
+        from copy import deepcopy
+        from .committed_publication import active
+        from .db import get_db
+        from .character_artificer_assignments import presentation
+        from .character_source_reads import native_character_source_context
+
+        systems = get_systems_service()
+        if (not is_dnd_5e_system(record.definition.system) or not active()
+                or get_db().in_transaction):
+            return presentation(record.definition, record.state_record.state,
+                                character_state_service.current_authority(record), systems)
+        if campaign is None:
+            campaign = repository_store.get().get_campaign(record.definition.campaign_slug)
+        if campaign is None:
+            raise ValueError("Character numeric authority is unavailable.")
+        with native_character_source_context(record, systems_service=systems,
+                campaign=campaign, purpose="assignment-read") as (phase, reader, _pages, _owner):
+            authority = (
+                prospective_character_numeric_authority(
+                    phase.campaign(), record.definition, record.state_record.state,
+                    record.state_record.revision, source_read_phase=phase)
+                if phase is not None else character_state_service.current_authority(record)
+            )
+            proposed = deepcopy(presentation(record.definition, record.state_record.state,
+                                             authority, reader))
+        return proposed
+
+    app.extensions["character_assignment_read_projection"] = present_assignment_read
     character_state_service.authority_provider = current_character_numeric_authority
     character_publication_coordinator.numeric_authority_provider = (
         lambda prior_record, candidate_definition, prospective_state=None: prospective_character_numeric_authority(
@@ -3069,6 +3137,37 @@ def create_app() -> Flask:
             prior_record.state_record.revision,
         )
     )
+    character_publication_coordinator.native_choice_source_context_provider = (
+        lambda record: (
+            get_systems_service(),
+            list_visible_character_page_records(
+                record.definition.campaign_slug,
+                repository_store.get().get_campaign(record.definition.campaign_slug),
+            ),
+        )
+    )
+
+    def source_read_numeric_authority_provider(prior_record, candidate_definition, prospective_state=None, *,
+                                               source_read_owner, source_read_phase=None):
+        from .character_source_reads import native_character_source_context
+        with native_character_source_context(prior_record, source_read_owner=source_read_owner,
+                purpose="publication-numeric-authority", source_read_phase=source_read_phase) as (phase, service, pages, owner):
+            campaign = phase.campaign() if phase is not None else service._get_campaign(candidate_definition.campaign_slug)
+            return prospective_character_numeric_authority(campaign, candidate_definition,
+                prior_record.state_record.state if prospective_state is None else prospective_state,
+                prior_record.state_record.revision, source_read_phase=phase)
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def source_read_native_choice_context_provider(record, *, source_read_owner):
+        from .character_source_reads import native_character_source_context
+        with native_character_source_context(record, source_read_owner=source_read_owner,
+                purpose="publication-choice-context") as (phase, service, pages, owner):
+            yield service, pages
+
+    character_publication_coordinator.source_read_numeric_authority_provider = source_read_numeric_authority_provider
+    character_publication_coordinator.source_read_native_choice_context_provider = source_read_native_choice_context_provider
 
     def list_visible_character_item_page_records(
         campaign_slug: str,
@@ -3511,6 +3610,35 @@ def create_app() -> Flask:
                     )
         return results
 
+    def character_spell_management_projection(
+        campaign_slug: str,
+        campaign,
+        record,
+        *,
+        systems_service=None,
+    ):
+        """Use the shared current read projection while retaining raw custody."""
+        from .committed_publication import active
+        from .character_spell_grants import has_native_grants
+        if not active() and not has_native_grants(record.definition):
+            return {"definition": record.definition, "spell_metric_presentations": {}, "source_authority": None}
+        projection = build_character_mechanics_projection(
+            campaign=campaign,
+            definition=record.definition,
+            state=record.state_record.state or {},
+            state_revision=record.state_record.revision,
+            systems_service=systems_service or get_systems_service(),
+            campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
+        )
+        return projection
+
+    def project_character_spell_management_definition(
+        campaign_slug: str, campaign, record, *, systems_service=None,
+    ):
+        # Keep the existing injected definition-only interface for search/catalogs.
+        return character_spell_management_projection(
+            campaign_slug, campaign, record, systems_service=systems_service)["definition"]
+
     def load_character_spell_management_support(
         campaign_slug: str,
         definition,
@@ -3539,12 +3667,16 @@ def create_app() -> Flask:
 
     def build_session_character_spell_manager_catalog(
         campaign_slug: str,
-        definition,
+        record,
         *,
+        campaign,
         systems_service=None,
     ) -> dict[str, object]:
         """Reuse the request-scoped, campaign-policy-safe spell enumeration."""
         systems_service = systems_service or get_systems_service()
+        definition = project_character_spell_management_definition(
+            campaign_slug, campaign, record, systems_service=systems_service,
+        )
         enabled_catalog = _build_scoped_spell_catalog(
             systems_service,
             campaign_slug,
@@ -3582,16 +3714,20 @@ def create_app() -> Flask:
         selected_class_rows: list[dict[str, object]] | None = None,
         systems_service=None,
     ) -> dict[str, object] | None:
+        management_projection = character_spell_management_projection(
+            campaign_slug, campaign, record, systems_service=systems_service,
+        )
+        management_definition = management_projection["definition"]
         resolved_spell_catalog, resolved_class_rows = load_character_spell_management_support(
             campaign_slug,
-            record.definition,
+            management_definition,
             spell_catalog=spell_catalog,
             systems_service=systems_service,
         )
         if selected_class_rows is not None:
             resolved_class_rows = selected_class_rows
         manager = build_character_spell_management_context(
-            record.definition,
+            management_definition,
             spell_catalog=resolved_spell_catalog,
             selected_class_rows=resolved_class_rows,
         )
@@ -3606,6 +3742,11 @@ def create_app() -> Flask:
             rows: list[dict[str, object]] = []
             for row in list(section_payload.get("rows") or []):
                 payload = dict(row.get("payload") or {})
+                metric_presentation = None
+                if management_projection.get("source_authority") is not None:
+                    from .character_spell_metrics import spell_attack_save_presentation
+                    metric_presentation = spell_attack_save_presentation(
+                        management_projection.get("spell_metric_presentations", {}), payload)
                 rows.append(
                     {
                         **dict(row),
@@ -3618,7 +3759,9 @@ def create_app() -> Flask:
                         "range": str(payload.get("range") or "").strip(),
                         "duration": str(payload.get("duration") or "").strip(),
                         "components": str(payload.get("components") or "").strip(),
-                        "save_or_hit": str(payload.get("save_or_hit") or "").strip(),
+                        "save_or_hit": (metric_presentation["label"] if metric_presentation is not None
+                                        else str(payload.get("save_or_hit") or "").strip()),
+                        "spell_metric_presentation": metric_presentation,
                         "source": str(payload.get("source") or "").strip(),
                         "reference": str(payload.get("reference") or "").strip(),
                     }
@@ -4872,6 +5015,17 @@ def create_app() -> Flask:
             is_dnd_5e_system(getattr(campaign, "system", ""))
             and is_dnd_5e_system(getattr(record.definition, "system", ""))
         )
+        from .committed_publication import active
+        from .db import get_db
+        source_phase_features_read = bool(
+            scoped_dnd_read
+            and requested_character_subpage == "features"
+            and request.method in {"GET", "HEAD"}
+            and status_code == 200
+            and not protected_conflict
+            and not get_db().in_transaction
+            and active()
+        )
         character_read_effective_visibility = (
             {
                 scope: get_effective_campaign_visibility(campaign_slug, scope)
@@ -4892,6 +5046,25 @@ def create_app() -> Flask:
                 in BUILDER_RELEVANT_CAMPAIGN_SECTIONS
             ]
         visible_campaign_page_manifest = list(campaign_page_records)
+
+        def materialize_feature_phase_pages(phase, phase_campaign, *, section):
+            # Rebuild the original shell-then-section body union in THIS
+            # snapshot; no Page from the earlier phase becomes trusted input.
+            with measure_character_read_component("page-records"):
+                shell_pages = materialize_dnd_character_read_page_records(
+                    phase.page_store(), campaign_slug, visible_campaign_page_manifest,
+                    record.definition, record.state_record.state or {},
+                    section="shell", campaign=phase_campaign,
+                )
+                if section == "shell":
+                    return shell_pages
+                return materialize_dnd_character_read_page_records(
+                    phase.page_store(), campaign_slug,
+                    shell_pages or visible_campaign_page_manifest,
+                    record.definition, record.state_record.state or {},
+                    section=section, campaign=phase_campaign,
+                )
+
         include_controls_subpage = (
             can_use_session_mode and campaign_supports_character_controls_routes(campaign)
         )
@@ -4913,6 +5086,25 @@ def create_app() -> Flask:
 
             def build_character_shell_projection() -> dict[str, object]:
                 nonlocal shell_campaign_page_records
+                if source_phase_features_read and not get_db().in_transaction and active():
+                    from copy import deepcopy
+                    from .character_source_reads import native_character_source_context
+                    proposed = None
+                    with native_character_source_context(
+                        record, systems_service=get_systems_service(), campaign=campaign,
+                        purpose="character-shell-read",
+                    ) as (phase, reader, _pages, _owner):
+                        if phase is not None:
+                            phase_campaign = phase.campaign()
+                            phase_pages = materialize_feature_phase_pages(
+                                phase, phase_campaign, section="shell",
+                            )
+                            proposed = deepcopy(build_dnd_character_read_shell_projection(
+                                phase_campaign, record, systems_service=reader,
+                                campaign_page_records=phase_pages,
+                            ))
+                    if proposed is not None:
+                        return proposed
                 with measure_character_read_component("page-records"):
                     shell_campaign_page_records = materialize_dnd_character_read_page_records(
                         get_campaign_page_store(),
@@ -4948,16 +5140,17 @@ def create_app() -> Flask:
                 include_spellcasting=include_spellcasting_subpage,
                 include_controls=include_controls_subpage,
             )
-            with measure_character_read_component("page-records"):
-                campaign_page_records = materialize_dnd_character_read_page_records(
-                    get_campaign_page_store(),
-                    campaign_slug,
-                    shell_campaign_page_records or visible_campaign_page_manifest,
-                    record.definition,
-                    record.state_record.state or {},
-                    section=character_subpage,
-                    campaign=campaign,
-                )
+            if not source_phase_features_read:
+                with measure_character_read_component("page-records"):
+                    campaign_page_records = materialize_dnd_character_read_page_records(
+                        get_campaign_page_store(),
+                        campaign_slug,
+                        shell_campaign_page_records or visible_campaign_page_manifest,
+                        record.definition,
+                        record.state_record.state or {},
+                        section=character_subpage,
+                        campaign=campaign,
+                    )
         shared_item_catalog: dict[str, object] | None = None
         shared_spell_catalog: dict[str, object] | None = None
         advancement_lane = character_advancement_lane(getattr(campaign, "system", ""))
@@ -5101,8 +5294,45 @@ def create_app() -> Flask:
             except ValueError as exc:
                 flash(str(exc), "warning")
 
-        with measure_character_read_component("presentation"):
-            character = (
+        def present_selected_character():
+            nonlocal campaign_page_records
+            if source_phase_features_read and character_subpage == "features":
+                from copy import deepcopy
+                from .character_source_reads import native_character_source_context
+                proposed = None
+                if not get_db().in_transaction and active():
+                    with native_character_source_context(
+                        record, systems_service=get_systems_service(), campaign=campaign,
+                        purpose="character-section-read",
+                    ) as (phase, reader, _pages, _owner):
+                        if phase is not None:
+                            phase_campaign = phase.campaign()
+                            phase_pages = materialize_feature_phase_pages(
+                                phase, phase_campaign, section=character_subpage,
+                            )
+                            proposed = deepcopy(present_dnd_character_section(
+                                phase_campaign, record, section=character_subpage,
+                                include_player_notes_section=not is_session_mode,
+                                systems_service=reader, campaign_page_records=phase_pages,
+                            ))
+                if proposed is not None:
+                    return proposed
+                # A pre-dispatch decline retains the original unphased recipe.
+                with measure_character_read_component("page-records"):
+                    fallback_shell_pages = shell_campaign_page_records
+                    if fallback_shell_pages is None:
+                        fallback_shell_pages = materialize_dnd_character_read_page_records(
+                            get_campaign_page_store(), campaign_slug, visible_campaign_page_manifest,
+                            record.definition, record.state_record.state or {},
+                            section="shell", campaign=campaign,
+                        )
+                    campaign_page_records = materialize_dnd_character_read_page_records(
+                        get_campaign_page_store(), campaign_slug,
+                        fallback_shell_pages or visible_campaign_page_manifest,
+                        record.definition, record.state_record.state or {},
+                        section=character_subpage, campaign=campaign,
+                    )
+            return (
                 present_dnd_character_section(
                     campaign,
                     record,
@@ -5120,6 +5350,8 @@ def create_app() -> Flask:
                     campaign_page_records=campaign_page_records,
                 )
             )
+        with measure_character_read_component("presentation"):
+            character = present_selected_character()
         if scoped_dnd_read:
             character.setdefault(
                 "death_save_summary",
@@ -5390,6 +5622,8 @@ def create_app() -> Flask:
                 definition, spell_choice_markers, spell_choice_bases, spell_choice_snapshot = (
                     prepare_native_spell_choice_authorizations(
                         prior_definition=record.definition, candidate_definition=definition,
+                        prior_record=record,
+                        actor_id=user.id,
                         state=record.state_record.state,
                         state_revision=record.state_record.revision,
                         systems_service=get_systems_service(),
@@ -5414,6 +5648,19 @@ def create_app() -> Flask:
                 prior_definition=record.definition if dnd_removed_item_id else None,
                 explicit_removed_item_id=dnd_removed_item_id,
             )
+            native_choice_audit = None
+            if spell_choice_markers:
+                def native_choice_audit():
+                    from .character_source_repair import prepare_native_spell_choice_audit_metadata
+                    return prepare_native_spell_choice_audit_metadata(
+                        record, definition, merged_state, actor_id=user.id,
+                        markers=spell_choice_markers,
+                        source_snapshot_digest=spell_choice_snapshot,
+                        source_basis_digests=spell_choice_bases,
+                        event_type="character_native_spell_selected",
+                        systems_service=get_systems_service(),
+                        campaign_page_records=list_visible_character_page_records(campaign_slug, campaign),
+                    )
             character_publication_coordinator.update(
                 record,
                 definition,
@@ -5423,11 +5670,15 @@ def create_app() -> Flask:
                 updated_by_user_id=user.id,
                 operation_kind="interactive_update",
                 trusted_spell_choice_authoring=committed_mode and anchor == "character-spell-manager",
+                native_choice_audit=native_choice_audit,
                 explicit_removed_item_id=dnd_removed_item_id,
             )
             if spell_choice_markers:
                 from .character_source_authority import build_reconciled_source_authority
-                from .character_source_repair import record_confirmed_native_level_up_witness
+                from .character_source_repair import (
+                    load_verified_manual_actions, load_verified_numeric_actions,
+                    record_confirmed_native_level_up_witness,
+                )
                 choice_confirmed = False
                 try:
                     current_campaign, readback = load_character_context(campaign_slug, character_slug)
@@ -5437,6 +5688,8 @@ def create_app() -> Flask:
                         systems_service=get_systems_service(),
                         campaign_page_records=list_visible_character_page_records(
                             campaign_slug, current_campaign),
+                        verified_manual_actions=load_verified_manual_actions(campaign_slug, character_slug),
+                        verified_numeric_actions=load_verified_numeric_actions(campaign_slug, character_slug),
                     )
                     if (current_authority.source_snapshot_digest == spell_choice_snapshot
                             and all(current_authority.numeric_basis_digest(target_id) == basis
@@ -5449,11 +5702,15 @@ def create_app() -> Flask:
                             source_basis_digests=spell_choice_bases,
                             actor_id=user.id, auth_store=get_auth_store(),
                             witness_kind="native_spell_choice",
+                            prior_record=record, prior_definition=record.definition,
+                            systems_service=get_systems_service(),
+                            campaign_page_records=list_visible_character_page_records(
+                                campaign_slug, current_campaign),
                         )
                 except Exception:
                     choice_confirmed = False
                 if not choice_confirmed:
-                    flash("Spell selection was saved, but its source needs review before automatic effects apply.", "warning")
+                    flash("Spell choice change was saved, but its selection or retirement could not be confirmed. Review the Character before submitting again; automatic choice effects remain withheld.", "warning")
                     return redirect_to_character_mode(campaign_slug, character_slug, anchor=anchor)
         except CharacterPublicationConflict:
             draft_names_by_anchor = {
@@ -6793,7 +7050,8 @@ def create_app() -> Flask:
                     with measure_character_read_component("catalogs"):
                         character_spell_catalog = build_session_character_spell_manager_catalog(
                             campaign_slug,
-                            record.definition,
+                            record,
+                            campaign=campaign,
                             systems_service=character_systems_service,
                         )
                     with measure_character_read_component("managers"):
@@ -10056,6 +10314,18 @@ def create_app() -> Flask:
             "app_loading_image_url": loading_image_url,
         }
 
+    from .db import SourceReadConnectionFatal
+
+    @app.errorhandler(SourceReadConnectionFatal)
+    def source_read_connection_unavailable(_error):
+        return "Character source connection is unavailable.", 503, {"Content-Type": "text/plain; charset=utf-8"}
+
+    @app.errorhandler(500)
+    def source_read_internal_failure(error):
+        if isinstance(getattr(error, "original_exception", None), SourceReadConnectionFatal):
+            return source_read_connection_unavailable(error)
+        return error
+
     @app.errorhandler(404)
     def not_found(_: Exception):
         return render_template("not_found.html"), 404
@@ -10656,6 +10926,28 @@ def create_app() -> Flask:
             ),
         )
 
+    @app.post("/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/flexible-casting")
+    @campaign_scope_access_required("combat")
+    def campaign_combat_character_flexible_casting(campaign_slug: str, combatant_id: int):
+        campaign = load_campaign_context(campaign_slug)
+        if not campaign_supports_dnd5e_character_spellcasting_tools(campaign):
+            flash(DND5E_CHARACTER_SPELLCASTING_TOOLS_UNSUPPORTED_MESSAGE, "error")
+            return redirect(url_for("campaign_view", campaign_slug=campaign_slug))
+
+        def action(record, expected_revision, user_id):
+            direction = request.form.get("direction", "")
+            if direction == "convert":
+                from .character_spell_slots import parse_spell_slot_selection
+                lane, level = parse_spell_slot_selection(request.form.get("slot_selection"))
+            else:
+                lane, level = "", request.form.get("level")
+            return get_character_state_service().flexible_casting(
+                record, direction=direction, slot_level=level, slot_lane_id=lane,
+                expected_revision=expected_revision, updated_by_user_id=user_id)
+
+        return run_combat_character_mutation(campaign_slug, combatant_id,
+            anchor="combat-character-spell-slots", success_message="Flexible Casting updated.", action=action)
+
     @app.post("/campaigns/<campaign_slug>/combat/character/combatants/<int:combatant_id>/item-actions/<action_id>/use")
     @campaign_scope_access_required("combat")
     def campaign_combat_character_item_action_use(
@@ -11177,9 +11469,7 @@ def create_app() -> Flask:
         campaign_supports_native_character_create=campaign_supports_native_character_create,
         native_character_create_lane=lambda value: native_character_create_lane(value),
         get_character_repository=get_character_repository,
-        present_character_roster=lambda records, **kwargs: present_roster_with_current_context(
-            records, kwargs["campaign"]
-        ),
+        present_character_roster=lambda records, **kwargs: present_character_directory(records),
         can_manage_campaign_session=lambda campaign_slug: can_manage_campaign_session(
             campaign_slug
         ),
@@ -11618,9 +11908,10 @@ def create_app() -> Flask:
                     entry_type,
                 )
             ),
-            can_access_campaign_systems_entry=lambda campaign_slug, entry_slug: (
-                can_access_campaign_systems_entry(campaign_slug, entry_slug)
+            can_access_campaign_systems_entry=lambda campaign_slug, entry_slug, *, systems_service=None: (
+                can_access_campaign_systems_entry(campaign_slug, entry_slug, systems_service=systems_service)
             ),
+            prepare_campaign_systems_entry_access=prepare_campaign_systems_entry_access,
             build_campaign_page_character_option=(
                 build_campaign_page_character_option
             ),
@@ -11717,6 +12008,7 @@ def create_app() -> Flask:
         app,
         dependencies=CharacterSpellSearchRouteDependencies(
             load_character_context=load_character_context,
+            project_character_spell_management_definition=project_character_spell_management_definition,
             campaign_supports_dnd5e_character_spellcasting_tools=(
                 campaign_supports_dnd5e_character_spellcasting_tools
             ),
@@ -11957,6 +12249,14 @@ def create_app() -> Flask:
         ),
     )
 
+    from .character_artificer_assignment_routes import AssignmentRouteDependencies, register_assignment_routes
+    register_assignment_routes(app, dependencies=AssignmentRouteDependencies(
+        load_session_character_context=load_session_character_context,
+        has_session_mode_access=has_session_mode_access,
+        get_character_state_service=get_character_state_service,
+        present_assignment_read=present_assignment_read,
+        run_session_mutation=run_session_mutation))
+
     register_character_session_item_action_route(
         app,
         dependencies=CharacterSessionItemActionRouteDependencies(
@@ -11983,6 +12283,7 @@ def create_app() -> Flask:
     register_character_session_inventory_route(
         app,
         dependencies=CharacterSessionInventoryRouteDependencies(
+            can_manage_campaign_content=can_manage_campaign_content,
             is_xianxia_system=lambda system: is_xianxia_system(system),
             get_character_state_service=get_character_state_service,
             run_session_mutation=run_session_mutation,

@@ -18,6 +18,7 @@ import yaml
 from .character_assets import validate_character_portrait_asset_ref
 from .committed_source_store import (
     _decode_mapping, _page_parity, _validate_config_payload, _validated_character_dir,
+    _character_system_code,
 )
 from .system_policy import normalize_system_code
 from .legacy_page_exclusion import proved_exclusions, is_exclusion_claim
@@ -263,7 +264,7 @@ def inspect_snapshot_coherence(
                         imported.get("character_slug") != ref or
                         not isinstance(definition.get("name"), str) or not definition["name"].strip() or
                         not isinstance(definition.get("status"), str) or not definition["status"].strip() or
-                        normalize_system_code(definition.get("system")) != config.system_code or
+                        _character_system_code(definition) != config.system_code or
                         not all(isinstance(imported.get(key), str) for key in
                                 ("source_path", "imported_at_utc", "parser_version", "import_status")) or
                         not isinstance(imported.get("warnings"), list) or

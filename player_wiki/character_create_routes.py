@@ -8,6 +8,10 @@ from flask import abort, flash, redirect, request, url_for
 from .auth import campaign_scope_access_required
 from .character_builder import CharacterBuildError
 from .character_path_safety import CharacterPathSafetyError
+from .character_spell_grants import (
+    ACQUISITION_FIELD, TRUSTED_ACQUISITION_KEY, GrantContractError,
+    resolve_acquisition_intent,
+)
 from .character_source_repair import (
     SourceRepairError, prepare_native_creation_authorizations,
     record_confirmed_native_creation_witness,
@@ -148,15 +152,34 @@ def register_character_create_route(
         campaign_page_records = dependencies.list_builder_campaign_page_records(
             campaign_slug, campaign
         )
-        form_values = dict(
-            request.form if request.method == "POST" else request.args
-        )
-        builder_context = dependencies.build_level_one_builder_context(
-            dependencies.get_systems_service(),
-            campaign_slug,
-            form_values,
-            campaign_page_records=campaign_page_records,
-        )
+        form_source = request.form if request.method == "POST" else request.args
+        form_values = dict(form_source)
+        if request.method == "POST" and dependencies.get_current_auth_source() == "view_as":
+            abort(403)
+        actor_id = getattr(dependencies.get_authenticated_user(), "id", None)
+        if type(actor_id) is not int or actor_id < 1:
+            abort(403)
+        from .committed_publication import active
+        acquisition_context = None
+        form_values.pop(ACQUISITION_FIELD, None)
+        form_values.pop(TRUSTED_ACQUISITION_KEY, None)
+        try:
+            if active():
+                acquisition_token, acquisition_context = resolve_acquisition_intent(
+                    form_source, campaign_slug=campaign_slug, actor_id=actor_id,
+                    mode="create",
+                    allow_issue=request.method != "POST" and "_live_preview" not in request.args,
+                )
+                form_values[ACQUISITION_FIELD] = acquisition_token
+                form_values[TRUSTED_ACQUISITION_KEY] = acquisition_context
+            builder_context = dependencies.build_level_one_builder_context(
+                dependencies.get_systems_service(),
+                campaign_slug,
+                form_values,
+                campaign_page_records=campaign_page_records,
+            )
+        except (GrantContractError, CharacterBuildError) as exc:
+            abort(400, description=str(exc))
         builder_ready = bool(
             builder_context.get("class_options")
             and builder_context.get("species_options")
@@ -166,13 +189,6 @@ def register_character_create_route(
             return dependencies.render_character_builder_page(
                 campaign_slug, builder_context
             )
-
-        if dependencies.get_current_auth_source() == "view_as":
-            abort(403)
-        actor = dependencies.get_authenticated_user()
-        actor_id = getattr(actor, "id", None)
-        if type(actor_id) is not int or actor_id < 1:
-            abort(403)
 
         if not builder_ready:
             flash(
@@ -198,7 +214,7 @@ def register_character_create_route(
                 mode="historical",
             )
             dependencies.validate_character_slug(definition.character_slug)
-        except (CharacterBuildError, CharacterPathSafetyError) as exc:
+        except (CharacterBuildError, CharacterPathSafetyError, GrantContractError) as exc:
             flash(str(exc), "error")
             return dependencies.render_character_builder_page(
                 campaign_slug, builder_context, status_code=400
@@ -213,6 +229,7 @@ def register_character_create_route(
                 definition, initial_state,
                 systems_service=dependencies.get_systems_service(),
                 campaign_page_records=dependencies.list_visible_character_page_records(campaign_slug, campaign),
+                acquisition_context=acquisition_context,
             )
         except SourceRepairError:
             from .committed_publication import active
@@ -269,6 +286,7 @@ def register_character_create_route(
                     source_snapshot_digest=source_snapshot_digest,
                     load_current_source_context=load_current_source_context,
                     actor_id=actor_id, auth_store=dependencies.get_auth_store(),
+                    acquisition_context=acquisition_context,
                 )
             except Exception:
                 # Publication already succeeded. Report the audit gap without a retry.

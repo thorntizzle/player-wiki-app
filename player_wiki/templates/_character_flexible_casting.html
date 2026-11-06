@@ -1,0 +1,45 @@
+{% macro totals(rows) %}
+  {% if rows %}
+    <ul class="plain-list slot-list" aria-label="Combined spell-slot availability">
+      {% for row in rows %}
+        <li><span>Level {{ row.level }} total</span><strong>{% if row.qualified %}{{ row.available }} available / {{ row.max }}{% else %}Needs repair{% endif %}</strong></li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endmacro %}
+
+{% macro controls(feature, action, revision) %}
+  {% if feature %}
+    <section class="detail-card">
+      <h3>{{ feature.label }}</h3>
+      <p class="meta">{{ feature.action_cost }}. {{ feature.expiry }}</p>
+      {% if feature.repair_reason %}<p class="meta">{{ feature.repair_reason }}</p>{% endif %}
+      <form method="post" action="{{ action }}" class="session-inline-form">
+        {{ csrf_input() }}{{ caller() }}
+        <input type="hidden" name="expected_revision" value="{{ revision }}">
+        <input type="hidden" name="direction" value="create">
+        <label class="session-field"><span>Create spell slot</span>
+          <select name="level" required>
+            {% for option in feature.create_options %}
+              <option value="{{ option.level }}" {% if not option.enabled %}disabled{% endif %}>Level {{ option.level }}: {{ option.cost }} Sorcery Points</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit" {% if not feature.create_options | selectattr('enabled') | list %}disabled{% endif %}>Create slot</button>
+      </form>
+      <form method="post" action="{{ action }}" class="session-inline-form">
+        {{ csrf_input() }}{{ caller() }}
+        <input type="hidden" name="expected_revision" value="{{ revision }}">
+        <input type="hidden" name="direction" value="convert">
+        <label class="session-field"><span>Convert spell slot to Sorcery Points</span>
+          <select name="slot_selection" required>
+            {% for option in feature.convert_options %}
+              <option value="{{ option.selection }}" {% if not option.enabled %}disabled{% endif %}>{{ option.label }}: gain {{ option.level }} Sorcery Points ({{ option.available }} available)</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit" {% if not feature.convert_options | selectattr('enabled') | list %}disabled{% endif %}>Convert slot</button>
+      </form>
+    </section>
+  {% endif %}
+{% endmacro %}

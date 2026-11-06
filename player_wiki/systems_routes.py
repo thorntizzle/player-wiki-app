@@ -18,8 +18,10 @@ from .auth import (
     login_required,
 )
 from .repository import normalize_lookup
+from .campaign_page_refresh import CampaignRefreshTransactionError
 from .input_limits import IngressLimitError, spool_bounded_stream
 from .systems_importer import Dnd5eSystemsImporter, SUPPORTED_ENTRY_TYPES
+from .systems_store import SystemsReplacementOwnershipError
 from .systems_ingest import (
     SystemsIngestError,
     configured_systems_archive_limits,
@@ -97,6 +99,8 @@ class SystemsCustomEntryFormInput:
     provenance: str
     search_metadata: str
     body_markdown: str
+    spell_profile_json: str
+    spell_higher_level_markdown: str | None
 
     def as_form_data(self) -> dict[str, str]:
         if not self.had_form_fields:
@@ -112,6 +116,8 @@ class SystemsCustomEntryFormInput:
             "custom_entry_provenance": self.provenance,
             "custom_entry_search_metadata": self.search_metadata,
             "custom_entry_body_markdown": self.body_markdown,
+            "custom_entry_spell_profile": self.spell_profile_json,
+            "custom_entry_spell_higher_level_markdown": self.spell_higher_level_markdown,
         }
 
 
@@ -461,6 +467,8 @@ def _parse_custom_entry_form() -> SystemsCustomEntryFormInput:
         provenance=request.form.get("custom_entry_provenance", ""),
         search_metadata=request.form.get("custom_entry_search_metadata", ""),
         body_markdown=request.form.get("custom_entry_body_markdown", ""),
+        spell_profile_json=request.form.get("custom_entry_spell_profile", ""),
+        spell_higher_level_markdown=request.form.get("custom_entry_spell_higher_level_markdown"),
     )
 
 
@@ -865,6 +873,8 @@ def campaign_systems_control_panel_create_custom_entry(campaign_slug: str):
 
     form = _parse_custom_entry_form()
     try:
+        from .systems_spell_authoring import parse_spell_profile_form
+        profile = parse_spell_profile_form(form.spell_profile_json)
         entry = dependencies.get_service().create_custom_campaign_entry(
             campaign_slug,
             title=form.title,
@@ -874,6 +884,7 @@ def campaign_systems_control_panel_create_custom_entry(campaign_slug: str):
             visibility=form.visibility,
             search_metadata=form.search_metadata,
             body_markdown=form.body_markdown,
+            spell_profile=profile, spell_higher_level_markdown=form.spell_higher_level_markdown,
             actor_user_id=user.id,
             can_set_private=bool(user.is_admin),
         )
@@ -946,6 +957,8 @@ def campaign_systems_control_panel_update_custom_entry(
 
     form = _parse_custom_entry_form()
     try:
+        from .systems_spell_authoring import parse_spell_profile_form
+        profile = parse_spell_profile_form(form.spell_profile_json)
         entry = systems_service.update_custom_campaign_entry(
             campaign_slug,
             entry_slug,
@@ -955,6 +968,7 @@ def campaign_systems_control_panel_update_custom_entry(
             visibility=form.visibility,
             search_metadata=form.search_metadata,
             body_markdown=form.body_markdown,
+            spell_profile=profile, spell_higher_level_markdown=form.spell_higher_level_markdown,
             actor_user_id=user.id,
             can_set_private=bool(user.is_admin),
         )
@@ -1082,13 +1096,31 @@ def campaign_systems_control_panel_restore_custom_entry(
 @login_required
 def campaign_systems_control_panel_import_dnd5e(campaign_slug: str):
     dependencies = _dependencies()
-    dependencies.load_campaign(campaign_slug)
-    if not can_manage_campaign_systems(campaign_slug):
-        abort(403)
 
-    user = get_current_user()
-    if user is None or not user.is_admin:
-        abort(403)
+    def ownership_refused():
+        response = make_response("Systems source import requires a connection without an active transaction.", 400)
+        response.mimetype = "text/plain"
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
+    try:
+        dependencies.load_campaign(campaign_slug)
+        if not can_manage_campaign_systems(campaign_slug):
+            abort(403)
+
+        user = get_current_user()
+        if user is None or not user.is_admin:
+            abort(403)
+    except CampaignRefreshTransactionError:
+        # Legacy repository preparation already refuses caller-owned work. Do
+        # not render a Systems context while handling that ownership refusal.
+        return ownership_refused()
+
+    systems_service = dependencies.get_service()
+    try:
+        systems_service.store.assert_import_ownership()
+    except SystemsReplacementOwnershipError:
+        return ownership_refused()
 
     return_to_dm_content_systems = request.form.get("return_to") == "dm-content-systems"
 
@@ -1111,7 +1143,6 @@ def campaign_systems_control_panel_import_dnd5e(campaign_slug: str):
             ),
         ), status_code
 
-    systems_service = dependencies.get_service()
     library_slug = systems_service.get_campaign_library_slug(campaign_slug)
     if not supports_dnd5e_systems_import(library_slug):
         return render_import_error(
@@ -1205,6 +1236,10 @@ def campaign_systems_control_panel_import_dnd5e(campaign_slug: str):
                     import_version=import_version,
                     source_path_label=source_path_label,
                 )
+    except SystemsReplacementOwnershipError:
+        # The generic ValueError renderer below can seed Systems content, so a
+        # late ownership refusal must return directly without that renderer.
+        return ownership_refused()
     except FileNotFoundError:
         return render_import_error(
             "Import archive does not contain the selected source data."

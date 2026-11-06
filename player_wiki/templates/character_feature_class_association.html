@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Repair feature class | {{ character.name }}{% endblock %}
+{% block content %}
+<div class="page-stack">
+  <header class="card">
+    <h1>Repair feature class for {{ character.name }}</h1>
+    <p>Associate an existing source-backed feature with its owning class. Current class levels supply its scaling value. This preserves every other Character field, history and play state.</p>
+    <a href="{{ url_for('character_source_repair_view', campaign_slug=campaign.slug, character_slug=character.character_slug) }}">Back to source repair</a>
+  </header>
+  {% if outcome %}<section class="callout" role="status"><p>{{ outcome }}</p></section>{% endif %}
+  {% if review %}
+  <section class="card">
+    <h2>Review class association</h2>
+    <p>Associate feature {{ review.feature_id }} with class {{ review.class_row_id }}. No feature is added or removed. Equipment and play state remain unchanged.</p>
+    <form method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="intent" value="apply">
+      <input type="hidden" name="review_token" value="{{ review.token }}">
+      <button type="submit">Apply class association</button>
+    </form>
+  </section>
+  {% endif %}
+  <section class="card">
+    <h2>Choose existing rows</h2>
+    {% if features and classes %}
+    <form method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="intent" value="review">
+      <label>Feature <select name="feature_id" required>{% for row in features %}<option value="{{ row.id }}">{{ row.name or row.title or row.id }}</option>{% endfor %}</select></label>
+      <label>Owning class <select name="class_row_id" required>{% for row in classes %}<option value="{{ row.row_id }}">{{ row.name or row.class_name or row.row_id }} (level {{ row.level }})</option>{% endfor %}</select></label>
+      <button type="submit">Review class association</button>
+    </form>
+    {% else %}<p>No supported feature with a missing class association is available.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

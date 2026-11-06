@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -7,6 +8,7 @@ from flask import request
 
 from .auth import campaign_scope_access_required
 from .character_editor import CharacterEditValidationError
+from .character_service import prepare_inventory_note_overrides
 
 
 @dataclass(frozen=True)
@@ -169,6 +171,10 @@ def register_character_equipment_definition_routes(
                     "Choose a valid supplemental equipment entry to update."
                 )
             systems_ref = dict(manual_entry.get("systems_ref") or {})
+            note_overrides = prepare_inventory_note_overrides(
+                record.definition, record.state_record.state or {},
+                {item_id: request.form["notes"]} if "notes" in request.form else {},
+            )
             include_page_refs = (
                 {
                     dependencies.normalize_character_page_ref(
@@ -185,7 +191,7 @@ def register_character_equipment_definition_routes(
                 section=dependencies.character_items_section,
                 include_page_refs=include_page_refs,
             )
-            return dependencies.apply_equipment_catalog_edit(
+            result = dependencies.apply_equipment_catalog_edit(
                 campaign_slug,
                 record.definition,
                 record.import_metadata,
@@ -204,12 +210,23 @@ def register_character_equipment_definition_routes(
                     if not systems_ref
                     else str(manual_entry.get("weight") or "")
                 ),
-                notes=request.form.get("notes", ""),
+                notes=note_overrides.get(item_id, {}).get("notes", manual_entry.get("notes", "")),
                 page_ref=(
                     request.form.get("page_ref", "") if not systems_ref else ""
                 ),
                 systems_ref=systems_ref or None,
             )
+            if item_id not in note_overrides:
+                # An unrelated edit must retain the raw memo, including key absence.
+                next_definition = deepcopy(result[0])
+                for item in next_definition.equipment_catalog:
+                    if item.get("id") == item_id:
+                        if "notes" in manual_entry:
+                            item["notes"] = deepcopy(manual_entry["notes"])
+                        else:
+                            item.pop("notes", None)
+                result = (next_definition, *result[1:])
+            return (*result, note_overrides)
 
         return dependencies.run_character_definition_mutation(
             campaign_slug,

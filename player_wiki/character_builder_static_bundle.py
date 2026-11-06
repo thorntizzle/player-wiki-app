@@ -40,6 +40,61 @@ __all__ = [
 ]
 
 
+def _build_builder_bundle_contents(systems_service, campaign_slug, campaign_page_records, *, catalog_source=None):
+    """Shared ordered sibling production; private sources alter representation only."""
+    page_records = list(campaign_page_records or [])
+    class_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "class")
+    subclass_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "subclass")
+    race_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "race")
+    background_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "background")
+    feat_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "feat")
+    optionalfeature_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "optionalfeature")
+    item_entries = (_list_campaign_enabled_entries(systems_service, campaign_slug, "item")
+                    if catalog_source is None else catalog_source.capture("item"))
+    spell_entries = (_list_campaign_enabled_entries(systems_service, campaign_slug, "spell")
+                     if catalog_source is None else catalog_source.capture("spell"))
+    species_options = _build_mixed_character_options(
+        race_entries,
+        page_records,
+        kind="species",
+    )
+    background_options = _build_mixed_character_options(
+        background_entries,
+        page_records,
+        kind="background",
+    )
+    feat_options = _build_mixed_character_options(
+        feat_entries,
+        page_records,
+        kind="feat",
+    )
+    return {
+        "class_entries": class_entries,
+        "supported_class_entries": [
+            entry for entry in class_entries if _supports_native_class_entry(entry)
+        ],
+        "subclass_entries": subclass_entries,
+        "species_options": species_options,
+        "background_options": background_options,
+        "feat_options": feat_options,
+        "feat_catalog": _build_feat_catalog(feat_options),
+        "optionalfeature_catalog": _build_entry_slug_catalog(optionalfeature_entries),
+        "item_catalog": (_attach_campaign_item_page_support(
+            _build_item_catalog(item_entries), page_records,
+        ) if catalog_source is None else catalog_source.build_item(item_entries, page_records)),
+        "spell_catalog": (_build_spell_catalog(spell_entries) if catalog_source is None
+                          else catalog_source.build_spell(spell_entries)),
+        "campaign_feature_options": _build_campaign_page_choice_options(
+            page_records,
+            include_items=False,
+        ),
+        "campaign_item_options": _build_campaign_page_choice_options(
+            page_records,
+            include_items=True,
+        ),
+    }
+
+
 def _build_common_builder_static_bundle(
     systems_service: Any,
     campaign_slug: str,
@@ -51,55 +106,7 @@ def _build_common_builder_static_bundle(
     revision_key = _builder_static_revision_key(systems_service, campaign_slug)
 
     def _build_bundle() -> dict[str, Any]:
-        page_records = list(campaign_page_records or [])
-        class_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "class")
-        subclass_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "subclass")
-        race_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "race")
-        background_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "background")
-        feat_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "feat")
-        optionalfeature_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "optionalfeature")
-        item_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "item")
-        spell_entries = _list_campaign_enabled_entries(systems_service, campaign_slug, "spell")
-        species_options = _build_mixed_character_options(
-            race_entries,
-            page_records,
-            kind="species",
-        )
-        background_options = _build_mixed_character_options(
-            background_entries,
-            page_records,
-            kind="background",
-        )
-        feat_options = _build_mixed_character_options(
-            feat_entries,
-            page_records,
-            kind="feat",
-        )
-        return {
-            "class_entries": class_entries,
-            "supported_class_entries": [
-                entry for entry in class_entries if _supports_native_class_entry(entry)
-            ],
-            "subclass_entries": subclass_entries,
-            "species_options": species_options,
-            "background_options": background_options,
-            "feat_options": feat_options,
-            "feat_catalog": _build_feat_catalog(feat_options),
-            "optionalfeature_catalog": _build_entry_slug_catalog(optionalfeature_entries),
-            "item_catalog": _attach_campaign_item_page_support(
-                _build_item_catalog(item_entries),
-                page_records,
-            ),
-            "spell_catalog": _build_spell_catalog(spell_entries),
-            "campaign_feature_options": _build_campaign_page_choice_options(
-                page_records,
-                include_items=False,
-            ),
-            "campaign_item_options": _build_campaign_page_choice_options(
-                page_records,
-                include_items=True,
-            ),
-        }
+        return _build_builder_bundle_contents(systems_service, campaign_slug, campaign_page_records)
 
     def _build_or_load_static_bundle() -> dict[str, Any]:
         if revision_key is None:
@@ -240,3 +247,13 @@ def _build_campaign_item_choice_fields(
             }
         )
     return fields
+
+
+_NATIVE_READ_BUNDLE_RECIPE = tuple((name, globals()[name]) for name in (
+    "_build_builder_bundle_contents", "_build_mixed_character_options",
+    "_build_feat_catalog", "_build_entry_slug_catalog", "_supports_native_class_entry",
+    "_build_campaign_page_choice_options", "_list_campaign_enabled_entries",
+    "_builder_request_page_key", "_builder_service_cache_identity", "_builder_static_revision_key",
+    "_build_item_catalog", "_build_spell_catalog", "_attach_campaign_item_page_support",
+    "_builder_cache_get", "_bind_revision_key", "_build_common_builder_static_bundle",
+))
