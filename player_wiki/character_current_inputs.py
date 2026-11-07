@@ -104,12 +104,14 @@ def _witness_kinds():
     from .character_spell_grants import NativeGrantCustody
     from .character_spell_reconstruction import NativeSpellReconstructionFact
     from .character_language_electives import NativeElectiveDecision, PendingElectiveOutcome
+    from .character_external_proficiencies import ExternalProficiencyCustody
     return ((dict, "plain-dict"), (NativeAggregateWitness, "native-aggregate"),
             (NativeSpellChoiceDecision, "native-spell-choice"),
             (NativeGrantCustody, "native-grant-custody"),
             (NativeSpellReconstructionFact, "native-spell-reconstruction"),
             (NativeElectiveDecision, "native-elective"),
-            (PendingElectiveOutcome, "pending-elective"))
+            (PendingElectiveOutcome, "pending-elective"),
+            (ExternalProficiencyCustody, "external-proficiency-custody"))
 
 
 def _admit_witness_inputs(rows, budget, kinds):

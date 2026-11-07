@@ -3565,11 +3565,15 @@ def _normalize_equipment_payloads(
     *,
     item_catalog: dict[str, Any] | None = None,
     trusted_source: tuple[str, str] | None = None,
+    strict_activation: bool = True,
 ) -> list[dict[str, Any]]:
     normalized_equipment: list[dict[str, Any]] = []
     index_by_key: dict[tuple[str, str, str, str, bool], int] = {}
     for equipment_payload in list(equipment_payloads or []):
         payload = dict(equipment_payload or {})
+        from .character_equipment_activation import require_activation_values
+        if strict_activation:
+            require_activation_values(payload)
         currency = dict(payload.get("currency") or {})
         is_currency_only = bool(payload.get("is_currency_only"))
         name = str(payload.get("name") or "").strip() or (_format_currency_seed(currency) if currency else "")

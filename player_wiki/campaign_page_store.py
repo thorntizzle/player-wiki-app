@@ -351,19 +351,6 @@ class CampaignPageStore:
             """,
             (campaign_slug, query_limit, query_offset),
         ).fetchall()
-        from .committed_publication import active, page_row, config
-        if active():
-            _, settings = config(campaign_slug)
-            proved = []
-            for row in rows:
-                try:
-                    proof = page_row(campaign_slug, row["page_ref"])
-                except ValueError:
-                    continue
-                if (proof is not None and proof["published"] == 1 and proof["section"] == "Mechanics"
-                        and proof["reveal_after_session"] <= int(settings["current_session"])):
-                    proved.append(proof)
-            rows = proved
         if offset:
             if (
                 not rows
@@ -376,8 +363,23 @@ class CampaignPageStore:
             candidates = rows
         has_more = len(candidates) > page_limit
         selected = candidates[:page_limit]
+        # Cursor positions and exhaustion belong to the raw SQL inventory.
+        # Ineligible rows still advance it; the lookahead remains for next time.
+        emitted = selected
+        from .committed_publication import active, page_row, config
+        if active():
+            _, settings = config(campaign_slug)
+            emitted = []
+            for row in selected:
+                try:
+                    proof = page_row(campaign_slug, row["page_ref"])
+                except ValueError:
+                    continue
+                if (proof is not None and proof["published"] == 1 and proof["section"] == "Mechanics"
+                        and proof["reveal_after_session"] <= int(settings["current_session"])):
+                    emitted.append(proof)
         consumers: list[SourceHealthConsumer] = []
-        for row in selected:
+        for row in emitted:
             page_ref = str(row["page_ref"])
             route_slug = str(row["route_slug"] or page_ref)
             try:

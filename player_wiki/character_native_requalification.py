@@ -430,6 +430,12 @@ def _historical_numeric_marker(entry, key, *, accepted_currentness=()):
         batch = [row.get("authorization", row) for row in accepted_currentness if type(row) is dict]
         if not batch:
             return None
+    elif event == "character_native_edited" and "external_proficiency_confirmation" in metadata:
+        from .character_external_proficiencies import historical_marker
+        try:
+            batch = historical_marker(entry, accepted_currentness)
+        except (ValueError, KeyError, TypeError):
+            return None
     elif event in {"character_native_created", "character_native_leveled", "character_native_spell_selected"}:
         created = event == "character_native_created"
         selected = event == "character_native_spell_selected"
@@ -1668,7 +1674,7 @@ def _prepare_native_requalification(*, record: Any, systems_service: Any,
         if old is None or old["metadata_sha256"] != origin["metadata_sha256"]:
             _fail()
         accepted = ()
-        if old["event_type"] in {"character_native_created", "character_native_spell_selected", "character_native_leveled"}:
+        if old["event_type"] in {"character_native_created", "character_native_spell_selected", "character_native_leveled", "character_native_edited"}:
             accepted = tuple(item["witness"] for item in origins if item["audit_id"] == old["audit_id"])
         if old["event_type"] == "character_update_applied" and old["metadata"].get("manager_action") == "native_reconstruct":
             from .character_reconstruction_authority import verified_reconstruction_batch
@@ -2186,6 +2192,10 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
                 from .character_source_repair import NativeSpellChoiceDecision
                 accepted = tuple(w for w in dict(history_cache or {}).get("prior_numeric_witnesses", ())
                     if type(w) is NativeSpellChoiceDecision and w.origin[2] == old["audit_id"])
+            if old["event_type"] == "character_native_edited":
+                from .character_external_proficiencies import ExternalProficiencyCustody
+                accepted = tuple(w for w in dict(history_cache or {}).get("prior_numeric_witnesses", ())
+                    if type(w) is ExternalProficiencyCustody and w.origin[1] == old["audit_id"])
             if old["metadata"].get("manager_action") == "native_reconstruct":
                 from .character_reconstruction_authority import verified_reconstruction_batch
                 accepted = verified_reconstruction_batch(connection, campaign, character,

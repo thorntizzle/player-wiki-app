@@ -1,0 +1,44 @@
+{% if level_up.recorded_adoption_allowed and level_up.physical_hp_input %}
+  <label class="field">
+    <span>Advancement record</span>
+    <select name="advancement_record_type" data-live-preview-trigger="change"
+      data-live-preview-regions="{{ level_up.live_regions_csv }}"
+      data-live-preview-debounce-ms="100">
+      <option value="new" {% if not level_up.completed_advancement %}selected{% endif %}>New advancement</option>
+      <option value="completed" {% if level_up.completed_advancement %}selected{% endif %}>Record a completed advancement</option>
+    </select>
+  </label>
+  {% if level_up.completed_advancement %}
+    {% for field in level_up.recorded_slot_fields %}
+      <label class="field"><span>{{ field.label }}</span>
+        <input type="number" name="{{ field.name }}" min="0" max="{{ field.max }}" step="1" value="{{ field.value }}" required>
+        <small>Enter the observed number already spent. Empty does not mean zero.</small>
+      </label>
+    {% endfor %}
+    <label class="field">
+      <span>Original advancement time</span>
+      <input name="advancement_recorded_at" type="text" maxlength="64"
+        value="{{ level_up['values'].get('advancement_recorded_at', '') }}"
+        placeholder="2026-01-01T12:00:00+00:00"
+        data-live-preview-trigger="input" data-live-preview-regions="{{ level_up.preview_regions_csv }}"
+        data-live-preview-debounce-ms="650">
+      <small>Use the recorded date and time with its UTC offset.</small>
+    </label>
+    <label class="field">
+      <span>Existing advancement record</span>
+      <input name="advancement_evidence" type="text" maxlength="512"
+        value="{{ level_up['values'].get('advancement_evidence', '') }}"
+        data-live-preview-trigger="input" data-live-preview-regions="{{ level_up.preview_regions_csv }}"
+        data-live-preview-debounce-ms="650">
+      <small>Identify the record confirming this completed level and whole HP increase.</small>
+    </label>
+  {% endif %}
+{% endif %}
+<label class="field">
+  <span>{{ 'Recorded total HP increase' if level_up.completed_advancement else 'Physical Hit Die contribution' if level_up.physical_hp_input else 'Hit Point Gain' }}</span>
+  <input type="number" name="hp_gain" min="1" value="{{ level_up['values'].hp_gain }}" placeholder="6"
+    data-live-preview-trigger="{{ level_up.field_live_preview.hp_gain.live_preview_trigger }}"
+    data-live-preview-regions="{{ level_up.field_live_preview.hp_gain.live_preview_regions }}"
+    data-live-preview-debounce-ms="{{ level_up.field_live_preview.hp_gain.live_preview_debounce_ms }}">
+  <small>{% if level_up.completed_advancement %}Enter the whole increase in the existing record, including Constitution already counted there. Current HP is preserved; no original die roll is inferred.{% elif level_up.physical_hp_input %}Enter the physical die contribution only; current Constitution is applied separately by the retained recipe.{% else %}Enter the HP increase for this level based on your table's method.{% endif %}</small>
+</label>

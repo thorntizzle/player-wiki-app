@@ -153,6 +153,32 @@ def next_level_maximum(value: Any, history: Any, *, level: int, constitution: in
     return evaluate_recipe(value, events, level=level, constitution=constitution, faces=faces)
 
 
+def recorded_level_maximum(value: Any, history: Any, *, level: int, constitution: int,
+                           faces: int, whole_hp_gain: int) -> tuple[int, dict[str, Any]]:
+    """Append one known whole increase without manufacturing physical inputs.
+
+    The first supported boundary is deliberately narrower than ordinary native
+    advancement: no continuing effects, Constitution change or intervening
+    physical event can be hidden inside the recorded whole increment.
+    """
+    _integer(faces, 1, 100)
+    recipe = canonical_recipe(value, faces=faces)
+    _integer(whole_hp_gain, 1, 1000)
+    _integer(level, 2, 20)
+    if (not isinstance(history, list) or recipe["retained_history_end"] != len(history)
+            or recipe["continuing_effects"] or constitution != recipe["reference_constitution"]):
+        raise HitPointRecipeError(
+            "This recorded gain needs unchanged Constitution, no continuing HP effects, "
+            "and a complete retained history without later physical events.")
+    # Prove that the old recipe reaches precisely the preceding level first.
+    evaluate_recipe(recipe, history, level=level - 1, constitution=constitution, faces=faces)
+    events = deepcopy(history)
+    events.append({"kind": "level_up", "from_level": level - 1,
+                   "to_level": level, "target_level": level, "max_hp_delta": whole_hp_gain})
+    recipe["retained_history_end"] = len(events)
+    return evaluate_recipe(recipe, events, level=level, constitution=constitution, faces=faces), recipe
+
+
 def recipe_for_source(source: Mapping[str, Any] | None) -> dict[str, Any] | None:
     progression = dict(dict(source or {}).get("native_progression") or {})
     value = progression.get("hp_recipe")

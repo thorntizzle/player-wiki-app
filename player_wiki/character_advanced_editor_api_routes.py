@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from flask import Blueprint, current_app
+from flask import Blueprint, current_app, jsonify
 
 from .character_editor import CharacterEditValidationError, prepare_native_editor_inventory_note_overrides
 from .character_service import CharacterStateValidationError
@@ -12,6 +12,8 @@ from .character_reconciliation import CharacterPublicationConflict
 from .character_source_repair import load_verified_manual_actions, load_verified_numeric_actions
 from .character_source_authority import build_reconciled_source_authority
 from .committed_publication import active
+from . import character_external_proficiencies as external_proficiencies
+from . import character_reference_notes as reference_notes
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,36 @@ def register_character_advanced_editor_api_routes(
 
         try:
             payload = dependencies.load_json_object()
+            nested = payload.get("values")
+            if isinstance(nested, dict) and reference_notes.ACTION in nested:
+                raise ValueError("Use one flat reference-notes request, separately from ordinary editor values.")
+            if reference_notes.ACTION in payload:
+                _context, pages, *_ = dependencies.build_character_advanced_editor_parts(
+                    campaign_slug, campaign, record)
+                edit = reference_notes.prepare(record, payload,
+                    systems_service=current_app.extensions["systems_service"], campaign_page_records=pages)
+                if payload[reference_notes.ACTION] == reference_notes.PREVIEW:
+                    return jsonify({"ok": True, "reference_notes_preview": edit.preview,
+                                    "message": "Review the reference-note changes before saving."})
+                reference_notes.publish(record, edit, dependencies.character_publication_coordinator)
+                refreshed = dependencies.load_character_record(campaign_slug, character_slug)
+                return dependencies.serialize_character_advanced_editor_response(campaign_slug, campaign, refreshed,
+                    message="No reference-note changes needed." if edit.preview["no_changes"] else "Reference notes updated.")
+            if isinstance(nested, dict) and external_proficiencies.ACTION in nested:
+                raise ValueError("Use one flat acquisition request, separately from ordinary editor values.")
+            if external_proficiencies.ACTION in payload:
+                _context, pages, _optional, _spells, items, _linked = dependencies.build_character_advanced_editor_parts(
+                    campaign_slug, campaign, record)
+                edit = external_proficiencies.prepare(record, payload,
+                    systems_service=current_app.extensions["systems_service"], item_catalog=items,
+                    campaign_page_records=pages)
+                if payload[external_proficiencies.ACTION] == external_proficiencies.PREVIEW:
+                    return jsonify({"ok": True, "external_proficiency_preview": edit.preview,
+                                    "message": "Review this acquired proficiency before saving."})
+                external_proficiencies.publish(record, edit, dependencies.character_publication_coordinator)
+                refreshed = dependencies.load_character_record(campaign_slug, character_slug)
+                return dependencies.serialize_character_advanced_editor_response(campaign_slug, campaign, refreshed,
+                    message="Acquired proficiency recorded; play state and prior choices preserved.")
             expected_revision = int(payload.get("expected_revision"))
             form_values = dependencies.normalize_character_editor_values(payload)
             note_overrides = prepare_native_editor_inventory_note_overrides(
@@ -181,6 +213,8 @@ def register_character_advanced_editor_api_routes(
                 audit_actor_user_id=user.id if native_edit else None,
                 audit_metadata={"source": "native_edit_confirmed"} if native_edit else None,
             )
+        except PermissionError as exc:
+            return dependencies.json_error(str(exc), 403, code="forbidden")
         except CharacterPublicationConflict:
             return dependencies.json_error(
                 "The Character update needs reconciliation. Its saved outcome is uncertain. Inspect the current Character before submitting again.",

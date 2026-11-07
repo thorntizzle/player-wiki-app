@@ -16,6 +16,20 @@ from .character_mechanics_projection import build_character_inventory_item_ref
 from .character_store import CharacterStateConflictError
 
 
+def validate_equipment_state_values(values: Any, *, strict_wield: bool = True) -> None:
+    """Validate original request intent before any text/boolean construction."""
+    if not isinstance(values, dict):
+        raise CharacterEditValidationError("Equipment intent is unavailable.")
+    if any(field in values and not isinstance(values[field], bool)
+           for field in ("is_equipped", "is_attuned")):
+        raise CharacterEditValidationError("Equipment intent is malformed.")
+    raw_mode = values.get("weapon_wield_mode")
+    if (strict_wield and raw_mode is not None and (not isinstance(raw_mode, str)
+            or len(raw_mode) > 64
+            or raw_mode.strip() and not _normalize_weapon_wield_mode_value(raw_mode))):
+        raise CharacterEditValidationError("Equipment wielding intent is malformed.")
+
+
 def build_reserved_equipment_state_update_result(record: Any, item_id: str,
                                                   values: dict[str, object], *, connection: Any):
     """Resolve activation support from sources selected on the writer connection."""
@@ -176,6 +190,8 @@ def build_record_equipment_support_lookup(
     reserved_item_id: str = "",
     trusted_sources: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
+    from .system_policy import is_xianxia_system
+    strict_activation = not is_xianxia_system(record.definition.system)
     projected_definition, _ = effective_definition(record.definition, record.state_record.state)
     if not reserved_source_proof:
         projected_definition, _ = suppress_unresolved_linked_sources(
@@ -201,9 +217,11 @@ def build_record_equipment_support_lookup(
          for normalized in _normalize_equipment_payloads(
              [row], item_catalog=item_catalog,
              trusted_source=(trusted_sources or {}).get(str(row.get("id") or "").strip()),
+             strict_activation=strict_activation,
          )]
         if reserved_source_proof else
-        _normalize_equipment_payloads(selected_definition_equipment, item_catalog=item_catalog)
+        _normalize_equipment_payloads(selected_definition_equipment, item_catalog=item_catalog,
+                                      strict_activation=strict_activation)
     )
     definition_item_lookup = {
         str(item.get("id") or "").strip(): dict(item)
@@ -239,6 +257,8 @@ def build_equipment_state_update_result(
     reserved_source_proof: bool = False,
     trusted_sources: dict[str, tuple[str, str]] | None = None,
 ):
+    from .system_policy import is_xianxia_system
+    validate_equipment_state_values(values, strict_wield=not is_xianxia_system(record.definition.system))
     identity = analyze_activation(record.definition, record.state_record.state)
     if identity["blocked"]:
         raise CharacterEditValidationError(
@@ -269,9 +289,6 @@ def build_equipment_state_update_result(
         )
 
     value_payload = dict(values or {})
-    for field in ("is_equipped", "is_attuned"):
-        if field in value_payload and not isinstance(value_payload[field], bool):
-            raise CharacterEditValidationError(f"{field} must be a boolean.")
     weapon_wield_mode = ""
     if bool(target_support.get("supports_weapon_wield_mode")):
         raw_wield_mode = value_payload.get("weapon_wield_mode")

@@ -312,22 +312,22 @@ def _send_managed_campaign_asset(campaign: Any, asset_ref: str, selected_path: P
         flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(path, flags)
         try:
-            with os.fdopen(descriptor, "rb") as stream:
-                before = os.fstat(stream.fileno())
-                if (not stat.S_ISREG(before.st_mode)
-                        or int(getattr(before, "st_file_attributes", 0)) & 0x400
-                        or before.st_size > MAX_INGRESS_FILE_BYTES):
-                    abort(404)
-                data = stream.read(MAX_INGRESS_FILE_BYTES + 1)
-                after = os.fstat(stream.fileno())
+            stream = os.fdopen(descriptor, "rb")
         except BaseException:
-            # fdopen owns the descriptor after it succeeds.
-            if descriptor >= 0:
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    pass
+            # The raw descriptor is ours only until fdopen succeeds.
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
             raise
+        with stream:
+            before = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(before.st_mode)
+                    or int(getattr(before, "st_file_attributes", 0)) & 0x400
+                    or before.st_size > MAX_INGRESS_FILE_BYTES):
+                abort(404)
+            data = stream.read(MAX_INGRESS_FILE_BYTES + 1)
+            after = os.fstat(stream.fileno())
         managed_wiki_image_path(campaign.assets_dir, asset_ref)
         named = path.lstat()
         managed_wiki_image_path(campaign.assets_dir, asset_ref)

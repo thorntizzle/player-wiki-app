@@ -134,8 +134,8 @@ def grant_contract(definition, owners, *, item_catalog=None):
                           if normalize_lookup(name) not in {normalize_lookup(value) for value in communications}]
     domains = {"skills": list(SKILL_LABELS.values()), "tools": list(COMMON_TOOL_PROFICIENCY_OPTIONS),
                "languages": ordinary_languages}
-    gaming = [name for name in COMMON_TOOL_PROFICIENCY_OPTIONS
-              if normalize_lookup(name) in {"diceset", "dragonchessset", "playingcardset", "threedragonanteset"}]
+    from .character_feature_proficiency_grants import gaming_set_options
+    gaming = gaming_set_options()
 
     def blocks(value):
         if value is None:
@@ -436,7 +436,11 @@ def refresh_continuation_choices(definition, service, *, elective_witnesses=()):
 
 
 def validate_current(definition, service, *, elective_witnesses=(), skill_adoption_draft=None, feature_grant_draft=None,
-                     _current_inputs=None):
+                     _current_inputs=None, _attribution=None):
+    # Output-only accounting for the manager's existing-observation producer.
+    # It changes neither this validator's result nor ordinary numeric custody.
+    if _attribution is not None and (type(_attribution) is not dict or _attribution or _current_inputs is not None):
+        raise SourceRepairError("Proficiency attribution needs a fresh independent accounting output.")
     from . import character_builder as builder
     from .repository import normalize_lookup
     owners = current_owners(definition, service)
@@ -480,6 +484,9 @@ def validate_current(definition, service, *, elective_witnesses=(), skill_adopti
     from .character_reconstruction_instruments import current_choice
     instrument_names, instrument_basis = current_choice(definition, service)
     fixed["tools"] += instrument_names
+    from .character_external_proficiencies import resolve as external_acquisitions
+    for acquisition in external_acquisitions(definition, elective_witnesses):
+        fixed[acquisition["category"]].append(acquisition["name"])
     from .character_language_electives import resolve_outcomes
     try:
         elective_outcomes = resolve_outcomes(definition, service, elective_witnesses,
@@ -540,6 +547,7 @@ def validate_current(definition, service, *, elective_witnesses=(), skill_adopti
     if any(len(choices[group]) != count or len({normalize_lookup(x) for x in choices[group]}) != count
            for group, count in counts.items()):
         raise SourceRepairError("A source-owned proficiency choice is duplicated or incomplete.")
+    incomplete_choices = frozenset(unresolved)
     actual = {category: {normalize_lookup(name) for name in definition.proficiencies.get(category, [])}
               for category in fixed if category != "skills"}
     actual["skills"] = {normalize_lookup(row["name"]) for row in definition.skills
@@ -591,7 +599,31 @@ def validate_current(definition, service, *, elective_witnesses=(), skill_adopti
         unresolved.add("tool_expertise")
     if _current_inputs is not None:
         _current_inputs.validated(optional_basis, instrument_basis)
+    if _attribution is not None:
+        _attribution.update({category: {
+            "declared": tuple(fixed[category]),
+            "source_complete": category not in incomplete_choices,
+        } for category in ("tools", "languages")})
     return sorted(unresolved)
+
+
+def require_existing_observation_attribution(definition, service, *, category, name, witnesses):
+    """Prove one external surplus without lending a proposed grant to reads."""
+    from .repository import normalize_lookup
+    if type(category) is not str or category not in {"tools", "languages"} or type(name) is not str:
+        raise SourceRepairError("Existing proficiency attribution needs one supported exact label.")
+    values = definition.proficiencies.get(category)
+    if (type(values) is not list or any(type(value) is not str or not normalize_lookup(value) for value in values)
+            or len({normalize_lookup(value) for value in values}) != len(values) or values.count(name) != 1):
+        raise SourceRepairError("Confirm one unique existing proficiency label without aliases or duplicates.")
+    accounting = {}
+    validate_current(definition, service, elective_witnesses=witnesses, _attribution=accounting)
+    frame = accounting[category]
+    declared = {normalize_lookup(value) for value in frame["declared"]}
+    selected = normalize_lookup(name)
+    observed = {normalize_lookup(value) for value in values}
+    if not frame["source_complete"] or selected in declared or observed != declared | {selected}:
+        raise SourceRepairError("The confirmed observation must be the only unowned value; resolve other source choices first.")
 
 
 # Finite ordinary callback surface omitted by invocation-owned current inputs.

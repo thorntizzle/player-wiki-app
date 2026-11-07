@@ -1,0 +1,65 @@
+<article class="card">
+  <h2>Record an acquired proficiency</h2>
+  <p>Record one confirmed tool or language proficiency gained outside starting choices, or confirm its existing unowned observation. This preserves existing choices, equipment, resources and historical records.</p>
+  {% set acquisition_values = edit_context.get('external_proficiency_values', {}) %}
+  <form method="post" class="stack-form">
+    {{ csrf_input() }}
+    <input type="hidden" name="editor_action" value="preview_external_proficiency">
+    <input type="hidden" name="expected_revision" value="{{ edit_context.state_revision }}">
+    <input type="hidden" name="expected_generation" value="{{ edit_context.definition_generation }}">
+    <label class="field"><span>What is being recorded?</span>
+      <select name="external_proficiency_operation">
+        <option value="add"{% if acquisition_values.get('external_proficiency_operation', 'add') == 'add' %} selected{% endif %}>Add a proficiency not yet listed</option>
+        <option value="adopt_existing"{% if acquisition_values.get('external_proficiency_operation') == 'adopt_existing' %} selected{% endif %}>Confirm an existing unowned proficiency</option>
+      </select>
+      <small>Existing observations keep their exact label and list position. Confirmation requires independent acquisition evidence and complete source choices for every other value in that category.</small>
+    </label>
+    <label class="field"><span>Proficiency category</span>
+      <select name="external_proficiency_category">
+        <option value="tools"{% if acquisition_values.get('external_proficiency_category') != 'languages' %} selected{% endif %}>Tool</option>
+        <option value="languages"{% if acquisition_values.get('external_proficiency_category') == 'languages' %} selected{% endif %}>Language</option>
+      </select>
+    </label>
+    <label class="field"><span>Proficiency name</span><input name="external_proficiency_name" maxlength="128" required value="{{ acquisition_values.get('external_proficiency_name', '') }}"></label>
+    <label class="field"><span>Acquisition</span>
+      <select name="external_proficiency_kind">
+        <option value="training"{% if acquisition_values.get('external_proficiency_kind') != 'external_grant' %} selected{% endif %}>Documented training</option>
+        <option value="external_grant"{% if acquisition_values.get('external_proficiency_kind') == 'external_grant' %} selected{% endif %}>Other confirmed acquisition</option>
+      </select>
+    </label>
+    <label class="field"><span>Historical origin</span>
+      <select name="external_proficiency_origin_status">
+        <option value="known"{% if acquisition_values.get('external_proficiency_origin_status') != 'unrecorded' %} selected{% endif %}>Known</option>
+        <option value="unrecorded"{% if acquisition_values.get('external_proficiency_origin_status') == 'unrecorded' %} selected{% endif %}>Unrecorded</option>
+      </select>
+    </label>
+    <label class="field"><span>Known origin</span><input name="external_proficiency_origin" maxlength="512" value="{{ acquisition_values.get('external_proficiency_origin', '') }}"><small>For example, identify the training or reward record. Leave empty if the historical origin is unrecorded.</small></label>
+    <label class="field"><span>Original acquisition time, if recorded</span><input name="external_proficiency_occurred_at" maxlength="64" value="{{ acquisition_values.get('external_proficiency_occurred_at', '') }}"><small>Include its UTC offset. Leave unknown time empty; no date will be invented.</small></label>
+    <label class="field"><span>Evidence confirming current proficiency</span><input name="external_proficiency_evidence" maxlength="512" required value="{{ acquisition_values.get('external_proficiency_evidence', '') }}"></label>
+    <label class="field"><span><input type="checkbox" name="external_proficiency_confirmed" value="yes" required{% if acquisition_values.get('external_proficiency_confirmed') == 'yes' %} checked{% endif %}> Full current proficiency is confirmed</span></label>
+    <button type="submit">Review acquisition</button>
+  </form>
+  {% if edit_context.external_proficiency_preview %}
+    {% set acquisition_preview = edit_context.external_proficiency_preview %}
+    <section class="read-section" aria-label="Acquisition review">
+      <h3>{{ acquisition_preview.name }}</h3>
+      <p>{{ acquisition_preview.category|title }} proficiency. {{ acquisition_preview.origin or 'Historical origin unrecorded.' }}</p>
+      <p>{{ acquisition_preview.evidence }}</p>
+      {% if acquisition_preview.get('operation') == 'adopt_existing' %}
+        <p>The existing proficiency list stays unchanged. Only this observation's acquisition record and authority will be added. Current play state and earlier choices remain unchanged.</p>
+      {% else %}
+        <p>Only this proficiency and its acquisition record will be added. Current play state and earlier choices remain unchanged.</p>
+      {% endif %}
+      <form method="post">
+        {{ csrf_input() }}
+        {% for key, value in acquisition_values.items() if key not in ['_csrf_token', 'editor_action', 'expected_source_digest', 'expected_candidate_digest'] %}
+          <input type="hidden" name="{{ key }}" value="{{ value }}">
+        {% endfor %}
+        <input type="hidden" name="editor_action" value="record_external_proficiency">
+        <input type="hidden" name="expected_source_digest" value="{{ acquisition_preview.source_digest }}">
+        <input type="hidden" name="expected_candidate_digest" value="{{ acquisition_preview.candidate_digest }}">
+        <button type="submit">{{ 'Confirm existing observation' if acquisition_preview.get('operation') == 'adopt_existing' else 'Record confirmed proficiency' }}</button>
+      </form>
+    </section>
+  {% endif %}
+</article>

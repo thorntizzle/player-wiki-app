@@ -920,7 +920,7 @@ def apply_character_spell_management_edit(
         selected_class_rows=selected_class_rows,
     ) if activated else manager
     safe_section = _resolve_spell_management_section(safe_manager or {}, row_id)
-    if activated and (safe_section is None or not safe_section.get("can_manage")):
+    if safe_section is None or not safe_section.get("can_manage"):
         raise CharacterEditValidationError("This spell source needs manager repair before its spell list can change.")
     # Saved spell counts and capacities are historical. A mismatch makes
     # prepared/known limits ambiguous; the projected current source wins.

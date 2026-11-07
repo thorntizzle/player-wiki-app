@@ -18,6 +18,7 @@ from .character_source_repair import (load_verified_manual_actions, load_verifie
                                       record_confirmed_native_level_up_witness,
                                       prepare_native_spell_choice_audit_metadata)
 from .committed_publication import active
+from .character_recorded_advancement import is_recorded, manager_allowed, require_single_fields, apply_slot_observations
 from .character_source_authority import (build_reconciled_source_authority,
                                          NativeAdvancementValidationError,
                                          native_advancement_input_target,
@@ -64,6 +65,9 @@ def register_character_level_up_api_routes(
                 campaign_slug, campaign, record, readiness=readiness
             )
         try:
+            require_single_fields(request.args)
+            if is_recorded(request.args) and not manager_allowed(campaign_slug):
+                return dependencies.json_error("Only a current campaign manager can record a completed advancement.", 403, code="forbidden")
             form_values = dependencies.normalize_character_level_up_values(dict(request.args))
             form_values.pop(ACQUISITION_FIELD, None)
             form_values.pop(TRUSTED_ACQUISITION_KEY, None)
@@ -84,7 +88,7 @@ def register_character_level_up_api_routes(
             )
         except GrantContractError as exc:
             return dependencies.json_error(str(exc), 400, code="acquisition_validation_failed")
-        except CharacterBuildError as exc:
+        except (CharacterBuildError, ValueError) as exc:
             readiness = {"status": "unsupported", "message": str(exc)}
             return dependencies.serialize_character_level_up_response(
                 campaign_slug, campaign, record, readiness=readiness
@@ -125,6 +129,10 @@ def register_character_level_up_api_routes(
             payload = dependencies.load_json_object()
             expected_revision = int(payload.get("expected_revision"))
             raw_values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
+            require_single_fields(raw_values)
+            recorded_request = is_recorded(raw_values)
+            if recorded_request and not manager_allowed(campaign_slug):
+                return dependencies.json_error("Only a current campaign manager can record a completed advancement.", 403, code="forbidden")
             form_values = dependencies.normalize_character_level_up_values(payload)
             form_values.pop(ACQUISITION_FIELD, None)
             form_values.pop(TRUSTED_ACQUISITION_KEY, None)
@@ -201,9 +209,14 @@ def register_character_level_up_api_routes(
                     definition,
                     record.state_record.state,
                     source_authority=prospective_authority,
-                    hp_delta=hp_gain,
+                    hp_delta=0 if recorded_request else hp_gain,
                 )
+                if recorded_request:
+                    merged_state = apply_slot_observations(record.state_record.state, merged_state,
+                        level_up_context.get("_recorded_slot_observations", ()))
                 def refresh_pending_authority():
+                    if recorded_request and not manager_allowed(campaign_slug):
+                        raise CharacterStateConflictError("Manager authority changed before recording advancement.")
                     fresh_campaign, fresh_record, access_error = dependencies.load_character_level_up_target(
                         campaign_slug, character_slug)
                     if access_error is not None or fresh_record is None:
@@ -245,7 +258,7 @@ def register_character_level_up_api_routes(
                 new_markers = ()
                 pending_authority = None
                 merged_state = dependencies.merge_state_with_definition(
-                    definition, record.state_record.state, hp_delta=hp_gain,
+                    definition, record.state_record.state, hp_delta=0 if recorded_request else hp_gain,
                 )
             dependencies.character_publication_coordinator.update(
                 record,
@@ -358,9 +371,11 @@ def register_character_level_up_api_routes(
             refreshed_record,
             readiness=refreshed_readiness,
             level_up_context=refreshed_context,
-            message=((f"{definition.name} advanced to level {target_level}."
+            message=((f"Recorded {definition.name}'s completed level {target_level} advancement."
+                     if recorded_request and resource_witness_confirmed else
+                     f"{definition.name} advanced to level {target_level}."
                      if resource_witness_confirmed else
-                     f"{definition.name} advanced to level {target_level}. New resource totals need manager review before use.")
+                     f"{definition.name}'s advancement was saved. New resource totals need manager review before use.")
                      + (" Reload level-up choices before another advancement." if next_context_unavailable else "")),
         )
 

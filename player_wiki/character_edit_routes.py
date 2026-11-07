@@ -14,6 +14,8 @@ from .character_page_records import list_visible_character_page_records
 from .character_source_repair import load_verified_manual_actions, load_verified_numeric_actions
 from .character_source_authority import build_reconciled_source_authority
 from .committed_publication import active
+from . import character_external_proficiencies as external_proficiencies
+from .character_recorded_advancement import manager_allowed
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,12 @@ def register_character_edit_route(
             linked_feature_authoring_support=linked_feature_authoring,
         )
         edit_context["state_revision"] = record.state_record.revision
+        edit_context["external_proficiency_allowed"] = (active()
+            and record.definition.source.get("source_type") == "native_character_builder"
+            and manager_allowed(campaign_slug))
+        edit_context["definition_generation"] = record.committed_revision
+        if external_proficiencies.ACTION in request.form:
+            edit_context["external_proficiency_values"] = dict(request.form)
 
         draft_names = [
             field["name"]
@@ -144,6 +152,32 @@ def register_character_edit_route(
                 edit_context,
                 campaign_page_records=campaign_page_records,
             )
+
+        if external_proficiencies.ACTION in request.form:
+            try:
+                edit = external_proficiencies.prepare(record, request.form,
+                    systems_service=dependencies.get_systems_service(), item_catalog=item_catalog,
+                    campaign_page_records=campaign_page_records)
+                if request.form[external_proficiencies.ACTION] == external_proficiencies.PREVIEW:
+                    edit_context["external_proficiency_preview"] = edit.preview
+                    return dependencies.render_character_edit_page(campaign_slug, character_slug, edit_context,
+                        campaign_page_records=campaign_page_records)
+                external_proficiencies.publish(record, edit, dependencies.character_publication_coordinator)
+                flash("Acquired proficiency recorded; play state and prior choices preserved.", "success")
+                return redirect(url_for("character_edit_view", campaign_slug=campaign_slug, character_slug=character_slug))
+            except PermissionError:
+                abort(403)
+            except CharacterPublicationConflict:
+                return protected_recovery(status_code=409, force=True, publication_conflict=True,
+                    message="The acquisition outcome is uncertain. Inspect the current Character before trying again.")
+            except CharacterStateConflictError as exc:
+                flash(str(exc), "error")
+                return dependencies.render_character_edit_page(campaign_slug, character_slug, edit_context,
+                    campaign_page_records=campaign_page_records, status_code=409)
+            except (ValueError, TypeError) as exc:
+                flash(str(exc), "error")
+                return dependencies.render_character_edit_page(campaign_slug, character_slug, edit_context,
+                    campaign_page_records=campaign_page_records, status_code=400)
 
         user = dependencies.get_current_user()
         if user is None:

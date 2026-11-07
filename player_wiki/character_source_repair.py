@@ -73,6 +73,7 @@ def action_witness_comparison(witnesses):
     from .character_spell_grants import NativeGrantCustody
     from .character_spell_reconstruction import NativeSpellReconstructionFact
     from .character_language_electives import NativeElectiveDecision, PendingElectiveOutcome
+    from .character_external_proficiencies import ExternalProficiencyCustody
 
     if type(witnesses) is not tuple:
         raise SourceReadConflict("Action witness sequence has an unsupported type.")
@@ -81,7 +82,7 @@ def action_witness_comparison(witnesses):
         kind = type(witness)
         if kind is dict:
             compared.append(("plain", freeze(witness)))
-        elif kind in (NativeAggregateWitness, NativeSpellChoiceDecision, NativeGrantCustody, NativeSpellReconstructionFact, NativeElectiveDecision, PendingElectiveOutcome):
+        elif kind in (NativeAggregateWitness, NativeSpellChoiceDecision, NativeGrantCustody, NativeSpellReconstructionFact, NativeElectiveDecision, PendingElectiveOutcome, ExternalProficiencyCustody):
             if set(vars(witness)) != {"origin"}:
                 raise SourceReadConflict("Action witness provenance envelope is unavailable.")
             compared.append(("trusted", kind, freeze(dict.copy(witness)), freeze(witness.origin)))
@@ -595,8 +596,11 @@ def numeric_authorization_record(
     from .character_source_authority import numeric_value_digest
     if target_kind not in NUMERIC_TARGETS or metric not in NUMERIC_METRICS:
         raise SourceRepairError("Unsupported numeric authorization target or metric.")
-    if provenance not in {"manager", "native_creation", "native_level_up", "native_spell_choice", "native_reconstruction", "native_requalification", "native_elective_decision"}:
+    if provenance not in {"manager", "native_creation", "native_level_up", "native_spell_choice", "native_reconstruction", "native_requalification", "native_elective_decision", "native_external_proficiency"}:
         raise SourceRepairError("Unsupported numeric authorization provenance.")
+    if provenance == "native_external_proficiency" and not (target_kind == "proficiency" and metric == "grant"
+            and type(target_id) is str and target_id.startswith(("proficiencies.tools.", "proficiencies.languages."))):
+        raise SourceRepairError("External acquisition can authorize only its tool or language grant.")
     if provenance == "native_elective_decision" and not (target_kind == "proficiency"
             and metric == "grant" and type(target_id) is str and target_id.startswith("proficiencies.languages.")):
         raise SourceRepairError("An elective decision can authorize only its current language grants.")
@@ -953,6 +957,15 @@ def prepare_native_spell_choice_audit_metadata(prior_record, definition, state, 
         "action_id": next(iter(action_ids)), "definition_digest": canonical_digest(definition.to_dict()),
         "prior_state_revision": prior_record.state_record.revision, "state_revision": state_revision,
         "source_snapshot_digest": source_snapshot_digest, "source_basis_digests": dict(source_basis_digests)}
+    if leveled:
+        from .character_recorded_advancement import audit_note
+        recorded = audit_note(definition)
+        if recorded is not None:
+            old_slots = {(row.get("slot_lane_id"), row.get("level"))
+                         for row in prior_record.state_record.state.get("spell_slots") or [] if isinstance(row, dict)}
+            recorded["current_new_slot_observations"] = [deepcopy(row) for row in state.get("spell_slots") or []
+                if isinstance(row, dict) and (row.get("slot_lane_id"), row.get("level")) not in old_slots]
+            metadata["recorded_advancement"] = recorded
     from .character_spell_grants import CLASS_CHOICE_STATE_FIELD
     if decisions or any(CLASS_CHOICE_STATE_FIELD in row for model in (prior_record.definition, definition)
             for row in model.spellcasting.get("spells", []) if isinstance(row, dict)):
@@ -1101,7 +1114,8 @@ def load_verified_numeric_actions(campaign_slug: str, character_slug: str, *,
             """SELECT id,actor_user_id, event_type, metadata_json FROM auth_audit_log
                WHERE campaign_slug = ? AND character_slug = ?
                  AND event_type IN ('character_update_applied', 'character_page_feature_grant_confirmed',
-                                    'character_native_created', 'character_native_leveled', 'character_native_spell_selected')
+                                    'character_native_created', 'character_native_leveled', 'character_native_spell_selected',
+                                    'character_native_edited')
                ORDER BY id ASC""",
             (campaign_slug, character_slug),
         ).fetchall()
@@ -1148,6 +1162,15 @@ def load_verified_numeric_actions(campaign_slug: str, character_slug: str, *,
             if not isinstance(parsed_metadata, dict):
                 continue
             metadata = parsed_metadata
+            if row["event_type"] == "character_native_edited":
+                if "external_proficiency_confirmation" in metadata:
+                    from .character_external_proficiencies import verified_batch as external_batch
+                    if type(raw_metadata) is not str or len(raw_metadata.encode("utf-8")) > 65536:
+                        continue
+                    metadata = _strict_grant_audit_json(raw_metadata)
+                    row_witnesses.extend(external_batch(db, campaign_slug, character_slug,
+                        row, metadata, tuple(witnesses)))
+                continue
             requalification = metadata.get("native_requalification")
             if isinstance(requalification, dict) and requalification.get("schema_version") in {5, 6}:
                 if type(raw_metadata) is not str or len(raw_metadata.encode("utf-8")) > 65536:
@@ -1710,6 +1733,20 @@ def record_confirmed_native_level_up_witness(
                 if (any(row.get("id") == tracker_id for row in prior_definition.resource_templates)
                         and not prior_authority.resource_status("resource", tracker_id).is_effective):
                     return False
+            if prior_record is not None:
+                historical_state = getattr(prior_record, "state_record", None)
+                if (type(getattr(prior_record, "definition", None)) is not CharacterDefinition
+                        or prior_record.definition.to_dict() != prior_definition.to_dict()
+                        or historical_state is None or historical_state.revision != prior_revision):
+                    return False
+                historical_authority = build_reconciled_source_authority(
+                    definition=prior_definition, state=historical_state.state, state_revision=prior_revision,
+                    systems_service=systems_service, campaign_page_records=campaign_page_records,
+                    verified_manual_actions=verified_manual_actions, verified_numeric_actions=verified_numeric_actions)
+                authority = authority.continue_spell_modifier_history(
+                    historical_authority, prior_definition, readback_definition,
+                    prior_state=historical_state.state, prior_state_revision=prior_revision,
+                    state=readback_state, state_revision=revision)
             validate_native_managed_resource_templates(
                 readback_definition, readback_state, authority=authority, systems_service=systems_service,
                 campaign_page_records=campaign_page_records, prior_definition=prior_definition,

@@ -19,6 +19,14 @@ CONDITIONS = "feature_proficiency_conditions"
 _PREPARED = object()
 
 
+def gaming_set_options():
+    """The existing finite gaming-tool domain, shared with reconstruction."""
+    from .character_builder_constants import COMMON_TOOL_PROFICIENCY_OPTIONS
+    from .repository import normalize_lookup
+    return [name for name in COMMON_TOOL_PROFICIENCY_OPTIONS if normalize_lookup(name) in {
+        "diceset", "dragonchessset", "playingcardset", "threedragonanteset"}]
+
+
 def normalize_metadata(metadata):
     """Validate present mechanics without manufacturing absent declarations."""
     if type(metadata) is not dict:
@@ -52,6 +60,10 @@ def normalize_metadata(metadata):
                             or type(value.get("count", 1)) is not int or not 1 <= value.get("count", 1) <= 18
                             or type(value.get("amount", 1)) is not int or value.get("amount", 1) != 1):
                         raise ValueError("Feature choice needs a bounded exact domain.")
+                elif key == "anyGamingSet":
+                    if (category != "tools" or type(value) is not int
+                            or not 1 <= value <= len(gaming_set_options())):
+                        raise ValueError("Gaming-set choices need a bounded tool count.")
                 elif key in {"any", "anyTool", "anyArtisansTool", "anyStandard"}:
                     if (type(value) is not int or not 1 <= value <= 18
                             or key == "any" and category not in {"skills", "tools", "languages"}
@@ -104,6 +116,8 @@ def contract(entry, *, item_catalog=None, strict=True):
                         options, count = value["from"], value.get("count", 1)
                     elif key == "anyArtisansTool":
                         options, count = [r["value"] for r in builder._tool_proficiency_options(item_catalog or {}, artisan_only=True)], value
+                    elif key == "anyGamingSet":
+                        options, count = gaming_set_options(), value
                     elif key == "anyStandard":
                         options, count = STANDARD_LANGUAGE_OPTIONS, value
                     elif key in {"any", "anyTool"}:
@@ -794,6 +808,7 @@ def project_automatic_expertise(authority, definition, service, witnesses, attai
 
 # Finite ordinary callback surface omitted by invocation-owned current inputs.
 _CURRENT_INPUT_RECIPE = tuple((name, globals()[name]) for name in (
+    'gaming_set_options',
     'resolve_reconstruction',
     'automatic',
     'automatic_history',

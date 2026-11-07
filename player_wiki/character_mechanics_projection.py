@@ -60,7 +60,8 @@ from .character_builder_constants import (
 )
 from .character_models import CharacterDefinition
 from .character_hp_recipe import HitPointRecipeError
-from .character_service import merge_state_with_definition, project_legacy_read_state
+from .character_service import (merge_state_with_definition, project_legacy_read_state,
+                                project_quarantined_activation_read_state)
 from .character_equipment_activation import effective_definition, suppress_unresolved_linked_sources
 from .character_spell_slots import normalize_spell_slot_lane_id, spell_slot_lanes_from_spellcasting
 from .models import Campaign
@@ -655,7 +656,17 @@ def build_effective_character_values(
                 if cache_key is not None
                 else _normalize_definition()
             )
-            if (activated and is_dnd_5e_system(definition.system)
+            quarantine_activation = (activated and is_dnd_5e_system(definition.system) and type(state) is dict
+                and any(warning.get("code") in {"malformed_activation_boolean", "malformed_wield_mode"}
+                        or "equipment_activation" in state and warning.get("code") == "activation_migration_required"
+                        for warning in activation_warnings))
+            if quarantine_activation:
+                projected_state = project_quarantined_activation_read_state(
+                    projected_definition, projected_state,
+                    incoming_definition=definition, source_authority=source_authority,
+                    state_revision=state_revision,
+                )
+            elif (activated and is_dnd_5e_system(definition.system)
                     and type(state) is dict and "equipment_activation" not in state):
                 projected_state = project_legacy_read_state(
                     projected_definition, projected_state,
@@ -1460,8 +1471,18 @@ def project_item_use_actions(
     character_spell_save_dc = _character_spell_save_dc(
         dict(getattr(definition, "spellcasting", {}) or {})
     )
+    from .character_equipment_activation import analyze_activation, effective_inventory_rows
+    eligible_items = (None if is_xianxia_system(getattr(definition, "system", "")) else
+                      {row["id"] for row in analyze_activation(definition, state)["rows"]
+                       if row["source"] == "sqlite" and row["status"] == "exact"})
+    effective_inventory = {
+        str(row.get("catalog_ref") or row.get("id") or "").strip(): row
+        for row in effective_inventory_rows(definition, state) if isinstance(row, dict)
+    }
     actions: list[dict[str, Any]] = []
     for item_ref, inventory_item in inventory_lookup.items():
+        inventory_item = effective_inventory.get(item_ref, {
+            **inventory_item, "is_equipped": False, "is_attuned": False, "weapon_wield_mode": ""})
         equipment_item = dict(equipment_catalog_lookup.get(item_ref) or {})
         if not equipment_item:
             continue
@@ -1484,6 +1505,7 @@ def project_item_use_actions(
                 requires_attunement=_metadata_requires_attunement_for_projection(item_metadata),
                 spell_slot_options=spell_slot_options,
                 character_spell_save_dc=character_spell_save_dc,
+                activation_current=eligible_items is None or item_ref in eligible_items,
             )
             if projected_action is not None:
                 actions.append(projected_action)
@@ -1500,6 +1522,7 @@ def project_item_use_action(
     requires_attunement: bool,
     spell_slot_options: list[dict[str, Any]],
     character_spell_save_dc: int | None,
+    activation_current: bool = True,
 ) -> dict[str, Any] | None:
     action_id = str(action_payload.get("id") or "").strip()
     if not action_id:
@@ -1513,7 +1536,10 @@ def project_item_use_action(
     is_attuned = bool(inventory_item.get("is_attuned", False))
     enabled = True
     disabled_reason = ""
-    if requires_equipped and not is_equipped:
+    if not activation_current:
+        enabled = False
+        disabled_reason = "Equipment activation needs manager repair before using this action."
+    elif requires_equipped and not is_equipped:
         enabled = False
         disabled_reason = "Equip this item before using this action."
     elif requires_attunement and not is_attuned:

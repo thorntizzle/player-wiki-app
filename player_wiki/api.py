@@ -3514,6 +3514,10 @@ def register_api(app) -> None:
     def serialize_character_level_up_context(level_up_context: dict[str, Any]) -> dict[str, Any]:
         keys = (
             "state_revision",
+            "physical_hp_input",
+            "recorded_adoption_allowed",
+            "completed_advancement",
+            "recorded_slot_fields",
             "values",
             "character_name",
             "current_level",
@@ -3551,6 +3555,7 @@ def register_api(app) -> None:
     ) -> dict[str, Any]:
         from .committed_publication import active
         from .character_source_repair import load_verified_manual_actions, load_verified_numeric_actions
+        from .character_recorded_advancement import manager_allowed
         level_up_context = build_native_level_up_context(
             current_app.extensions["systems_service"],
             campaign_slug,
@@ -3562,6 +3567,7 @@ def register_api(app) -> None:
             authority_page_records=list_visible_character_page_records(campaign_slug, campaign),
             verified_manual_actions=(load_verified_manual_actions(campaign_slug, record.definition.character_slug) if active() else ()),
             verified_numeric_actions=(load_verified_numeric_actions(campaign_slug, record.definition.character_slug) if active() else ()),
+            allow_recorded_advancement=manager_allowed(campaign_slug),
         )
         level_up_context["state_revision"] = record.state_record.revision
         return level_up_context
@@ -4533,9 +4539,10 @@ def register_api(app) -> None:
         )
         equipment_items: list[dict[str, Any]] = []
         state = dict(record.state_record.state or {})
+        from .character_equipment_activation import effective_inventory_rows
         inventory_lookup = {
             build_character_inventory_item_ref(item): dict(item)
-            for item in list(state.get("inventory") or [])
+            for item in effective_inventory_rows(record.definition, state)
             if build_character_inventory_item_ref(item)
         }
         for item_ref, inventory_item in inventory_lookup.items():

@@ -102,9 +102,11 @@ class NativeAdvancementIntent:
     candidate_without_authorizations_digest: str
     restored_resource_currents: tuple[tuple[str, int], ...] = ()
     ability_inputs_json: str = ""
+    retained_import_digest: str | None = None
 
     @classmethod
-    def from_validated(cls, prior_definition, candidate_definition, *, restored_resource_currents=()):
+    def from_validated(cls, prior_definition, candidate_definition, *, restored_resource_currents=(),
+                       retained_import_metadata=None):
         from .character_equipment_activation import definition_digest
 
         prior_rows = profile_class_rows(prior_definition.profile)
@@ -129,11 +131,32 @@ class NativeAdvancementIntent:
             if (old or len(new) != 1 or type(new[0].get("max")) is not int
                     or not 0 <= current <= new[0]["max"] or new[0].get("initial_current") != current):
                 raise NativeAdvancementValidationError("This restoration could not be validated. Review its choices.")
+        prior_progression = prior_definition.source.get("native_progression")
+        progression = candidate_definition.source.get("native_progression")
+        prior_history = prior_progression.get("history", []) if type(prior_progression) is dict else None
+        history = progression.get("history", []) if type(progression) is dict else None
+        recorded = (type(prior_history) is list and type(history) is list and len(history) == len(prior_history) + 1
+                    and type(history[-1]) is dict and "recorded_advancement" in history[-1])
+        retained_import_digest = None
+        if recorded or retained_import_metadata is not None:
+            from .character_models import CharacterImportMetadata
+            from .character_recorded_advancement import parse_recorded
+            if (not recorded or history[:-1] != prior_history
+                    or type(retained_import_metadata) is not CharacterImportMetadata):
+                raise NativeAdvancementValidationError("The completed advancement lost its retained import metadata.")
+            note = history[-1]["recorded_advancement"]
+            if (type(note) is not dict or set(note) != {"schema_version", "kind", "evidence"}
+                    or type(note["schema_version"]) is not int or note["schema_version"] != 1
+                    or note["kind"] != "completed_whole_hp"):
+                raise NativeAdvancementValidationError("The completed advancement evidence is malformed.")
+            parse_recorded({"advancement_record_type": "completed", "advancement_recorded_at": history[-1].get("at"),
+                            "advancement_evidence": note["evidence"]}, allowed=True)
+            retained_import_digest = numeric_value_digest(retained_import_metadata.to_dict())
         payload = deepcopy(candidate_definition.to_dict())
         payload["source"].pop("source_authorizations", None)
         return cls(definition_digest(prior_definition), definition_digest(candidate_definition),
                    definition_digest(CharacterDefinition.from_dict(payload)), restored_resource_currents,
-                   _canonical(candidate_definition.stats.get("ability_inputs")))
+                   _canonical(candidate_definition.stats.get("ability_inputs")), retained_import_digest)
 
     def matches(self, prior_definition, candidate_definition):
         from .character_equipment_activation import definition_digest
@@ -317,6 +340,9 @@ def _numeric_witness_identity(witness: dict[str, Any]) -> str:
     from .character_source_repair import NativeAggregateWitness, NativeSpellChoiceDecision
     from .character_spell_reconstruction import NativeSpellReconstructionFact
     from .character_language_electives import NativeElectiveDecision, PendingElectiveOutcome
+    from .character_external_proficiencies import ExternalProficiencyCustody
+    if type(witness) is ExternalProficiencyCustody:
+        return _canonical({"witness": dict(witness), "external_proficiency_origin": witness.origin})
     if type(witness) in (NativeElectiveDecision, PendingElectiveOutcome):
         return _canonical({"witness": dict(witness), "elective_decision_type": type(witness).__name__,
             "elective_decision_origin": witness.origin})
@@ -628,8 +654,10 @@ def _plain_numeric_witness_data(witnesses):
     from .character_spell_grants import NativeGrantCustody
     from .character_spell_reconstruction import NativeSpellReconstructionFact
     from .character_language_electives import NativeElectiveDecision, PendingElectiveOutcome
+    from .character_external_proficiencies import ExternalProficiencyCustody
     supported = (NativeAggregateWitness, NativeSpellChoiceDecision, NativeGrantCustody,
-                 NativeSpellReconstructionFact, NativeElectiveDecision, PendingElectiveOutcome)
+                 NativeSpellReconstructionFact, NativeElectiveDecision, PendingElectiveOutcome,
+                 ExternalProficiencyCustody)
     data = []
     remaining = 32768
     for witness in witnesses:
@@ -785,7 +813,12 @@ def valid_numeric_authorization(
             record.get("target_kind") == "proficiency" and record.get("metric") == "grant"
             and type(record.get("target_id")) is str and record["target_id"].startswith("proficiencies.languages.")):
         return False
-    if record.get("provenance") not in {"manager", "native_creation", "native_level_up", "native_spell_choice", "page_feature_update", "native_reconstruction", "native_requalification", "native_elective_decision"}:
+    if record.get("provenance") == "native_external_proficiency" and not (
+            record.get("target_kind") == "proficiency" and record.get("metric") == "grant"
+            and type(record.get("target_id")) is str
+            and record["target_id"].startswith(("proficiencies.tools.", "proficiencies.languages."))):
+        return False
+    if record.get("provenance") not in {"manager", "native_creation", "native_level_up", "native_spell_choice", "page_feature_update", "native_reconstruction", "native_requalification", "native_elective_decision", "native_external_proficiency"}:
         return False
     if is_page_feature and (
         target_kind != "resource" or metric != "owner_reset"
@@ -860,6 +893,71 @@ class EffectiveStatus:
         return self.status in {VERIFIED, MANUAL} and self.effective is not None
 
 
+def _require_modifier_retention_rows(definition, history):
+    """An exact old row may survive; changed or colliding rows cannot."""
+    seen = set()
+    for entry in history:
+        observation, source = entry["observation"], entry["source_row"]
+        identity = observation["id"]
+        if identity in seen or entry["reason"] != "modifier_not_entitlement":
+            raise ValueError("Modifier history has conflicting retained observations.")
+        seen.add(identity)
+        rows = [row for row in definition.spellcasting.get("spells", [])
+                if isinstance(row, dict) and (row.get("id") == identity
+                    or row.get("spell_source_row_id") == entry["source_row_id"])]
+        sources = [row for row in definition.spellcasting.get("source_rows", [])
+                   if isinstance(row, dict) and row.get("source_row_id") == entry["source_row_id"]]
+        if rows != [observation] or sources != [source]:
+            raise ValueError("A prospective spell/source row changed retained modifier history.")
+
+
+def _modifier_retention_entries(authority, definition, history):
+    from .character_spell_properties import FIELD, normalize_item_spell_properties
+    entries = authority.spell_property_item_entries(definition)
+    result = []
+    for retained in history:
+        legacy = retained["source_row_id"]
+        owners = [entry for entry in entries
+                  if any(effect.get("legacy_source_row_id") == legacy
+                         for effect in normalize_item_spell_properties(entry[FIELD]))]
+        if (len(owners) != 1 or owners[0]["item_id"] != retained["item_id"]
+                or owners[0]["source_ref"] != retained["source_ref"]
+                or owners[0]["legacy_entitlement_cleared"] is not True
+                or legacy in owners[0]["current_source_rows"]):
+            raise ValueError("Retained modifier history lacks a unique current non-entitling item owner.")
+        # Other newly attained class source rows are independent. The relevant
+        # legacy ID must still have no competing current owner.
+        result.append({key: value for key, value in owners[0].items() if key != "current_source_rows"})
+    return result
+
+
+def _modifier_retention_edges(authority, history):
+    view = authority.native_grant_view
+    if view is None:
+        raise ValueError("Modifier history has no inspected native migration frame.")
+    result = []
+    for entry in history:
+        rows = [edge for edge in view.migration_edges if edge.get("old_spell_id") == entry["observation"]["id"]]
+        if (len(rows) != 1 or rows[0].get("grant_ids") != []
+                or rows[0].get("unresolved_observation_digest") != numeric_value_digest(entry["observation"])):
+            raise ValueError("Modifier history lost its exact empty-grant migration edge.")
+        result.append(rows[0])
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class _ModifierHistoryRetention:
+    """Detached continuation data, never a current native-grant witness."""
+    definition_digest: str
+    raw_definition_digest: str
+    state_digest: str
+    state_revision: int
+    source_digest: str
+    entries_json: str
+    edges_json: str
+    history_json: str
+
+
 @dataclass(frozen=True, slots=True)
 class SourceAuthority:
     definition_digest: str
@@ -906,6 +1004,7 @@ class SourceAuthority:
     item_prepared_context_json: str = ""
     passive_member_frames: tuple[str, ...] = ()
     tracker_associations: tuple[dict[str, Any], ...] = ()
+    modifier_history_retention: _ModifierHistoryRetention | None = None
 
     def _numeric_context(self, input_definition, input_state, *, formula_scope="current"):
         """Ephemeral raw-input ownership and per-output temporary dependencies."""
@@ -1630,6 +1729,43 @@ class SourceAuthority:
                 "current_source_rows": sorted(self.verified_source_rows | self.disputed_source_rows)})
         return entries
 
+    def continue_spell_modifier_history(self, prior_authority, prior_definition, definition, *,
+                                       prior_state, prior_state_revision, state, state_revision):
+        """Retain exact prior observations without authenticating future grants.
+
+        Only the actual prior/current authorities can issue this request-local
+        carrier. Its consumers are normalization/history preservation, not play
+        projection, native grant verification or publication authorization.
+        """
+        if type(self) is not SourceAuthority or type(prior_authority) is not SourceAuthority:
+            raise ValueError("Modifier history needs its exact prior authority.")
+        for authority, frame, frame_state, revision in (
+                (prior_authority, prior_definition, prior_state, prior_state_revision),
+                (self, definition, state, state_revision)):
+            if (type(frame) is not CharacterDefinition or type(frame_state) is not dict
+                    or type(revision) is not int or revision < 0
+                    or authority.state_revision != revision
+                    or authority.state_digest != numeric_value_digest(frame_state)
+                    or numeric_value_digest(frame.to_dict()) not in {
+                        authority.definition_digest, authority.original_definition_digest}):
+                raise ValueError("Modifier history no longer matches its character/state frame.")
+        history = prior_authority.retained_spell_modifier_history(prior_definition)
+        if not history:
+            return self
+        if (not prior_authority.native_grant_custody_confirmed
+                or not self.source_snapshot_digest
+                or self.source_snapshot_digest != prior_authority.source_snapshot_digest):
+            raise ValueError("Modifier history lost its confirmed prior or current source frame.")
+        prior_entries = _modifier_retention_entries(prior_authority, prior_definition, history)
+        entries = _modifier_retention_entries(self, definition, history)
+        edges = _modifier_retention_edges(self, history)
+        if entries != prior_entries or edges != _modifier_retention_edges(prior_authority, history):
+            raise ValueError("Modifier history changed its exact physical/source or migration relation.")
+        _require_modifier_retention_rows(definition, history)
+        return replace(self, modifier_history_retention=_ModifierHistoryRetention(
+            self.definition_digest, numeric_value_digest(definition.to_dict()), self.state_digest, state_revision,
+            self.source_snapshot_digest, _canonical(entries), _canonical(edges), _canonical(history)))
+
     def retained_spell_modifier_history(self, definition):
         from .character_spell_properties import FIELD, item_spell_property_facts, normalize_item_spell_properties
         entries = self.spell_property_item_entries(definition)
@@ -1641,6 +1777,24 @@ class SourceAuthority:
             native_custody_confirmed=self.native_grant_custody_confirmed)
         required = {row.get("id") for row in definition.spellcasting.get("spells", [])
                     if isinstance(row, dict) and row.get("spell_source_row_id") in declared}
+        retention = self.modifier_history_retention
+        if retention is not None:
+            if (type(retention) is not _ModifierHistoryRetention
+                    or retention.definition_digest != self.definition_digest
+                    or numeric_value_digest(definition.to_dict()) not in {
+                        retention.definition_digest, retention.raw_definition_digest}
+                    or retention.state_digest != self.state_digest
+                    or retention.state_revision != self.state_revision
+                    or retention.source_digest != self.source_snapshot_digest):
+                raise ValueError("Modifier history continuation no longer matches its exact candidate.")
+            retained = json.loads(retention.history_json)
+            if (_canonical(_modifier_retention_entries(self, definition, retained)) != retention.entries_json
+                    or _canonical(_modifier_retention_edges(self, retained)) != retention.edges_json):
+                raise ValueError("Modifier history continuation source relation changed.")
+            _require_modifier_retention_rows(definition, retained)
+            # Keep the pending native view/custody unchanged. These old rows
+            # cannot supply current casting entitlement or numeric authority.
+            history = retained
         if required != {entry["observation"]["id"] for entry in history}:
             raise ValueError("Legacy item observations need exact current custody before normalization.")
         return history
@@ -5085,7 +5239,7 @@ def _numeric_statuses(
                                   or native_baseline_target(kind, path, metric)
                                   or (matches[0].get("provenance") in {"native_level_up", "native_reconstruction", "native_requalification"}
                                       and native_advancement_input_target(kind, path, metric)))
-                and matches[0].get("provenance") in {"native_level_up", "native_creation", "page_feature_update", "native_reconstruction", "native_requalification", "native_elective_decision"}):
+                and matches[0].get("provenance") in {"native_level_up", "native_creation", "page_feature_update", "native_reconstruction", "native_requalification", "native_elective_decision", "native_external_proficiency"}):
             basis = resource_bases.get(path)
             trusted_witnesses = tuple(
                 witness.get("authorization") for witness in verified_actions
@@ -5315,7 +5469,10 @@ def build_source_authority(
                 key = (ref.get("entry_key"), feature.get("name"))
                 companion_claims[key] = companion_claims.get(key, 0) + 1
     from .character_equipment_activation import analyze_activation
-    exact_activation_indices = {row["index"] for row in analyze_activation(definition, state)["rows"]
+    activation_analysis = analyze_activation(definition, state)
+    exact_activation_indices = {row["index"] for row in activation_analysis["rows"]
+        if row["source"] == "sqlite" and row["status"] == "exact"}
+    current_activation_rows = {row["id"]: row["state"] for row in activation_analysis["rows"]
         if row["source"] == "sqlite" and row["status"] == "exact"}
     for index, class_row in enumerate(profile_class_rows(definition.profile), start=1):
         row_id = _text(class_row.get("row_id")) or f"class-row-{index}"
@@ -5418,11 +5575,13 @@ def build_source_authority(
                     # a mechanical owner. Qualification is a final status-only pass.
                     current, reason = None, "historical association requires current owner and custody"
                 current_feature_payloads[instance_id] = deepcopy(current) if current is not None and not reason else None
-            active = kind != "item" or (bool(raw.get("is_equipped")) and not raw.get("mechanics_suppressed"))
+            physical_activation = current_activation_rows.get(instance_id, {}) if kind == "item" else {}
+            active = kind != "item" or (physical_activation.get("is_equipped") is True
+                                       and not raw.get("mechanics_suppressed"))
             if current is not None and kind == "item":
                 from .character_builder_equipment import _metadata_requires_attunement
                 if (_metadata_requires_attunement(current.get("attunement"))
-                        or current.get("requires_attunement") is True) and not raw.get("is_attuned"):
+                        or current.get("requires_attunement") is True) and physical_activation.get("is_attuned") is not True:
                     active = False
             if current is None or reason:
                 statuses.append(AuthorityStatus(kind, instance_id, NEEDS_REPAIR, reason or "source unavailable"))
@@ -5612,6 +5771,11 @@ def build_source_authority(
         else:
             native_bases.update(reconstructed_input_bases(definition, systems_service=systems_service,
                 statuses=statuses, elective_witnesses=verified_numeric_actions, _current_inputs=current_inputs))
+    from .character_external_proficiencies import source_bases as external_proficiency_bases
+    try:
+        native_bases.update(external_proficiency_bases(definition, verified_numeric_actions))
+    except ValueError:
+        warnings.append(("external_proficiency_unconfirmed", "An acquired proficiency needs manager review."))
     preliminary_fields, _ = _numeric_statuses(
         definition, state, verified_numeric_actions, native_bases, source_snapshot_digest,
     )
@@ -5830,7 +5994,8 @@ def build_source_authority(
                            frozenset(spell_choice_targets), frozenset(current_spell_keys),
                            frozenset(inert_page_companions), frozenset(
                                _text(row.get("id")) for row in definition.equipment_catalog
-                               if isinstance(row, dict) and row.get("is_equipped")),
+                               if isinstance(row, dict) and current_activation_rows.get(
+                                   _text(row.get("id")), {}).get("is_equipped") is True),
                            _unqualified_native_aggregate_adjustments(dict(definition.stats or {})),
                            tuple(_canonical({**{key: row.get(key) for key in (
                                "id", "catalog_ref", "quantity", "is_equipped", "is_attuned", "weapon_wield_mode", "charges_current", "charges_max")},
@@ -5990,6 +6155,18 @@ def validate_native_spell_choice_capacity_transition(prior_definition, candidate
             state=prior_record.state_record.state, campaign_page_records=campaign_page_records))
     prior_pools = prior_ledger["pools"]
     prior_choices = {row["spell_id"]: row for row in prior_ledger["choices"]}
+    def retained_choice_state(choice):
+        # Prepared-list presentation uses "available" even for a proved active
+        # preparation. Transfer its actual prior ordinary fact, not that display
+        # label. The prospective ledger still rechecks current source, owner,
+        # list, level and marks; this does not confer new selection or custody.
+        if (choice["historical_state"] == "available"
+                and choice["pool"] == "prepared"
+                and all(choice.get(key) is True for key in (
+                    "ordinary_prepared", "ordinary_counted", "ordinary_eligible",
+                    "current_usable", "counts_against_prepared", "retained_obligation"))):
+            return "active"
+        return choice["historical_state"]
     changed_ids = {key for key in set(old) | set(new) if old.get(key) != new.get(key)}
     affected = {_text(row.get("class_row_id")) for key in changed_ids for row in (old.get(key), new.get(key))
         if isinstance(row, dict) and not row.get("spell_source_row_id")}
@@ -6026,7 +6203,7 @@ def validate_native_spell_choice_capacity_transition(prior_definition, candidate
             and (same or valid_intent or adoption is not None and row["id"] in adoption["supported_grant_ids"]) else "UNPROVED"})
     candidate = replace(candidate, native_grant_view=GrantView(tuple(qualified), inspected.diagnostics, inspected.migration_edges))
     if adoption is not None:
-        retained = ({key: value["historical_state"] for key, value in prior_choices.items() if key in new}
+        retained = ({key: retained_choice_state(value) for key, value in prior_choices.items() if key in new}
                     if checkpoint is None else {})
         ledger = _native_spell_choice_ledger(candidate, candidate_definition, systems_service,
             state=state, campaign_page_records=campaign_page_records, retained_states=retained)
@@ -6046,7 +6223,7 @@ def validate_native_spell_choice_capacity_transition(prior_definition, candidate
             continue
         previous = prior_choices.get(spell_id)
         if old.get(spell_id) == raw and previous:
-            retained[spell_id] = previous["historical_state"]
+            retained[spell_id] = retained_choice_state(previous)
             continue
         declared = native_class_choice_state(raw)
         if declared == "retired":
@@ -6063,7 +6240,7 @@ def validate_native_spell_choice_capacity_transition(prior_definition, candidate
                 raise ValueError("A new choice cannot borrow or rename an original obligation.")
             active.add(spell_id)
         elif previous and old.get(spell_id) == raw:
-            retained[spell_id] = previous["historical_state"]
+            retained[spell_id] = retained_choice_state(previous)
         else:
             raise ValueError("A new ordinary choice needs its actual native selection checkpoint.")
     for spell_id in set(old) - set(new):
@@ -6511,6 +6688,10 @@ def prepare_native_level_up_resource_authorizations(
         verified_manual_actions=verified_manual_actions,
         verified_numeric_actions=input_witnesses,
     )
+    baseline = baseline.continue_spell_modifier_history(
+        prior_authority, prior_definition, candidate_definition,
+        prior_state=prior_state, prior_state_revision=state_revision,
+        state=prospective_state, state_revision=state_revision)
     validate_native_managed_resource_templates(
         candidate_definition, prospective_state, authority=baseline,
         systems_service=systems_service, campaign_page_records=campaign_page_records,

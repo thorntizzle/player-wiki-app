@@ -1446,6 +1446,7 @@ class CharacterPublicationCoordinator:
         reviewed_source_proof: PendingReviewedSourceProof | None,
         trusted_spell_choice_authoring: bool, reconcile_reimport_state: bool,
         reimport_source_authority: Any | None,
+        audit_metadata: dict[str, Any] | None = None,
         _replacement_preview_target: str = "",
         _feature_association_preview: Any | None = None,
         _resource_restoration_preview: Any | None = None,
@@ -1497,6 +1498,13 @@ class CharacterPublicationCoordinator:
             raise CharacterStateConflictError("Native retention is unavailable for this update.")
         from .committed_character_publication import _prior_numeric_authority_loader
         load_prior_authority = _prior_numeric_authority_loader(self, prior_record)
+        from .character_external_proficiencies import validate_transition as validate_external_proficiency
+        from .auth import get_systems_service
+        validate_external_proficiency(prior_record, definition, desired_state,
+            actor_id=updated_by_user_id, metadata=audit_metadata,
+            audit_event_type=audit_event_type, operation_kind=operation_kind,
+            prior_authority=load_prior_authority, import_metadata=import_metadata,
+            systems_service_provider=get_systems_service)
         validate_native_grant_transition(prior_record, definition, desired_state,
             reviewed_source_proof=reviewed_source_proof, pending_numeric_authority=pending_numeric_authority,
             actor_id=updated_by_user_id, operation_kind=operation_kind,
@@ -1874,9 +1882,17 @@ class CharacterPublicationCoordinator:
         explicit_removed_item_id: str | None = None,
         reconcile_reimport_state: bool = False,
         reimport_source_authority: Any | None = None,
+        activation_repair_intent: tuple[Any, ...] | None = None,
     ) -> CharacterRecord:
         native_lifetime = False
         try:
+            if operation_kind == "activation_repair":
+                from .character_equipment_activation import validate_activation_repair_intent
+                validate_activation_repair_intent(prior_record.definition, prior_record.state_record.state,
+                                                 definition, desired_state,
+                                                 activation_repair_intent)
+            elif activation_repair_intent is not None:
+                raise CharacterStateConflictError("Activation repair intent requires its bounded operation.")
             if type(reviewed_source_proof) is PendingReviewedSourceProof:
                 native_lifetime = reviewed_source_proof._requires_native_custody()
                 if native_lifetime:
@@ -1891,6 +1907,7 @@ class CharacterPublicationCoordinator:
                 trusted_spell_choice_authoring=trusted_spell_choice_authoring,
                 reconcile_reimport_state=reconcile_reimport_state,
                 reimport_source_authority=reimport_source_authority,
+                audit_metadata=audit_metadata,
             )
             if committed_mode:
                 from .committed_character_publication import publish_update
@@ -1907,6 +1924,7 @@ class CharacterPublicationCoordinator:
                     explicit_removed_item_id=explicit_removed_item_id,
                     reconcile_reimport_state=reconcile_reimport_state,
                     reimport_source_authority=reimport_source_authority,
+                    activation_repair_intent=activation_repair_intent,
                 )
             key = (definition.campaign_slug, definition.character_slug)
             with acquire_runtime_state_lease(self.database_path, timeout_seconds=30.0):
@@ -1951,8 +1969,17 @@ class CharacterPublicationCoordinator:
         from .character_equipment_migration import _assert_activation_only_delta
         from .character_service import validate_state
         from .committed_publication import active
+        from .character_equipment_state import validate_equipment_state_values
+        from .system_policy import is_xianxia_system
 
-        if active():
+        # Callback-only legacy callers retain their signature. Explicit raw
+        # intent is checked before either dispatch mode can normalize it.
+        committed_mode = active()
+        if values is not None:
+            validate_equipment_state_values(values, strict_wield=(
+                committed_mode or not is_xianxia_system(prior_record.definition.system)))
+
+        if committed_mode:
             from .character_store import publication_source_write_transaction
             from .committed_character_publication import load_for_write
             from .character_equipment_state import build_reserved_equipment_state_update_result
@@ -1961,15 +1988,6 @@ class CharacterPublicationCoordinator:
             if (not isinstance(item_id, str) or not item_id.strip()
                     or len(item_id) > 256 or not isinstance(values, dict)):
                 raise CharacterEditValidationError("Equipment intent is unavailable.")
-            from .character_builder_equipment import _normalize_weapon_wield_mode_value
-            if any(field in values and not isinstance(values[field], bool)
-                   for field in ("is_equipped", "is_attuned")):
-                raise CharacterEditValidationError("Equipment intent is malformed.")
-            raw_mode = values.get("weapon_wield_mode")
-            if (raw_mode is not None and (not isinstance(raw_mode, str)
-                                          or len(raw_mode) > 64
-                                          or raw_mode.strip() and not _normalize_weapon_wield_mode_value(raw_mode))):
-                raise CharacterEditValidationError("Equipment wielding intent is malformed.")
             with publication_source_write_transaction() as connection:
                 current = load_for_write(self.repository, *key)
                 if (current is None or current.committed_revision is None
@@ -2758,6 +2776,27 @@ class CharacterPublicationCoordinator:
                 audit_metadata,
             )
         )
+        if operation_kind == "interactive_update" and audit_event_type == "character_reference_notes_updated":
+            from .committed_publication import active
+            from .character_reference_notes import validate_audit_metadata
+            if not active() or self.auth_store is None or audit_target_user_id is not None:
+                raise CharacterPublicationError("Reference-note audits require committed Character maintenance.")
+            validate_audit_metadata(audit_metadata, audit_actor_user_id)
+            clean = self.auth_store.sanitize_audit_metadata(audit_metadata)
+            encoded = json.dumps(clean, sort_keys=True, allow_nan=False)
+            if clean != audit_metadata or len(encoded.encode("utf-8")) > 60000:
+                raise CharacterPublicationError("The complete reference-note audit cannot be stored losslessly.")
+            return audit_event_type, audit_actor_user_id, None, encoded
+        if (operation_kind == "interactive_update" and audit_event_type == "character_native_edited"
+                and isinstance(audit_metadata, dict) and "external_proficiency_confirmation" in audit_metadata
+                and self.auth_store is not None and audit_target_user_id is None):
+            from .character_external_proficiencies import validate_metadata
+            validate_metadata(audit_metadata, audit_actor_user_id)
+            clean = self.auth_store.sanitize_audit_metadata(audit_metadata)
+            encoded = json.dumps(clean, sort_keys=True, allow_nan=False)
+            if clean != audit_metadata or len(encoded.encode("utf-8")) > 60000:
+                raise CharacterPublicationError("The complete acquisition audit cannot be stored losslessly.")
+            return audit_event_type, audit_actor_user_id, None, encoded
         if (operation_kind == "interactive_update"
                 and audit_event_type == "character_native_edited"
                 and audit_metadata == {"source": "native_edit_confirmed"}

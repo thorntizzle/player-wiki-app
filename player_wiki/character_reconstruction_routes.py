@@ -260,8 +260,12 @@ def prepare_reconstruction_review(dependencies, campaign, record, inputs, actor_
         authority_page_records = tuple(
             dependencies.list_visible_character_page_records(campaign.slug, current_campaign))
         systems_service = dependencies.get_systems_service()
+        from .character_source_repair import load_verified_numeric_actions
+        existing_numeric = load_verified_numeric_actions(
+            campaign.slug, current_record.definition.character_slug, strict=True)
         candidate, _ = compose_reconstruction(record=current_record, inputs=inputs,
-            systems_service=systems_service, campaign_page_records=list(authority_page_records))
+            systems_service=systems_service, campaign_page_records=list(authority_page_records),
+            verified_numeric_actions=existing_numeric)
         proof = issue_reconstruction(record=current_record, candidate=candidate,
             systems_service=systems_service, campaign_page_records=list(authority_page_records),
             actor_id=actor_id, action_id=action, input_digest=canonical_digest(inputs), refresh=refresh_proof)

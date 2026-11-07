@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from .character_equipment_activation import activation_marker, activation_frame_digest
+from .character_equipment_activation import (activation_marker, activation_frame_digest,
+                                             require_activation_values)
 
 from copy import deepcopy
 from typing import Any
@@ -33,6 +34,10 @@ SUPPORTED_FEATURE_STATE_KEYS = {"arcane_armor", "divine_avatar_forms"}
 
 class CharacterStateValidationError(ValueError):
     pass
+
+
+def _require_typed_activation_values(item: Any) -> None:
+    require_activation_values(item)
 
 
 def _inventory_note_target(
@@ -105,7 +110,10 @@ def build_resource_state(template: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_inventory_state(item: dict[str, Any], *, quantity: int | None = None) -> dict[str, Any]:
+def build_inventory_state(item: dict[str, Any], *, quantity: int | None = None,
+                          strict_activation: bool = False) -> dict[str, Any]:
+    if strict_activation:
+        _require_typed_activation_values(item)
     resolved_quantity = item.get("default_quantity") if quantity is None else quantity
     payload = {
         "id": item.get("id"),
@@ -171,7 +179,7 @@ def build_initial_state(definition: CharacterDefinition) -> dict[str, Any]:
             )
         if bool(item.get("is_currency_only")):
             continue
-        inventory.append(build_inventory_state(item))
+        inventory.append(build_inventory_state(item, strict_activation=True))
 
     return {
         "status": definition.status,
@@ -298,7 +306,7 @@ def prospective_inventory_projection_state(
         if item_id not in present_ids:
             quantity = (inventory_quantity_overrides or {}).get(item_id)
             prospective.setdefault("inventory", []).append(
-                build_inventory_state(item, quantity=quantity)
+                build_inventory_state(item, quantity=quantity, strict_activation=True)
             )
     prospective["equipment_activation"] = activation_marker(definition)
     prospective["attunement"] = _normalize_attunement_state(
@@ -496,6 +504,31 @@ def project_legacy_read_state(
     Only an absent legacy marker with exact physical owners is eligible. This
     read boundary never grants permission to update the retained state.
     """
+    return _project_guarded_equipment_read_state(definition, state,
+        incoming_definition=incoming_definition, source_authority=source_authority,
+        state_revision=state_revision, quarantine=False)
+
+
+def project_quarantined_activation_read_state(
+    definition: CharacterDefinition, state: dict[str, Any], *,
+    incoming_definition: CharacterDefinition, source_authority: Any,
+    state_revision: int,
+) -> dict[str, Any]:
+    """Keep numeric derivation while retaining malformed activation as raw evidence.
+
+    This read-only boundary accepts only bounded activation-value/marker issues;
+    physical ambiguity still refuses, and no writer may use it as admission.
+    """
+    return _project_guarded_equipment_read_state(definition, state,
+        incoming_definition=incoming_definition, source_authority=source_authority,
+        state_revision=state_revision, quarantine=True)
+
+
+def _project_guarded_equipment_read_state(
+    definition: CharacterDefinition, state: dict[str, Any], *,
+    incoming_definition: CharacterDefinition, source_authority: Any,
+    state_revision: int, quarantine: bool,
+) -> dict[str, Any]:
     import hashlib
 
     from .committed_publication import active
@@ -510,7 +543,7 @@ def project_legacy_read_state(
             or definition.system != incoming_definition.system
             or definition.campaign_slug != incoming_definition.campaign_slug
             or definition.character_slug != incoming_definition.character_slug
-            or type(state) is not dict or "equipment_activation" in state
+            or type(state) is not dict or (not quarantine and "equipment_activation" in state)
             or type(state_revision) is not int or state_revision < 0
             or type(source_authority) is not SourceAuthority
             or source_authority.state_revision != state_revision):
@@ -549,15 +582,26 @@ def project_legacy_read_state(
                     or len(set(identifiers)) != 1):
                 refuse()
             identity = identifiers[0]
-            if identity in seen or identity not in owners or item.get("unlinked_activation_discarded"):
+            discarded = (item.get("unlinked_activation_discarded") is True
+                         if quarantine else item.get("unlinked_activation_discarded"))
+            if identity in seen or identity not in owners or discarded:
                 refuse()
             seen.add(identity)
         if seen != set(owners):
             refuse()
         analysis = analyze_activation(candidate, state)
-        if (any(row["status"] != "exact" for row in analysis["rows"])
-                or {warning["code"] for warning in analysis["warnings"]}
-                   != {"activation_migration_required"}):
+        codes = {warning["code"] for warning in analysis["warnings"]}
+        if quarantine:
+            value_issues = {"malformed_activation_boolean", "malformed_wield_mode"}
+            marker_issue = {"invalid_activation_marker"}
+            if (not codes or codes - (value_issues | marker_issue | {"activation_migration_required"})
+                    or any(row["status"] not in ({"exact"} | value_issues | marker_issue) for row in analysis["rows"])
+                    or ("invalid_activation_marker" in codes and analysis["marker_kind"] != "present_invalid")
+                    or not (codes & value_issues or "equipment_activation" in state
+                            and "activation_migration_required" in codes)):
+                refuse()
+        elif (any(row["status"] != "exact" for row in analysis["rows"])
+                or codes != {"activation_migration_required"}):
             refuse()
         return owners
 
@@ -619,7 +663,12 @@ def project_legacy_read_state(
     payload = _reconcile_numeric_pools(
         definition, deepcopy(state), source_authority=source_authority,
     )
-    return _reconcile_current_hp(definition, payload, source_authority=source_authority)
+    payload = _reconcile_current_hp(definition, payload, source_authority=source_authority)
+    if quarantine and (activation_frame_digest(payload.get("inventory")) != activation_frame_digest(state.get("inventory"))
+            or ("equipment_activation" in payload) != ("equipment_activation" in state)
+            or activation_frame_digest(payload.get("equipment_activation")) != activation_frame_digest(state.get("equipment_activation"))):
+        refuse()
+    return payload
 
 
 def merge_state_with_definition(
@@ -683,6 +732,8 @@ def merge_state_with_definition(
         for key, value in dict(inventory_state_overrides or {}).items()
         if str(key).strip()
     }
+    for override in state_overrides.values():
+        _require_typed_activation_values(override)
     for item_id, override in dict(inventory_state_overrides or {}).items():
         if "notes" not in override:
             continue
@@ -714,8 +765,16 @@ def merge_state_with_definition(
             if existing_item is not None and "quantity" in existing_item
             else catalog_item.get("default_quantity") or 0
         )
-        merged_item = build_inventory_state(catalog_item, quantity=quantity)
+        activation_inputs = {
+            field: existing_item[field] if existing_item is not None and field in existing_item else catalog_item[field]
+            for field in ("is_equipped", "is_attuned", "weapon_wield_mode")
+            if (existing_item is not None and field in existing_item) or field in catalog_item
+        }
+        _require_typed_activation_values(activation_inputs)
+        merged_item = build_inventory_state(
+            {**catalog_item, **activation_inputs}, quantity=quantity, strict_activation=True)
         if existing_item is not None:
+            _require_typed_activation_values(existing_item)
             merged_item["is_equipped"] = bool(existing_item.get("is_equipped", merged_item.get("is_equipped", False)))
             merged_item["is_attuned"] = bool(existing_item.get("is_attuned", merged_item.get("is_attuned", False)))
             merged_item["charges_current"] = existing_item.get("charges_current", merged_item.get("charges_current"))
@@ -843,6 +902,9 @@ def validate_state(
 ) -> dict[str, Any]:
     payload = deepcopy(state)
     is_xianxia = is_xianxia_system(definition.system)
+    if not is_xianxia:
+        for item in payload.get("inventory") or []:
+            _require_typed_activation_values(item)
     from .committed_publication import active
     if source_authority is None and previous_state is not None and not is_xianxia and active():
         raise CharacterStateValidationError("Character numeric authority is unavailable.")

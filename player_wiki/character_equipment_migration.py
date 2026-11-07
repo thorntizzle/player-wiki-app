@@ -17,7 +17,8 @@ from typing import Any
 
 import yaml
 
-from .character_equipment_activation import ACTIVATION_FIELDS, activation_marker, analyze_activation
+from .character_equipment_activation import (ACTIVATION_FIELDS, activation_marker,
+                                             activation_value_issue, analyze_activation)
 from .character_models import CharacterDefinition, CharacterImportMetadata
 from .character_path_safety import resolve_character_path, validate_character_slug
 from .character_repository import load_campaign_character_config
@@ -36,6 +37,7 @@ def _bounded_report_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         value = payload.get("value")
         safe_value = (
             value if isinstance(value, bool)
+            else None if field == "weapon_wield_mode" and value is None
             else value[:128] if field == "weapon_wield_mode" and isinstance(value, str)
             else "malformed_value"
         )
@@ -87,8 +89,7 @@ def plan_equipment_activation_migration(
 ) -> dict[str, Any]:
     if not is_dnd_5e_system(definition.system):
         return {"status": "skipped_system", "state": deepcopy(state), "rows": [], "warnings": []}
-    existing_marker = dict(state.get("equipment_activation") or {})
-    if existing_marker.get("schema_version") == 1:
+    if "equipment_activation" in state:
         analysis = analyze_activation(definition, state)
         return {"status": "already_migrated" if not analysis["blocked"] else "quarantined",
                 "state": deepcopy(state), "rows": analysis["rows"],
@@ -111,21 +112,16 @@ def plan_equipment_activation_migration(
     unsafe = False
     for index, row in enumerate(state_rows):
         item_id = state_ids[index]
-        reason = ""
-        if row.get("unlinked_activation_discarded"):
+        reason = activation_value_issue(row)
+        if not reason and row.get("unlinked_activation_discarded") is True:
             provenance.append({"source": "sqlite", "index": index, "id": item_id,
                                "status": "explicit_discard_preserved", "fields": {}})
             continue
-        if not item_id or (row.get("id") and row.get("catalog_ref")
-                           and str(row["id"]).strip() != str(row["catalog_ref"]).strip()):
+        if not reason and (not item_id or (row.get("id") and row.get("catalog_ref")
+                           and str(row["id"]).strip() != str(row["catalog_ref"]).strip())):
             reason = "missing_or_conflicting_state_id"
-        elif state_counts[item_id] != 1 or def_counts[item_id] != 1:
+        elif not reason and (state_counts[item_id] != 1 or def_counts[item_id] != 1):
             reason = "duplicate_or_orphan_id"
-        elif any(field in row and not isinstance(row[field], bool)
-                 for field in ACTIVATION_FIELDS[:2]):
-            reason = "malformed_activation_boolean"
-        elif "weapon_wield_mode" in row and not isinstance(row["weapon_wield_mode"], str):
-            reason = "malformed_wield_mode"
         if reason:
             unsafe = True
             warnings.append({"code": reason, "message": f"Row {index} ({item_id or 'no ID'}) needs manager repair."})
@@ -143,12 +139,20 @@ def plan_equipment_activation_migration(
             else:
                 value = target.get(field, "" if field == "weapon_wield_mode" else False)
                 origin = "yaml_seed_missing"
-            if field == "weapon_wield_mode":
-                value = str(value or "").strip()
-            else:
-                value = bool(value)
-            candidate["inventory"][index][field] = value
             fields[field] = {"provenance": origin, "value": value}
+        reason = activation_value_issue({field: detail["value"] for field, detail in fields.items()})
+        if reason:
+            unsafe = True
+            warnings.append({"code": reason, "message": f"Row {index} ({item_id}) needs manager repair."})
+            provenance.append({"source": "sqlite", "index": index, "id": item_id,
+                               "status": "quarantined", "reason": reason, "fields": fields})
+            continue
+        for field, detail in fields.items():
+            value = detail["value"]
+            if field == "weapon_wield_mode" and value is not None:
+                value = value.strip()
+                detail["value"] = value
+            candidate["inventory"][index][field] = value
         provenance.append({"source": "sqlite", "index": index, "id": item_id,
                            "status": "exact", "fields": fields})
     for index, item in enumerate(definition_rows):

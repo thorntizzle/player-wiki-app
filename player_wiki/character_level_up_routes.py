@@ -18,6 +18,7 @@ from .character_source_repair import (load_verified_manual_actions, load_verifie
                                       record_confirmed_native_level_up_witness,
                                       prepare_native_spell_choice_audit_metadata)
 from .committed_publication import active
+from .character_recorded_advancement import is_recorded, manager_allowed, require_single_fields, apply_slot_observations
 from .character_source_authority import (build_reconciled_source_authority,
                                          NativeAdvancementValidationError,
                                          native_advancement_input_target,
@@ -123,6 +124,13 @@ def register_character_level_up_route(
             )
 
         form_source = request.form if request.method == "POST" else request.args
+        try:
+            require_single_fields(form_source)
+            recorded_request = is_recorded(form_source)
+        except ValueError as exc:
+            abort(400, description=str(exc))
+        if recorded_request and not manager_allowed(campaign_slug):
+            abort(403)
         form_values = dict(form_source)
         form_values.pop(ACQUISITION_FIELD, None)
         form_values.pop(TRUSTED_ACQUISITION_KEY, None)
@@ -151,6 +159,7 @@ def register_character_level_up_route(
                 authority_page_records=authority_page_records,
                 verified_manual_actions=(load_verified_manual_actions(campaign_slug, character_slug) if active() else ()),
                 verified_numeric_actions=(load_verified_numeric_actions(campaign_slug, character_slug) if active() else ()),
+                allow_recorded_advancement=manager_allowed(campaign_slug),
             )
             level_up_context["state_revision"] = record.state_record.revision
         except (CharacterBuildError, GrantContractError) as exc:
@@ -175,6 +184,7 @@ def register_character_level_up_route(
         draft_names = (
             "advancement_mode", "new_class_slug", "new_subclass_slug",
             "target_class_row_id", "hp_gain",
+            "advancement_record_type", "advancement_recorded_at", "advancement_evidence",
             *(field["name"] for field in level_up_context.get("restored_resource_fields", ())),
             *(
                 field["name"]
@@ -241,9 +251,14 @@ def register_character_level_up_route(
                     definition,
                     record.state_record.state,
                     source_authority=prospective_authority,
-                    hp_delta=hp_gain,
+                    hp_delta=0 if recorded_request else hp_gain,
                 )
+                if recorded_request:
+                    merged_state = apply_slot_observations(record.state_record.state, merged_state,
+                        level_up_context.get("_recorded_slot_observations", ()))
                 def refresh_pending_authority():
+                    if recorded_request and not manager_allowed(campaign_slug):
+                        raise CharacterStateConflictError("Manager authority changed before recording advancement.")
                     if not dependencies.has_session_mode_access(campaign_slug, character_slug):
                         raise CharacterStateConflictError("Character access changed before publication.")
                     fresh_campaign, _ = dependencies.load_character_context(campaign_slug, character_slug)
@@ -284,7 +299,7 @@ def register_character_level_up_route(
                 new_markers = ()
                 pending_authority = None
                 merged_state = dependencies.merge_state_with_definition(
-                    definition, record.state_record.state, hp_delta=hp_gain,
+                    definition, record.state_record.state, hp_delta=0 if recorded_request else hp_gain,
                 )
             dependencies.character_publication_coordinator.update(
                 record,
@@ -376,7 +391,8 @@ def register_character_level_up_route(
             )
 
         flash(
-            f"{definition.name} advanced to level {int(level_up_context.get('next_level') or 0)}.",
+            (f"Recorded {definition.name}'s completed level {int(level_up_context.get('next_level') or 0)} advancement."
+             if recorded_request else f"{definition.name} advanced to level {int(level_up_context.get('next_level') or 0)}."),
             "success",
         )
         if not resource_witness_confirmed:

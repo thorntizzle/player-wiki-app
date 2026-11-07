@@ -102,6 +102,8 @@ def register_character_equipment_activation_repair_route(
                         expected_revision=expected_revision,
                         updated_by_user_id=user.id,
                         operation_kind="activation_repair",
+                        activation_repair_intent=(choice, row_index, target_id,
+                            int(request.form.get("state_index", "-1")) if choice == "remap_definition" else -1),
                     )
                     refreshed = load_character_context(campaign_slug, character_slug)
                     if refreshed is None:

@@ -1,8 +1,9 @@
-"""Exact, read-only proof for one operator-marked deprecated page.
+"""Exact proof and a closed-target producer for one deprecated legacy page.
 
 The marker is a sealed custody claim, never an admission or a publication.
 Callers supply a pinned SQLite connection and a scanned file inventory; this
-module neither discovers candidates nor writes the marker.
+The operator producer is separate from ordinary readers and never admits or
+publishes a page. Its caller owns exclusive target and filesystem access.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import re
 import sqlite3
 from pathlib import Path
 from typing import Mapping
+from datetime import datetime, timezone
 
 import yaml
 
@@ -61,6 +63,117 @@ def marker_digest(campaign_slug: str, page_ref: str, file_sha256: str,
     return hashlib.sha256(_DOMAIN + json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
+
+
+class LegacyExclusionUncertain(RuntimeError):
+    """The marker may be durable; inspect it before any further operation."""
+
+
+def exclude_legacy_index(
+    connection: sqlite3.Connection, *, campaign_slug: str, campaigns_dir: Path,
+    source_relative_path: str, expected_source_sha256: str,
+    expected_marker_digest: str,
+) -> dict[str, object]:
+    """Seal the existing deprecated index without changing its row or file.
+
+    This operator-only service requires a trusted closed v18 target, no ambient
+    transaction, and quiesced external file writers. Both expected digests come
+    from the caller's reviewed observation. The ordinary reader proves the
+    prospective claim inside the writer reservation and again after commit.
+    """
+    from .backup_archive import DEFAULT_LIMITS, _scan_campaign_files
+    from .committed_publication import active
+    from .committed_source_store import _legacy_enum_values_valid
+    from .migrations import inspect_migration_ledger
+
+    if (not isinstance(campaign_slug, str) or not _CAMPAIGN_SLUG.fullmatch(campaign_slug)
+            or type(source_relative_path) is not str
+            or not source_relative_path.startswith(campaign_slug + "/")
+            or not source_relative_path.endswith("/index.md")
+            or "\\" in source_relative_path or ":" in source_relative_path
+            or any(part in ("", ".", "..") for part in source_relative_path.split("/"))
+            or not all(type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value)
+                       for value in (expected_source_sha256, expected_marker_digest))):
+        raise ValueError("An exact campaign index path and expected digests are required.")
+    if connection.in_transaction or connection.row_factory is not sqlite3.Row:
+        raise ValueError("Exclusion requires its own transaction and the ordinary SQLite row factory.")
+    # The shared inventory rejects links, reparse points, unsafe paths and
+    # changing files. Do not substitute a caller-supplied success claim.
+    observed = _scan_campaign_files(Path(campaigns_dir), DEFAULT_LIMITS)
+    file_map = {path: (size, digest) for path, _, size, digest, _ in observed}
+    source_files = {path: source for path, source, _, _, _ in observed}
+    selected = next((item for item in observed if item[0] == source_relative_path), None)
+    if (selected is None or file_map[source_relative_path][1] != expected_source_sha256
+            or not 0 < file_map[source_relative_path][0] <= _MAX_SOURCE_BYTES):
+        raise ValueError("The expected index source is unavailable or changed.")
+    marker = "legacy_excluded:" + expected_marker_digest
+    key = (campaign_slug, "page", "index")
+    changed = False
+    committed = False
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        ledger = inspect_migration_ledger(connection)
+        if (not ledger.is_current or ledger.applied_version != 18 or active(connection)
+                or not _legacy_enum_values_valid(connection)
+                or connection.execute("SELECT 1 FROM sqlite_temp_schema LIMIT 1").fetchone()):
+            raise ValueError("Exclusion requires an ordinary trusted closed v18 target.")
+        row = connection.execute(
+            "SELECT * FROM campaign_pages WHERE campaign_slug=? AND page_ref='index'",
+            (campaign_slug,),
+        ).fetchone()
+        if row is None or marker_digest(campaign_slug, "index", expected_source_sha256, row) != expected_marker_digest:
+            raise ValueError("The reviewed index row changed.")
+        prior = connection.execute(
+            "SELECT status,reason_code,revision FROM committed_source_admission "
+            "WHERE campaign_slug=? AND object_kind='page' AND object_ref='index'",
+            (campaign_slug,),
+        ).fetchone()
+        if prior is not None and not (
+            prior["status"] == "blocked" and prior["revision"] is None
+            and prior["reason_code"] in ("page_deprecated", marker)
+        ):
+            raise ValueError("An existing admission or conflicting claim cannot be replaced.")
+        if prior is None or prior["reason_code"] != marker:
+            connection.execute(
+                "INSERT INTO committed_source_admission "
+                "(campaign_slug,object_kind,object_ref,status,reason_code,revision,updated_at) "
+                "VALUES (?,'page','index','blocked',?,NULL,?) "
+                "ON CONFLICT(campaign_slug,object_kind,object_ref) DO UPDATE SET "
+                "status='blocked',reason_code=excluded.reason_code,revision=NULL,updated_at=excluded.updated_at",
+                (campaign_slug, marker, datetime.now(timezone.utc).isoformat()),
+            )
+            changed = True
+        proof = proved_exclusions(connection, file_map, source_files=source_files)
+        if (set(proof) != {key} or proof[key]["path"] != source_relative_path
+                or proof[key]["marker"] != marker):
+            raise ValueError("The exact deprecated-index exclusion does not qualify.")
+        fresh = next((item for item in _scan_campaign_files(Path(campaigns_dir), DEFAULT_LIMITS)
+                      if item[0] == source_relative_path), None)
+        if fresh != selected:
+            raise ValueError("The index source changed during the writer reservation.")
+        # A transport/storage error during COMMIT does not prove noncommit.
+        committed = True
+        connection.commit()
+        connection.execute("BEGIN")
+        durable = proved_exclusions(connection, file_map, source_files=source_files)
+        if durable != proof:
+            raise LegacyExclusionUncertain("Index marker committed but durable proof changed; inspect before retrying.")
+        connection.rollback()
+        return {"changed": changed, "marker": marker, "path": source_relative_path,
+                "sha256": expected_source_sha256}
+    except BaseException as exc:
+        try:
+            if connection.in_transaction:
+                connection.rollback()
+        except BaseException as cleanup:
+            raise LegacyExclusionUncertain(
+                "Index exclusion transaction cleanup failed; inspect before continuing."
+            ) from cleanup
+        if committed and not isinstance(exc, LegacyExclusionUncertain):
+            raise LegacyExclusionUncertain(
+                "Index marker may be durable; inspect the exact target before continuing."
+            ) from exc
+        raise
 
 
 def proved_exclusions(connection: sqlite3.Connection,

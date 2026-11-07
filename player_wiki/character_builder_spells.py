@@ -1398,7 +1398,10 @@ def _build_level_up_spell_choice_fields(
         prepared_occupancy = (qualified_pools.get("prepared") or {}).get("occupancy") if has_native_grants(definition) else len(existing_prepared_identities)
         if type(prepared_occupancy) is not int:
             return fields + feat_spell_fields
-        additional_prepared = max(target_prepared_count - prepared_occupancy, 0)
+        # A completed event does not establish a later daily preparation
+        # choice. Keep the existing legal selection; capacity may be unused.
+        additional_prepared = (0 if values.get("advancement_record_type") == "completed"
+                               else max(target_prepared_count - prepared_occupancy, 0))
         excluded_values = (
             existing_prepared_values
             | existing_always_prepared_values
@@ -1478,7 +1481,8 @@ def _build_level_up_spell_choice_fields(
         prepared_occupancy = (qualified_pools.get("prepared") or {}).get("occupancy") if has_native_grants(definition) else len(existing_prepared_identities)
         if type(prepared_occupancy) is not int:
             return fields + feat_spell_fields
-        additional_prepared = max(target_prepared_count - prepared_occupancy, 0)
+        additional_prepared = (0 if values.get("advancement_record_type") == "completed"
+                               else max(target_prepared_count - prepared_occupancy, 0))
         if additional_prepared > 0 and not prepared_options:
             return fields + feat_spell_fields
         for index in range(additional_prepared):
@@ -4505,7 +4509,7 @@ def _additional_spell_metadata_entries(
         for evidence in _inferred_bonus_cantrip_spell_evidence(feature_entries, selected_class=selected_class, include_native_owners=True):
             for owner in evidence["owners"]:
                 output_sources.append({"entry": owner, "blocks": [evidence["block"]],
-                    "was_suppressed": evidence["was_suppressed"], "semantics_known": False})
+                    "was_suppressed": evidence["was_suppressed"], "cantrip_only": True})
     return values
 
 
@@ -5822,7 +5826,7 @@ def _record_spell_output_contribution(collector, payload, *, source_entry=None, 
 
 def _capture_automatic_spell_output(collector, *, value, source_entry, spell_catalog,
         class_row_id, bonus_known=False, always_prepared=False, support=None,
-        was_suppressed=False, semantics_known=True):
+        was_suppressed=False, semantics_known=True, cantrip_only=False):
     if collector is None:
         return
     support = dict(support or {})
@@ -5836,13 +5840,15 @@ def _capture_automatic_spell_output(collector, *, value, source_entry, spell_cat
             mark=str(support.get("mark") or ""), is_ritual=bool(support.get("ritual")), **kwargs)
     if was_suppressed and not temporary:
         raise GrantContractError("A suppressed spell output has no exact current publication.")
-    # Unknown/custom access and inferred action-less rules stay opaque.
+    # Only the recognized learned/count-exempt component is understood here.
+    # Its literal reference must resolve to a real cantrip; other clauses stay opaque.
     semantics = None
     spell_entry = _resolve_spell_entry(value, spell_catalog)
     spell_level = spell_entry.metadata.get("level") if spell_entry is not None else None
     explicit_ritual = support.get("ritual") is True
     if (semantics_known and isinstance(source_entry, SystemsEntryRecord) and (bonus_known or always_prepared or explicit_ritual)
             and type(spell_level) is int and 0 <= spell_level <= 9
+            and (not cantrip_only or spell_level == 0)
             and not _spell_payload_support_kwargs(support)
             and str(support.get("mark") or "") in {"", "Known", "Cantrip", "Prepared"}):
         contributions = {}
@@ -5894,6 +5900,7 @@ def _automatic_known_spell_values(
                     source_entry=source["entry"], was_suppressed=source.get("was_suppressed", False),
                     semantics_known=source.get("semantics_known", True) and _simple_automatic_additional_block(
                         block, target_level=target_level, exact_level=exact_level),
+                    cantrip_only=source.get("cantrip_only", False),
                     spell_catalog=spell_catalog or {}, class_row_id=class_row_id, bonus_known=True)
     return _dedupe_preserve_order(values)
 

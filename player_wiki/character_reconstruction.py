@@ -81,9 +81,16 @@ def retain_reconstruction_content(composed, derived):
     if not isinstance(composed.spellcasting, dict) or not isinstance(derived.spellcasting, dict):
         return CharacterDefinition.from_dict(payload)
     for family, identity in (("class_rows", "class_row_id"), ("source_rows", "source_row_id")):
+        if family == "class_rows" and family not in composed.spellcasting:
+            # A flat advancement payload has no saved casting rows to retain.
+            # Normalization derived these from the complete current profile and
+            # sources, together with its slot lanes. Keep that owned structure;
+            # never recover it by copying the prior level's rows or a header.
+            payload["spellcasting"][family] = clean(derived.spellcasting.get(family, []))
         if family in composed.spellcasting:
             payload["spellcasting"][family] = merge_rows(composed.spellcasting[family], derived.spellcasting.get(family, []),
                 identity, ("spell_save_dc", "spell_attack_bonus", "spellcasting_ability", "slot_progression", "spell_metric_provenance"))
+        if family in payload["spellcasting"]:
             # Persist the native base recipe, not a current equipped item's
             # formula bonus. The read projection applies those qualified item
             # effects once. Explicit sourced overrides remain untouched.
@@ -248,7 +255,8 @@ def reconstruction_context(definition, service, pages, values=None, *, state=Non
                        for identity, entry in owner_entries.items()]}
 
 
-def compose_reconstruction(*, record, inputs, systems_service, campaign_page_records):
+def compose_reconstruction(*, record, inputs, systems_service, campaign_page_records,
+                           verified_numeric_actions=()):
     retained = record.definition.source.get("native_reconstruction_choices")
     if isinstance(retained, dict) and retained.get("language_elective_outcomes"):
         raise SourceRepairError("Use the language decision review; full build reconstruction cannot discard elective decision history.")
@@ -477,7 +485,8 @@ def compose_reconstruction(*, record, inputs, systems_service, campaign_page_rec
     from .character_feature_proficiency_grants import prepare_reconstruction
     feature_grant_draft = prepare_reconstruction(record.definition, candidate, systems_service)
     payload["source"]["native_reconstruction_choices"]["unresolved_proficiencies"] = validate_current(
-        candidate, systems_service, skill_adoption_draft=skill_draft, feature_grant_draft=feature_grant_draft)
+        candidate, systems_service, elective_witnesses=verified_numeric_actions,
+        skill_adoption_draft=skill_draft, feature_grant_draft=feature_grant_draft)
     candidate = CharacterDefinition.from_dict(payload)
     from .character_reconstruction_authority import reconstruction_source_links
     reconstruction_source_links(candidate, require_origin=False)

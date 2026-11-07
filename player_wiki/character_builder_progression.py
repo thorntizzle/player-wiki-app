@@ -1289,14 +1289,55 @@ def _restored_native_resource_fields(
 
 def _missing_attained_native_feature_entries(
     definition: CharacterDefinition, entries: list[dict[str, Any]], *, class_row_id: str,
+    systems_service=None, source_authority=None, prior_definition=None,
 ) -> list[dict[str, Any]]:
     from .character_armor_models import historical_ids
-    summaries = historical_ids(definition)
+    from .character_feature_history import declared_ids
+    summaries = historical_ids(definition) | declared_ids(definition)
     existing = {
         str(dict(feature.get("systems_ref") or {}).get("entry_key") or "").strip()
         for feature in definition.features
         if str(feature.get("class_row_id") or "").strip() == class_row_id and feature.get("id") not in summaries
     }
+    prior = prior_definition if prior_definition is not None else definition
+    if source_authority is not None and isinstance(prior.source.get("native_reconstruction_choices"), dict):
+        from .character_reconstruction_authority import attained_reconstruction_feature_owners
+        from .character_armor_models import structural_selectors
+        from .character_source_authority import SourceAuthority, numeric_value_digest
+        if (type(source_authority) is not SourceAuthority
+                or numeric_value_digest(prior.to_dict()) not in {
+                    source_authority.definition_digest, source_authority.original_definition_digest}
+                or class_row_id not in source_authority.verified_class_rows):
+            raise CharacterBuildError("Retained feature coverage needs its qualified prior class frame.")
+        owners = attained_reconstruction_feature_owners(prior, systems_service,
+            armor_selectors=structural_selectors(prior, systems_service))
+        prior_rows = list(prior.features or [])
+        for row in entries:
+            entry = row["entry"]
+            expected = _systems_ref_from_entry(entry)
+            matches = [feature for feature in definition.features if isinstance(feature, dict)
+                and feature.get("id") not in summaries
+                and feature.get("class_row_id") in (None, "", class_row_id)
+                and isinstance(feature.get("systems_ref"), dict)
+                and feature["systems_ref"].get("entry_key") == entry.entry_key]
+            if not matches:
+                continue
+            feature = matches[0]
+            ref = feature["systems_ref"]
+            if (len(matches) != 1 or not feature.get("id") or feature.get("page_ref")
+                    or (feature.get("native_acquisition") and not feature.get("class_row_id"))
+                    or any(ref.get(key) != expected.get(key) for key in
+                           ("entry_key", "entry_type", "source_id", "library_slug"))
+                    or any(ref.get(key) and ref[key] != expected.get(key) for key in ("slug", "title"))
+                    or class_row_id not in owners.get(entry.entry_key, ())
+                    or (not feature.get("class_row_id")
+                        and owners.get(entry.entry_key) != frozenset({class_row_id}))
+                    or source_authority.status_for("feature", feature["id"]) != "VERIFIED"
+                    or [old for old in prior_rows if old.get("id") == feature["id"]] != [feature]):
+                raise CharacterBuildError("An existing attained feature needs exact unique prior source/class ownership before continuation.")
+            # This is output coverage, not a new acquisition or a raw owner
+            # rewrite. The original stable row and all choice custody survive.
+            existing.add(entry.entry_key)
     return [row for row in entries if row["entry"].entry_key not in existing]
 
 
@@ -1371,6 +1412,7 @@ def build_native_level_up_context(
     authority_page_records: list[Any] | None = None,
     verified_manual_actions: tuple[Any, ...] = (),
     verified_numeric_actions: tuple[Any, ...] = (),
+    allow_recorded_advancement: bool = False,
 ) -> dict[str, Any]:
     raw_values = dict(form_values or {})
     acquisition_context = raw_values.pop(TRUSTED_ACQUISITION_KEY, None)
@@ -1403,6 +1445,13 @@ def build_native_level_up_context(
         if activation_warnings:
             raise CharacterBuildError("Equipment activation identity needs manager repair before level-up.")
     values = _normalize_level_up_values(definition, raw_values)
+    from .character_recorded_advancement import is_recorded
+    try:
+        completed_advancement = is_recorded(values)
+        if completed_advancement and not allow_recorded_advancement:
+            raise ValueError("Only a current campaign manager can record a completed advancement.")
+    except ValueError as exc:
+        raise CharacterBuildError(str(exc)) from exc
     submitted_values = dict(values)
     current_level = int(readiness.get("current_level") or _resolve_native_character_level(definition))
     next_level = current_level + 1
@@ -1422,7 +1471,9 @@ def build_native_level_up_context(
     # Choice fields use current independent ownership. Keep the raw definition
     # for numeric/resource preview and strict production, including retired rows.
     spell_choice_definition = definition
-    if activated and has_native_grants(acquisition_prior_definition):
+    choice_authority = None
+    if activated and (has_native_grants(acquisition_prior_definition)
+            or isinstance(acquisition_prior_definition.source.get("native_reconstruction_choices"), dict)):
         from .character_source_authority import build_reconciled_source_authority
         choice_authority = build_reconciled_source_authority(
             definition=acquisition_prior_definition, state=state,
@@ -1431,7 +1482,8 @@ def build_native_level_up_context(
             verified_manual_actions=verified_manual_actions,
             verified_numeric_actions=verified_numeric_actions,
         )
-        spell_choice_definition = choice_authority.effective_definition(definition)
+        if has_native_grants(acquisition_prior_definition):
+            spell_choice_definition = choice_authority.effective_definition(definition)
     row_contexts = [
         dict(row or {})
         for row in list(readiness.get("selected_class_rows") or [])
@@ -1634,11 +1686,20 @@ def build_native_level_up_context(
         )
         attained_entries = _missing_attained_native_feature_entries(
             definition, attained_entries, class_row_id=acted_row_id,
+            systems_service=systems_service, source_authority=choice_authority,
+            prior_definition=acquisition_prior_definition,
         )
         historical_entries = _attained_native_feature_entries(
             systems_service, campaign_slug, selected_class, selected_subclass, attained_level=row_current_level, definition=definition,
             verified_numeric_actions=verified_numeric_actions,
         )
+        if completed_advancement:
+            from .character_recorded_advancement import require_spine
+            try:
+                require_spine(acquisition_prior_definition, selected_class=selected_class,
+                    selected_subclass=selected_subclass, class_row_id=acted_row_id, mode=values["advancement_mode"])
+            except ValueError as exc:
+                raise CharacterBuildError(str(exc)) from exc
         preview = _build_native_level_up_preview(
             definition=definition,
             selected_class=selected_class,
@@ -1664,6 +1725,12 @@ def build_native_level_up_context(
             spell_choice_definition=spell_choice_definition,
         )
         preview_resource_templates = preview.pop("_resource_templates", [])
+        preview_slot_lanes = preview.pop("_slot_lanes", [])
+        from .character_recorded_advancement import slot_fields
+        recorded_slot_fields = slot_fields(preview_slot_lanes, state or {}, submitted_values) if completed_advancement else []
+        for field in recorded_slot_fields:
+            if field["name"] in submitted_values:
+                values[field["name"]] = submitted_values[field["name"]]
         restored_resource_fields = _restored_native_resource_fields(
             definition, historical_entries=historical_entries, class_row_id=acted_row_id,
             candidate_templates=preview_resource_templates, values=submitted_values,
@@ -1677,10 +1744,13 @@ def build_native_level_up_context(
                 values[field["name"]] = submitted_values[field["name"]]
     else:
         restored_resource_fields = []
+        recorded_slot_fields = []
         try:
             preview_max_hp = max(int((definition.stats or {}).get("max_hp") or 0) + _parse_level_up_hit_point_gain(values), 1)
         except CharacterBuildError:
             preview_max_hp = max(int((definition.stats or {}).get("max_hp") or 0), 1)
+        if completed_advancement:
+            preview_max_hp = "Pending valid completed advancement"
         preview = {
             "class_level_text": str(preview_profile.get("class_level_text") or profile_class_level_text(definition.profile)),
             "class_rows": [_class_row_level_text(row) for row in ensure_profile_class_rows(preview_profile)],
@@ -1695,6 +1765,9 @@ def build_native_level_up_context(
         TRUSTED_ACQUISITION_KEY: acquisition_context,
         "character_name": definition.name,
         "physical_hp_input": bool(dict(definition.source.get("native_progression") or {}).get("hp_recipe")),
+        "recorded_adoption_allowed": allow_recorded_advancement,
+        "completed_advancement": completed_advancement,
+        "recorded_slot_fields": recorded_slot_fields,
         "current_level": current_level,
         "next_level": next_level,
         "campaign_slug": campaign_slug,
@@ -1859,6 +1932,8 @@ def build_native_level_up_character_definition(
             choice_sections=choice_sections,
             static_keys=set(LEVEL_UP_BUILDER_STATIC_KEYS) | {
                 str(field["name"]) for field in list(level_up_context.get("restored_resource_fields") or [])
+            } | {
+                str(field["name"]) for field in list(level_up_context.get("recorded_slot_fields") or [])
             },
         ),
     )
@@ -1891,14 +1966,24 @@ def build_native_level_up_character_definition(
         raise CharacterBuildError("This class row can only advance one level at a time.")
 
     hp_gain = _parse_level_up_hit_point_gain(values)
+    from .character_recorded_advancement import parse_recorded, require_spine
+    try:
+        recorded = parse_recorded(values, allowed=level_up_context.get("recorded_adoption_allowed") is True)
+        if recorded is not None:
+            require_spine(prior_definition, selected_class=selected_class,
+                selected_subclass=selected_subclass, class_row_id=target_class_row_id, mode=advancement_mode)
+    except ValueError as exc:
+        raise CharacterBuildError(str(exc)) from exc
     from .character_hp_recipe import recipe_for_source
     reconstruction_hp_recipe = recipe_for_source(current_definition.source)
     if reconstruction_hp_recipe is not None:
         from .character_hit_dice import _hit_die_faces_for_class_row
         faces = _hit_die_faces_for_class_row({
             "systems_ref": _systems_ref_from_entry(selected_class), "metadata": selected_class.metadata})
-        if not 1 <= hp_gain <= faces:
+        if recorded is None and not 1 <= hp_gain <= faces:
             raise CharacterBuildError(f"Enter the physical Hit Die contribution from 1 to {faces}; Constitution is applied separately.")
+    elif recorded is not None:
+        raise CharacterBuildError("Recording a whole HP gain needs the reconstructed retained recipe.")
     _, selected_choices = _resolve_builder_choices(choice_sections, values)
     advancement_scores = ability_advancement_scores(current_definition.stats)
     base_ability_scores, level_up_feat_entries, _ = _resolve_level_up_ability_score_choices(
@@ -1936,6 +2021,8 @@ def build_native_level_up_character_definition(
             attained_level=row_target_level, definition=prior_definition,
             verified_numeric_actions=verified_numeric_actions,
         ), class_row_id=target_class_row_id,
+        systems_service=level_up_context["systems_service"], source_authority=current_authority,
+        prior_definition=prior_definition,
     ))
     new_feature_entries.extend(level_up_feat_entries)
     new_feature_entries.extend(
@@ -2141,6 +2228,7 @@ def build_native_level_up_character_definition(
         hp_gain=hp_gain, total_character_level=target_level, item_catalog=item_catalog,
         selected_campaign_option_payloads=selected_campaign_option_payloads,
         weapon_proficiencies=resulting_weapon_proficiencies, attack_choices=combined_selected_choices,
+        recorded_advancement_values=values if recorded is not None else None,
     )
     prospective_stats["ability_inputs"] = prospective_ability_inputs
     total_hp_delta = hp_gain + _feat_hit_point_bonus(
@@ -2203,6 +2291,7 @@ def build_native_level_up_character_definition(
             subclass_ref=_systems_ref_from_entry(selected_subclass) if selected_subclass is not None else None,
             row_from_level=row_current_level,
             row_to_level=row_target_level,
+            preserve_import_provenance=recorded is not None,
         ),
     )
     grant_frame = native_frame(feature_choice_selections, selected_choices, prior_definition.proficiencies,
@@ -2235,16 +2324,38 @@ def build_native_level_up_character_definition(
             selected_choices=selected_choices, base_scores=base_ability_scores,
             prior_scores=advancement_scores, class_entry=selected_class,
             systems_service=level_up_context["systems_service"], elective_witnesses=verified_numeric_actions)
-        from .character_hp_recipe import next_level_maximum
+        from .character_hp_recipe import next_level_maximum, recorded_level_maximum
         payload = deepcopy(definition.to_dict())
         history = payload["source"]["native_progression"]["history"]
-        history[-1]["physical_hp_gain"] = hp_gain
-        expected_hp = next_level_maximum(payload["source"]["native_progression"]["hp_recipe"], history[:-1],
-            level=target_level, constitution=ability_scores["con"], faces=faces, physical_hp_gain=hp_gain)
+        if recorded is not None:
+            expected_hp, retained_recipe = recorded_level_maximum(
+                payload["source"]["native_progression"]["hp_recipe"], history[:-1],
+                level=target_level, constitution=ability_scores["con"], faces=faces, whole_hp_gain=hp_gain)
+            payload["source"]["native_progression"]["hp_recipe"] = retained_recipe
+            history[-1]["at"] = recorded.occurred_at
+            history[-1]["recorded_advancement"] = recorded.history_note()
+        else:
+            history[-1]["physical_hp_gain"] = hp_gain
+            expected_hp = next_level_maximum(payload["source"]["native_progression"]["hp_recipe"], history[:-1],
+                level=target_level, constitution=ability_scores["con"], faces=faces, physical_hp_gain=hp_gain)
         history[-1]["max_hp_delta"] = expected_hp - int(current_definition.stats["max_hp"])
+        if recorded is not None and history[-1]["max_hp_delta"] != hp_gain:
+            raise CharacterBuildError("The recorded whole gain does not match the qualified prior HP maximum.")
         total_hp_delta = history[-1]["max_hp_delta"]
         payload["stats"]["max_hp"] = expected_hp
         definition = CharacterDefinition.from_dict(payload)
+    # A single-class spell payload rebuilds current class output, not the old
+    # non-entitling item source rows. Restore qualified literal history before
+    # binding the new authority; the prospective relation/equality checks below
+    # still refuse conflicting owners or changed declarations.
+    if activated:
+        from .character_spell_properties import preserve_modifier_history
+        try:
+            definition.spellcasting = preserve_modifier_history(
+                definition.spellcasting, prior_definition,
+                current_authority.retained_spell_modifier_history(prior_definition))
+        except ValueError as exc:
+            raise CharacterBuildError(str(exc)) from exc
     pending_authority = None
     if activated:
         pending_authority = build_reconciled_source_authority(
@@ -2265,6 +2376,13 @@ def build_native_level_up_character_definition(
             if row.path in pending_skills else row
             for row in pending_authority.field_statuses
         ))
+        try:
+            pending_authority = pending_authority.continue_spell_modifier_history(
+                current_authority, prior_definition, definition,
+                prior_state=state, prior_state_revision=state_revision,
+                state=state, state_revision=state_revision)
+        except ValueError as exc:
+            raise CharacterBuildError(str(exc)) from exc
     retained_continuation = definition
     definition = normalize_definition_to_native_model(
         definition,
@@ -2311,20 +2429,35 @@ def build_native_level_up_character_definition(
     definition.equipment_catalog = [
         deepcopy(prior_by_id.get(row.get("id"), row)) for row in definition.equipment_catalog
     ]
-    import_metadata = _build_leveled_import_metadata(
-        campaign_slug=campaign_slug,
-        current_definition=current_definition,
-        current_import_metadata=current_import_metadata,
-        target_level=target_level,
-    )
+    if recorded is not None:
+        if type(current_import_metadata) is not CharacterImportMetadata:
+            raise CharacterBuildError("Recording advancement needs its retained import metadata.")
+        import_metadata = deepcopy(current_import_metadata)
+    else:
+        import_metadata = _build_leveled_import_metadata(
+            campaign_slug=campaign_slug,
+            current_definition=current_definition,
+            current_import_metadata=current_import_metadata,
+            target_level=target_level,
+        )
     from .character_source_authority import NativeAdvancementIntent
     definition.resource_templates = _retain_continuation_resource_templates(
         list(prior_definition.resource_templates or []), list(definition.resource_templates or []),
         _continuation_pool_ids(definition.features),
     )
     restored_ids = {str(field["id"]) for field in restored_fields}
+    if recorded is not None:
+        prior_resource_ids = {row.get("id") for row in prior_definition.resource_templates}
+        if any(row.get("id") not in prior_resource_ids for row in definition.resource_templates):
+            raise CharacterBuildError("Recording this advancement needs a separate current-use baseline for its new resource trackers.")
+        from .character_recorded_advancement import slot_observations
+        try:
+            level_up_context["_recorded_slot_observations"] = slot_observations(definition, state, submitted_values)
+        except ValueError as exc:
+            raise CharacterBuildError(str(exc)) from exc
     level_up_context["_validated_native_advancement"] = NativeAdvancementIntent.from_validated(
         prior_definition, definition,
+        retained_import_metadata=import_metadata if recorded is not None else None,
         restored_resource_currents=tuple(
             (str(template["id"]), template["initial_current"])
             for template in definition.resource_templates if str(template.get("id") or "") in restored_ids

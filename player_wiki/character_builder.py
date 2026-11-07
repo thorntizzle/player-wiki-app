@@ -1441,6 +1441,7 @@ def _normalize_level_up_values(
 ) -> dict[str, str]:
     normalized = {key: str(value) for key, value in dict(values or {}).items()}
     normalized.setdefault("hp_gain", "")
+    normalized.setdefault("advancement_record_type", "new")
     normalized.setdefault("advancement_mode", "advance_existing")
     normalized.setdefault("target_class_row_id", "")
     normalized.setdefault("new_class_slug", "")
@@ -4563,14 +4564,16 @@ def _build_leveled_source(
     subclass_ref: dict[str, Any] | None = None,
     row_from_level: int | None = None,
     row_to_level: int | None = None,
+    preserve_import_provenance: bool = False,
 ) -> dict[str, Any]:
     source = dict(source_payload or {})
     if current_definition is not None:
         source = _seed_source_hp_baseline_from_definition(source, current_definition)
     source_type = str(source.get("source_type") or "").strip()
     if source_type in IMPORTED_CHARACTER_SOURCE_TYPES:
-        source["imported_at"] = isoformat(utcnow())
-        source["parse_warnings"] = list(source.get("parse_warnings") or [])
+        if not preserve_import_provenance:
+            source["imported_at"] = isoformat(utcnow())
+            source["parse_warnings"] = list(source.get("parse_warnings") or [])
         source = _with_native_progression_event(
             source,
             kind="level_up",
@@ -4586,15 +4589,16 @@ def _build_leveled_source(
             row_to_level=row_to_level,
         )
         return source
-    source.update(
-        {
-            "source_path": f"builder://native-level-{target_level}",
-            "source_type": "native_character_builder",
-            "imported_from": f"In-app Native Level {target_level} Builder",
-            "imported_at": isoformat(utcnow()),
-            "parse_warnings": [],
-        }
-    )
+    if not preserve_import_provenance:
+        source.update(
+            {
+                "source_path": f"builder://native-level-{target_level}",
+                "source_type": "native_character_builder",
+                "imported_from": f"In-app Native Level {target_level} Builder",
+                "imported_at": isoformat(utcnow()),
+                "parse_warnings": [],
+            }
+        )
     return _with_native_progression_event(
         source,
         kind="level_up",
@@ -4712,6 +4716,7 @@ def _prospective_native_level_up_numbers(
     item_catalog: dict[str, Any], selected_campaign_option_payloads: list[dict[str, Any]],
     weapon_proficiencies: list[str], attack_choices: dict[str, list[str]],
     preview_only: bool = False,
+    recorded_advancement_values: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Shared, side-effect-free prospective sheet math for preview and save."""
     proficiency_bonus = _proficiency_bonus_for_level(total_character_level)
@@ -4723,7 +4728,7 @@ def _prospective_native_level_up_numbers(
         features=features, item_catalog=item_catalog,
         selected_campaign_option_payloads=selected_campaign_option_payloads, resulting_profile=profile,
     )
-    from .character_hp_recipe import next_level_maximum
+    from .character_hp_recipe import next_level_maximum, recorded_level_maximum
     from .character_reconstruction_authority import advanced_hp_recipe
     if dict(definition.source.get("native_progression") or {}).get("hp_recipe") is not None:
         from .character_hit_dice import _hit_die_faces_for_class_row
@@ -4731,16 +4736,27 @@ def _prospective_native_level_up_numbers(
             recipe = advanced_hp_recipe(definition, features, feat_selections)
             faces = _hit_die_faces_for_class_row({
                 "systems_ref": _systems_ref_from_entry(selected_class), "metadata": selected_class.metadata})
-            stats["max_hp"] = next_level_maximum(recipe,
-                dict(definition.source.get("native_progression") or {}).get("history", []),
-                level=total_character_level, constitution=ability_scores["con"],
-                faces=faces, physical_hp_gain=hp_gain)
+            history = dict(definition.source.get("native_progression") or {}).get("history", [])
+            if recorded_advancement_values is not None:
+                from .character_recorded_advancement import parse_recorded
+                parse_recorded(recorded_advancement_values, allowed=True)
+                stats["max_hp"], _recipe = recorded_level_maximum(recipe, history,
+                    level=total_character_level, constitution=ability_scores["con"],
+                    faces=faces, whole_hp_gain=hp_gain)
+            else:
+                stats["max_hp"] = next_level_maximum(recipe, history,
+                    level=total_character_level, constitution=ability_scores["con"],
+                    faces=faces, physical_hp_gain=hp_gain)
         except ValueError as exc:
             if not preview_only:
                 raise CharacterBuildError(str(exc)) from exc
             # An empty/invalid physical input has no prospective maximum.
             # Keep the form editable without presenting an invented number.
             stats["max_hp"] = None
+    elif recorded_advancement_values is not None:
+        if not preview_only:
+            raise CharacterBuildError("Recording a whole HP gain needs the reconstructed retained recipe.")
+        stats["max_hp"] = None
     attacks = _build_level_one_attacks(
         equipment_catalog=list(definition.equipment_catalog or []), item_catalog=item_catalog,
         ability_scores=ability_scores, proficiency_bonus=proficiency_bonus,
@@ -4956,6 +4972,7 @@ def _build_native_level_up_preview(
         ),
         attack_choices=_merge_selected_choice_maps(_extract_existing_feature_choice_map(definition), selected_choices),
         preview_only=True,
+        recorded_advancement_values=(values if values.get("advancement_record_type") == "completed" else None),
     )
     preview_carrying_stats = _derive_carrying_capacity_stats(
         strength_score=ability_scores["str"],
@@ -4983,8 +5000,10 @@ def _build_native_level_up_preview(
         "class_level_text": str(preview_profile.get("class_level_text") or f"{selected_class.title} {target_level}"),
         "class_rows": [_class_row_level_text(row) for row in ensure_profile_class_rows(preview_profile)],
         "max_hp": (int(preview_stats["max_hp"]) if preview_stats.get("max_hp") is not None
+                   else "Pending valid completed advancement" if values.get("advancement_record_type") == "completed"
                    else "Pending valid physical HP input"),
         "_resource_templates": merged_resource_templates,
+        "_slot_lanes": slot_lanes,
         "carrying_capacity": _format_weight_value(preview_carrying_stats.get("carrying_capacity")),
         "push_drag_lift": _format_weight_value(preview_carrying_stats.get("push_drag_lift")),
         "gained_features": gained_features,

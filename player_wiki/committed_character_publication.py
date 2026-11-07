@@ -1114,6 +1114,48 @@ def _elective_import_bytes(prior_record, import_metadata, reviewed_source_proof,
     return raw
 
 
+def _recorded_advancement_import(prior_record, definition, import_metadata,
+                                 pending_numeric_authority, operation_kind, *, source=None):
+    """Retain only the committed sidecar bound by a strict completed intent.
+
+    The reserved caller supplies its already digest-checked current row. No
+    submitted bytes, audit label or historical flag alone can request retention.
+    """
+    from .character_reconciliation import PendingNativeLevelUpAuthority
+    from .character_source_authority import NativeAdvancementIntent, numeric_value_digest
+    from .character_recorded_advancement import manager_allowed
+    prior_progression = prior_record.definition.source.get("native_progression")
+    progression = definition.source.get("native_progression")
+    prior_history = prior_progression.get("history", []) if type(prior_progression) is dict else None
+    history = progression.get("history", []) if type(progression) is dict else None
+    recorded = (type(prior_history) is list and type(history) is list and len(history) == len(prior_history) + 1
+                and type(history[-1]) is dict and "recorded_advancement" in history[-1])
+    intent = (pending_numeric_authority.advancement_intent
+              if type(pending_numeric_authority) is PendingNativeLevelUpAuthority else None)
+    retained_digest = intent.retained_import_digest if type(intent) is NativeAdvancementIntent else None
+    if not recorded and retained_digest is None:
+        return None
+    if (not recorded or operation_kind != "interactive_update"
+            or type(pending_numeric_authority) is not PendingNativeLevelUpAuthority
+            or type(intent) is not NativeAdvancementIntent
+            or type(retained_digest) is not str or len(retained_digest) != 64
+            or any(char not in "0123456789abcdef" for char in retained_digest)
+            or not intent.matches_resource_readback(prior_record.definition, definition)
+            or not manager_allowed(definition.campaign_slug)
+            or type(import_metadata) is not CharacterImportMetadata
+            or numeric_value_digest(import_metadata.to_dict()) != retained_digest
+            or numeric_value_digest(prior_record.import_metadata.to_dict()) != retained_digest):
+        raise CharacterStateConflictError("The completed advancement lost its exact retained import proof.")
+    if source is None:
+        source = exact_character(definition.campaign_slug, definition.character_slug)
+    raw = source["secondary_bytes"] if source is not None else None
+    if (source is None or source["tombstone"] or source["revision"] != prior_record.committed_revision
+            or type(raw) is not bytes or _sha(raw) != source["secondary_sha256"]
+            or CharacterImportMetadata.from_dict(yaml.safe_load(raw.decode("utf-8"))).to_dict() != import_metadata.to_dict()):
+        raise CharacterStateConflictError("The completed advancement's committed import sidecar changed.")
+    return raw, source["secondary_sha256"], source["revision"]
+
+
 def _reject_journals(connection, campaign_slug, character_slug):
     for table in ("character_reconciliation_operations", "character_deletion_operations"):
         if connection.execute(
@@ -1671,7 +1713,8 @@ def _exact_item_transition_baseline(prior_definition, definition,
                                     prior_authority, candidate_authority, prior_state, *,
                                      reconstruction=None, prior_record=None, actor_id=None,
                                      prior_authority_provider=None,
-                                     same_physical_mapping=None, source_read_owner=None, source_read_phase=None):
+                                     same_physical_mapping=None, source_read_owner=None, source_read_phase=None,
+                                     activation_repair_intent=None, repaired_state=None):
     """Bind retired physical owners and their exact approved source bytes.
 
     Aggregate values are handled separately. Their saved totals are never an
@@ -1681,6 +1724,7 @@ def _exact_item_transition_baseline(prior_definition, definition,
     from .character_source_authority import VERIFIED, _current_payload, _source_identity
     from .item_spell_support import parse_item_spell_support
     from .system_policy import is_dnd_5e_system
+    from .character_equipment_activation import definition_identity_repair_disposition
 
     if not is_dnd_5e_system(definition.system):
         return ((), (), (), ())
@@ -1690,8 +1734,16 @@ def _exact_item_transition_baseline(prior_definition, definition,
                  if isinstance(item, dict) and not item.get("is_currency_only")]
     old_ids = [str(item.get("id") or "").strip() for item in old_items]
     new_ids = [str(item.get("id") or "").strip() for item in new_items]
-    if (not all(old_ids + new_ids) or len(old_ids) != len(set(old_ids))
-            or len(new_ids) != len(set(new_ids))):
+    if not all(new_ids) or len(new_ids) != len(set(new_ids)):
+        raise CharacterStateConflictError("Item identity needs manager repair before publication.")
+    disposition = definition_identity_repair_disposition(
+        prior_definition, prior_state, definition, repaired_state, activation_repair_intent)
+    if disposition is not None:
+        # Reidentification retires no source declaration. The exact producer
+        # replay, complete resulting identities and custody exclusions prove
+        # this narrow case; ordinary relinks retain the original baseline.
+        return ((), (), (), ())
+    if not all(old_ids) or len(old_ids) != len(set(old_ids)):
         raise CharacterStateConflictError("Item identity needs manager repair before publication.")
     new_by_id = dict(zip(new_ids, new_items))
     # Additive authentication of the exact same physical owner retires no
@@ -2367,6 +2419,7 @@ def preview_activation_repair(coordinator, prior_record, *, row_index, actor_id)
     result = publish_update(coordinator, prior_record, prior_record.definition,
         prior_record.import_metadata, desired_state, expected_revision=prior_record.state_record.revision,
         updated_by_user_id=actor_id, operation_kind="activation_repair",
+        activation_repair_intent=("preserve", row_index, "", -1),
         _activation_preparation=_ACTIVATION_PREPARATION)
     if connection.total_changes != initial_changes:
         raise CharacterStateConflictError("Activation preparation performed an unexpected database write.")
@@ -2376,7 +2429,8 @@ def preview_activation_repair(coordinator, prior_record, *, row_index, actor_id)
 def _activation_preparation_result(prior_record, definition, import_metadata, desired_state,
         prepared, primary, secondary, authority, prospective_transitions, prospective_choice_audit,
         choice_decisions, choice_capacity, expected_config, expected_source, expected_assignment,
-        new_pages, new_entries, clean_audit, prior_authority, *, connection, actor_id):
+        new_pages, new_entries, clean_audit, prior_authority, *, connection, actor_id,
+        activation_repair_intent):
     """Capture real prepared bytes in an owned final read snapshot, before reservation."""
     from .character_equipment_activation import activation_frame_digest
     from .db import rollback_source_read_connection
@@ -2407,6 +2461,10 @@ def _activation_preparation_result(prior_record, definition, import_metadata, de
                 or (tuple(assignment) if assignment is not None else None) != expected_assignment
                 or _create_source_proof(campaign, new_pages, new_entries, connection=connection) != expected_source):
             raise CharacterStateConflictError("Activation preparation changed before its final capture.")
+        from .character_equipment_activation import validate_activation_repair_intent
+        validate_activation_repair_intent(
+            CharacterDefinition.from_dict(yaml.safe_load(source["primary_bytes"])),
+            json.loads(row["state_json"]), definition, desired_state, activation_repair_intent)
         if _prepare_transition_renewals(prior_record, definition, prepared.validated_state,
                 authority, prior_authority, connection, actor_id=actor_id,
                 spell_choice_decisions=choice_decisions) != prospective_transitions:
@@ -2515,7 +2573,23 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
                    native_choice_audit=None,
                    explicit_removed_item_id=None,
                    reconcile_reimport_state=False, reimport_source_authority=None, source_read_owner=None,
+                   activation_repair_intent=None,
                    _activation_preparation=None):
+    from .character_equipment_activation import (validate_activation_repair_intent,
+                                                 definition_identity_repair_disposition,
+                                                 activation_frame_digest)
+    identity_disposition = None
+    if operation_kind == "activation_repair":
+        validate_activation_repair_intent(prior_record.definition, prior_record.state_record.state,
+                                         definition, desired_state, activation_repair_intent)
+        identity_disposition = definition_identity_repair_disposition(
+            prior_record.definition, prior_record.state_record.state,
+            definition, desired_state, activation_repair_intent)
+        if identity_disposition is not None and activation_frame_digest(import_metadata.to_dict()) != activation_frame_digest(
+                prior_record.import_metadata.to_dict()):
+            raise CharacterStateConflictError("Definition-ID repair cannot change import history.")
+    elif activation_repair_intent is not None:
+        raise CharacterStateConflictError("Activation repair intent requires its bounded operation.")
     if _activation_preparation is not None and (
             _activation_preparation is not _ACTIVATION_PREPARATION
             or operation_kind != "activation_repair" or type(prior_record) is not CharacterRecord
@@ -2658,11 +2732,24 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         source_read_owner=source_read_owner,
         source_read_context_provider=getattr(coordinator, "source_read_native_choice_context_provider", None),
     )
+    from .character_external_proficiencies import validate_transition as validate_external_proficiency
+    from .auth import get_systems_service
+    external_acquisition = validate_external_proficiency(prior_record, definition, desired_state,
+        actor_id=updated_by_user_id, metadata=audit_metadata, audit_event_type=audit_event_type,
+        operation_kind=operation_kind, prior_authority=load_prior_authority, import_metadata=import_metadata,
+        systems_service_provider=get_systems_service)
+    from .character_reference_notes import validate_transition as validate_reference_notes
+    reference_note_edit = validate_reference_notes(prior_record, definition, desired_state,
+        actor_id=updated_by_user_id, metadata=audit_metadata, audit_event_type=audit_event_type,
+        audit_actor_id=audit_actor_user_id,
+        operation_kind=operation_kind, prior_authority=load_prior_authority, import_metadata=import_metadata)
     authority = _update_numeric_authority(
         coordinator, prior_record, definition, desired_state,
         pending_numeric_authority=pending_numeric_authority, reviewed_source_proof=reviewed_source_proof,
         source_read_owner=source_read_owner,
     )
+    if identity_disposition is not None and authority is None:
+        raise CharacterStateConflictError("Definition-ID repair needs current source authority.")
     if reviewed_source_proof is not None:
         reviewed_source_proof.recheck(prior_record, definition, desired_state,
                                       authority, expected_config["revision"], source_read_owner=source_read_owner,
@@ -2689,6 +2776,7 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         reconstruction=reconstruction, prior_record=prior_record, actor_id=updated_by_user_id,
         prior_authority_provider=load_prior_authority,
         same_physical_mapping=same_physical_mapping, source_read_owner=source_read_owner,
+        activation_repair_intent=activation_repair_intent, repaired_state=desired_state,
     )
     if not item_baseline[0] and dict(definition.source or {}).get(
             "item_transition_withheld_resources") != dict(
@@ -2724,6 +2812,22 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
             source_read_owner=source_read_owner,
         )
     primary, secondary = _pair(definition, import_metadata)
+    recorded_import = _recorded_advancement_import(prior_record, definition, import_metadata,
+        pending_numeric_authority, operation_kind)
+    if recorded_import is not None:
+        secondary = recorded_import[0]
+        if len(primary) + len(secondary) > MAX_PAIR_BYTES:
+            raise CommittedSourceConflict("Character pair exceeds its committed payload bound.")
+    maintenance_secondary = None
+    if external_acquisition or reference_note_edit or identity_disposition is not None:
+        retained = exact_character(definition.campaign_slug, definition.character_slug)
+        if (retained is None or retained["revision"] != prior_record.committed_revision
+                or CharacterImportMetadata.from_dict(yaml.safe_load(retained["secondary_bytes"].decode("utf-8"))).to_dict()
+                   != prior_record.import_metadata.to_dict()):
+            raise CharacterStateConflictError("The Character's exact import history changed.")
+        secondary = maintenance_secondary = retained["secondary_bytes"]
+        if len(primary) + len(secondary) > MAX_PAIR_BYTES:
+            raise CommittedSourceConflict("Character pair exceeds its committed payload bound.")
     elective_secondary = None
     if restoration is not None:
         retained = exact_character(definition.campaign_slug, definition.character_slug)
@@ -2784,6 +2888,8 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         raise CharacterStateConflictError("Additive physical source preparation changed current play facts.")
     if native_proof is not None and activation_frame_digest(prepared.validated_state) != activation_frame_digest(desired_state):
         raise CharacterStateConflictError("Native preparation changed the complete reviewed state.")
+    if identity_disposition is not None and activation_frame_digest(prepared.validated_state) != activation_frame_digest(desired_state):
+        raise CharacterStateConflictError("Definition-ID repair cannot normalize current play state.")
     if choice_decisions and prepared.validated_state != desired_state:
         raise CharacterStateConflictError("A class choice decision must preserve its exact reviewed state.")
     choice_audit_callback = (pending_numeric_authority.prepare_audit if pending_numeric_authority is not None
@@ -2881,7 +2987,7 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
             prepared, primary, secondary, authority, prospective_transitions, prospective_choice_audit,
             choice_decisions, choice_capacity, expected_config, expected_source, expected_assignment,
             new_pages, new_entries, clean_audit, preparation_prior_authority, connection=connection,
-            actor_id=updated_by_user_id)
+            actor_id=updated_by_user_id, activation_repair_intent=activation_repair_intent)
         source_read_owner.checkpoint()
         source_read_owner.close()
         return result
@@ -2911,6 +3017,12 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         if (loaded_definition.to_dict() != prior_record.definition.to_dict()
                 or loaded_import.to_dict() != prior_record.import_metadata.to_dict()):
             raise CharacterStateConflictError("Character definition was not loaded from current committed bytes.")
+        locked_recorded_import = _recorded_advancement_import(prior_record, definition, import_metadata,
+            pending_numeric_authority, operation_kind, source=source)
+        if locked_recorded_import != recorded_import:
+            raise CharacterStateConflictError("The completed advancement's import bytes changed under reservation.")
+        if locked_recorded_import is not None:
+            secondary = locked_recorded_import[0]
         if elective is not None:
             locked_secondary = _elective_import_bytes(prior_record, import_metadata,
                 reviewed_source_proof, audit_metadata, connection=connection)
@@ -2934,11 +3046,34 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         if (row is None or row["revision"] != expected_revision
                 or json.loads(row["state_json"]) != prior_record.state_record.state):
             raise CharacterStateConflictError("Character state changed before publication.")
+        if operation_kind == "activation_repair":
+            validate_activation_repair_intent(loaded_definition, json.loads(row["state_json"]),
+                                             definition, desired_state, activation_repair_intent)
+            if definition_identity_repair_disposition(
+                    loaded_definition, json.loads(row["state_json"]), definition, desired_state,
+                    activation_repair_intent) != identity_disposition:
+                raise CharacterStateConflictError("Definition-ID repair changed under reservation.")
         if native_proof is not None and activation_frame_digest(json.loads(row["state_json"])) != native_proof.prior_state_digest:
             raise CharacterStateConflictError("Native original typed state changed before publication.")
         load_locked_prior_authority = _prior_numeric_authority_loader(
             coordinator, prior_record, prepublication=False, source_read_owner=source_read_owner,
         )
+        locked_external = validate_external_proficiency(prior_record, definition, desired_state,
+            actor_id=updated_by_user_id, metadata=audit_metadata, audit_event_type=audit_event_type,
+            operation_kind=operation_kind, prior_authority=load_locked_prior_authority, import_metadata=import_metadata,
+            systems_service_provider=get_systems_service)
+        if locked_external != external_acquisition:
+            raise CharacterStateConflictError("The proficiency acquisition changed under reservation.")
+        locked_reference_notes = validate_reference_notes(prior_record, definition, desired_state,
+            actor_id=updated_by_user_id, metadata=audit_metadata, audit_event_type=audit_event_type,
+            audit_actor_id=audit_actor_user_id,
+            operation_kind=operation_kind, prior_authority=load_locked_prior_authority, import_metadata=import_metadata)
+        if locked_reference_notes != reference_note_edit:
+            raise CharacterStateConflictError("Reference-note maintenance changed under reservation.")
+        if external_acquisition or reference_note_edit or identity_disposition is not None:
+            if source["secondary_bytes"] != maintenance_secondary:
+                raise CharacterStateConflictError("The Character's import history changed under reservation.")
+            secondary = maintenance_secondary
         locked_capacity = []
         locked_choices = validate_native_grant_transition(
             prior_record, definition, desired_state, reviewed_source_proof=reviewed_source_proof,
@@ -3022,6 +3157,14 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
                         or activation_frame_digest(locked_prepared.validated_state) != activation_frame_digest(prepared.validated_state)):
                     raise CharacterStateConflictError("Native preparation changed the complete reviewed state under reservation.")
                 prepared = locked_prepared
+            elif identity_disposition is not None:
+                locked_prepared = coordinator.state_store.prepare_initial_state(
+                    definition, desired_state, source_authority=refreshed,
+                    previous_state=json.loads(row["state_json"]))
+                if (activation_frame_digest(locked_prepared.validated_state) != activation_frame_digest(desired_state)
+                        or activation_frame_digest(locked_prepared.validated_state) != activation_frame_digest(prepared.validated_state)):
+                    raise CharacterStateConflictError("Definition-ID repair changed current play state under reservation.")
+                prepared = locked_prepared
             if explicit_removed_item_id:
                 locked_expected_state = merge_state_with_definition(
                     definition, prior_record.state_record.state,
@@ -3095,6 +3238,7 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
             reconstruction=reconstruction, prior_record=prior_record, actor_id=updated_by_user_id,
             prior_authority_provider=load_locked_prior_authority,
             same_physical_mapping=same_physical_mapping, source_read_owner=source_read_owner,
+            activation_repair_intent=activation_repair_intent, repaired_state=desired_state,
         ) != item_baseline:
             raise CharacterStateConflictError("Item baseline changed before publication.")
         if item_baseline[0]:
@@ -3163,6 +3307,8 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         if source_read_owner is not None:
             source_read_owner.checkpoint()
             source_read_owner.before_publication_write()
+        if (external_acquisition or reference_note_edit) and prepared.validated_state != prior_record.state_record.state:
+            raise CharacterStateConflictError("Character maintenance cannot change play state.")
         state_changed = (activation_frame_digest(prepared.validated_state) != activation_frame_digest(prior_record.state_record.state)
                          if native_proof is not None or same_physical_mapping is not None else prepared.validated_state != prior_record.state_record.state)
         if not preserve_exact_state and state_changed:

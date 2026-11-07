@@ -445,6 +445,14 @@ def presentation(definition, service, authority):
             facet = linked_companion_facet(feature, definition.profile, species) if species else None
             if facet:
                 facets[feature["id"]] = {**facet, "systems_ref": deepcopy(ref), "parent_summary": True}
+        elif isinstance(ref, dict) and ref.get("entry_type") == "subclass":
+            from .character_subclass_companion import selected_subclass_companion_matches
+            selected = service.get_entry_for_campaign(definition.campaign_slug, ref.get("entry_key", ""))
+            if selected is not None and selected_subclass_companion_matches(
+                    feature, definition.profile, selected, service, definition.campaign_slug):
+                # The selected subclass is already in the profile. Only the
+                # exact proved inert container is hidden, never its members.
+                facets[feature["id"]] = {"systems_ref": deepcopy(ref), "parent_summary": True}
     entry = resolve_parent(definition.campaign_slug, definition.profile, "background", "", service)
     if entry is None:
         if definition.profile.get("background_ref"):

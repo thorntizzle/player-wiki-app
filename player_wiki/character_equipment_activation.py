@@ -21,6 +21,62 @@ ACTIVATION_FIELDS = ("is_equipped", "is_attuned", "weapon_wield_mode")
 ACTIVATION_SCHEMA_VERSION = 1
 
 
+def activation_marker_kind(state: dict[str, Any]) -> str:
+    """Classify retained schema evidence without normalizing it."""
+    if "equipment_activation" not in state:
+        return "absent"
+    marker = state["equipment_activation"]
+    if not isinstance(marker, dict):
+        return "present_invalid"
+    identities = marker.get("known_definition_ids")
+    if (type(marker.get("schema_version")) is int
+            and marker["schema_version"] == ACTIVATION_SCHEMA_VERSION
+            and isinstance(identities, list)
+            and all(isinstance(value, str) and value and value == value.strip() for value in identities)
+            and len(identities) == len(set(identities))):
+        return "valid_v1"
+    return "present_invalid"
+
+
+def activation_value_issue(item: dict[str, Any]) -> str:
+    """Classify explicit observations without coercing or repairing their values."""
+    for field in ("is_equipped", "is_attuned", "unlinked_activation_discarded"):
+        if field in item and type(item[field]) is not bool:
+            return "malformed_activation_boolean"
+    if "weapon_wield_mode" in item:
+        value = item["weapon_wield_mode"]
+        if value is not None and (type(value) is not str or value and
+                re.sub(r"[^a-z0-9]+", "", value.lower()) not in {"mainhand", "offhand", "twohanded"}):
+            return "malformed_wield_mode"
+    return ""
+
+
+def require_activation_values(item: Any) -> None:
+    """Reject original malformed observations before a constructor can coerce them."""
+    if not isinstance(item, dict) or activation_value_issue(item):
+        from .character_service import CharacterStateValidationError
+        raise CharacterStateValidationError(
+            "Equipment activation values need manager repair before this state can change.")
+
+
+def effective_inventory_rows(definition: Any, state: dict[str, Any]) -> list[Any]:
+    """Detached effective flags for read DTOs; retained raw state is never changed."""
+    rows = deepcopy(list((state or {}).get("inventory") or []))
+    if is_xianxia_system(getattr(definition, "system", "")):
+        return rows
+    analysis = analyze_activation(definition, state)
+    eligible = {row["index"] for row in analysis["rows"]
+                if row["source"] == "sqlite" and row["status"] == "exact"}
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        row["is_equipped"] = index in eligible and row.get("is_equipped") is True
+        row["is_attuned"] = index in eligible and row.get("is_attuned") is True
+        mode = row.get("weapon_wield_mode")
+        row["weapon_wield_mode"] = mode.strip() if index in eligible and isinstance(mode, str) else ""
+    return rows
+
+
 class ActivationPrerequisiteError(ValueError):
     """An activation prerequisite refused before publication could start."""
 
@@ -245,15 +301,12 @@ def analyze_activation(definition: Any, state: dict[str, Any]) -> dict[str, Any]
                        if isinstance(item, dict) and not item.get("is_currency_only")]
     raw_rows = (state or {}).get("inventory")
     state_rows = raw_rows if isinstance(raw_rows, list) else []
+    marker_kind = activation_marker_kind(state or {})
     raw_marker = (state or {}).get("equipment_activation")
+    marker_present = marker_kind != "absent"
     marker = raw_marker if isinstance(raw_marker, dict) else {}
     known_ids = marker.get("known_definition_ids")
-    marker_valid = (
-        marker.get("schema_version") == ACTIVATION_SCHEMA_VERSION
-        and isinstance(known_ids, list)
-        and all(isinstance(value, str) and value.strip() == value and value for value in known_ids)
-        and len(known_ids) == len(set(known_ids))
-    )
+    marker_valid = marker_kind == "valid_v1"
     definition_ids = [str(item.get("id") or "").strip() for item in definition_rows]
     state_ids = [str(item.get("catalog_ref") or item.get("id") or "").strip()
                  if isinstance(item, dict) else "" for item in state_rows]
@@ -271,7 +324,15 @@ def analyze_activation(definition: Any, state: dict[str, Any]) -> dict[str, Any]
             warnings.append({"code": "malformed_inventory_row", "message":
                              f"Equipment inventory row {index} is malformed and needs separate repair."})
             continue
-        if item.get("unlinked_activation_discarded"):
+        value_issue = activation_value_issue(item)
+        if value_issue:
+            rows.append({"source": "sqlite", "index": index, "id": state_ids[index],
+                         "definition": deepcopy(definition_by_id.get(state_ids[index])),
+                         "state": deepcopy(item), "status": value_issue})
+            warnings.append({"code": value_issue, "message":
+                             f"Equipment activation for {state_ids[index] or 'an unnamed row'} needs manager repair."})
+            continue
+        if item.get("unlinked_activation_discarded") is True:
             rows.append({"source": "sqlite", "index": index,
                          "id": str(item.get("id") or ""), "definition": None,
                          "state": deepcopy(item), "status": "discarded_unlinked"})
@@ -288,7 +349,9 @@ def analyze_activation(definition: Any, state: dict[str, Any]) -> dict[str, Any]
             reason = "duplicate_state_id"
         elif definition_counts[item_ref] != 1:
             reason = "orphan_or_duplicate_definition_id"
-        elif marker_valid and not all(field in item for field in ACTIVATION_FIELDS):
+        elif marker_kind == "present_invalid":
+            reason = "invalid_activation_marker"
+        elif marker_present and not all(field in item for field in ACTIVATION_FIELDS):
             reason = "partial_activation_row"
         rows.append({"source": "sqlite", "index": index, "id": item_ref,
                      "definition": deepcopy(definition_by_id.get(item_ref)),
@@ -310,7 +373,8 @@ def analyze_activation(definition: Any, state: dict[str, Any]) -> dict[str, Any]
                      "definition": deepcopy(item), "state": None, "status": reason})
         warnings.append({"code": reason, "message":
                          f"Equipment activation for {item_ref or 'an unnamed row'} needs manager repair."})
-    return {"rows": rows, "warnings": warnings, "blocked": bool(warnings)}
+    return {"rows": rows, "warnings": warnings, "blocked": bool(warnings),
+            "marker_kind": marker_kind}
 
 
 def effective_definition(definition: Any, state: dict[str, Any]) -> tuple[Any, list[dict[str, str]]]:
@@ -334,9 +398,10 @@ def effective_definition(definition: Any, state: dict[str, Any]) -> tuple[Any, l
             item["is_attuned"] = False
             item.pop("weapon_wield_mode", None)
             continue
-        item["is_equipped"] = bool(state_item.get("is_equipped", False))
-        item["is_attuned"] = bool(state_item.get("is_attuned", False))
-        mode = str(state_item.get("weapon_wield_mode") or "").strip()
+        item["is_equipped"] = state_item.get("is_equipped", False)
+        item["is_attuned"] = state_item.get("is_attuned", False)
+        raw_mode = state_item.get("weapon_wield_mode")
+        mode = raw_mode.strip() if raw_mode is not None else ""
         if mode:
             item["weapon_wield_mode"] = mode
         else:
@@ -361,7 +426,7 @@ def reconcile_equipment_state_for_raw_update(definition: Any, state: dict[str, A
     for row in analysis["rows"]:
         if row["source"] == "definition" and row["status"] == "new_definition_row":
             result.setdefault("inventory", []).append(
-                build_inventory_state(definition_rows[row["index"]])
+                build_inventory_state(definition_rows[row["index"]], strict_activation=True)
             )
     result["equipment_activation"] = activation_marker(definition)
     if analyze_activation(definition, result)["blocked"]:
@@ -486,13 +551,14 @@ def repair_activation_state(
             for item in rows
         ):
             raise CharacterStateValidationError("Missing state can be seeded only for one unique, unused ID.")
-        result.setdefault("inventory", []).append(build_inventory_state(definition_rows[row_index]))
+        result.setdefault("inventory", []).append(
+            build_inventory_state(definition_rows[row_index], strict_activation=True))
         result["attunement"] = dict(result.get("attunement") or {})
         result["attunement"]["attuned_item_refs"] = [
             str(item.get("catalog_ref") or item.get("id") or "").strip()
-            for item in result["inventory"] if bool(item.get("is_attuned"))
+            for item in result["inventory"] if item.get("is_attuned") is True
         ]
-        if dict(state.get("equipment_activation") or {}).get("schema_version") == ACTIVATION_SCHEMA_VERSION:
+        if activation_marker_kind(state) == "valid_v1":
             result["equipment_activation"] = activation_marker(definition)
             return result
         from .character_equipment_migration import plan_equipment_activation_migration
@@ -500,6 +566,8 @@ def repair_activation_state(
     if row_index < 0 or row_index >= len(rows) or not isinstance(rows[row_index], dict):
         raise CharacterStateValidationError("Choose one existing inventory row to repair.")
     row = result["inventory"][row_index]
+    if choice in {"preserve", "remap"}:
+        require_activation_values(row)
     original_id = str(row.get("catalog_ref") or row.get("id") or "").strip()
     if choice == "preserve":
         if not original_id or definition_ids.count(original_id) != 1:
@@ -538,21 +606,23 @@ def repair_activation_state(
         row["is_equipped"] = False
         row["is_attuned"] = False
         row["weapon_wield_mode"] = ""
+        if exact_unique:
+            row.pop("unlinked_activation_discarded", None)
         target = None
     if target is not None:
+        require_activation_values({field: row[field] if field in row else target.get(
+            field, "" if field == "weapon_wield_mode" else False) for field in ACTIVATION_FIELDS})
         for field in ACTIVATION_FIELDS:
             if field not in row:
                 row[field] = target.get(field, "" if field == "weapon_wield_mode" else False)
-        row["is_equipped"] = bool(row["is_equipped"])
-        row["is_attuned"] = bool(row["is_attuned"])
-        row["weapon_wield_mode"] = str(row["weapon_wield_mode"] or "").strip()
+        row["weapon_wield_mode"] = (row["weapon_wield_mode"] or "").strip()
         row.pop("unlinked_activation_discarded", None)
     result["attunement"] = dict(result.get("attunement") or {})
     result["attunement"]["attuned_item_refs"] = [
         str(item.get("catalog_ref") or item.get("id") or "").strip()
-        for item in result["inventory"] if bool(item.get("is_attuned"))
+        for item in result["inventory"] if item.get("is_attuned") is True
     ]
-    if dict(state.get("equipment_activation") or {}).get("schema_version") == ACTIVATION_SCHEMA_VERSION:
+    if activation_marker_kind(state) == "valid_v1":
         result["equipment_activation"] = activation_marker(definition)
         return result
     from .character_equipment_migration import plan_equipment_activation_migration
@@ -576,6 +646,7 @@ def repair_definition_identity(
     if definition_index < 0 or definition_index >= len(rows):
         raise CharacterStateValidationError("Choose a definition row to repair.")
     all_ids = {str(item.get("id") or "").strip() for item in rows}
+    require_activation_values(rows[definition_index])
     state_rows = list(state.get("inventory") or [])
     if any(not isinstance(item, dict) for item in state_rows):
         raise CharacterStateValidationError(
@@ -640,18 +711,145 @@ def repair_definition_identity(
     if state_index >= 0:
         if state_index >= len(state_rows) or not isinstance(state_rows[state_index], dict):
             raise CharacterStateValidationError("Choose a valid SQLite row to remap.")
+        require_activation_values(state_rows[state_index])
         new_state["inventory"][state_index]["id"] = new_id
         new_state["inventory"][state_index]["catalog_ref"] = new_id
         new_state["inventory"][state_index].pop("unlinked_activation_discarded", None)
     new_state["attunement"] = dict(new_state.get("attunement") or {})
     new_state["attunement"]["attuned_item_refs"] = [
         str(item.get("catalog_ref") or item.get("id") or "").strip()
-        for item in new_state.get("inventory") or [] if bool(item.get("is_attuned"))
+        for item in new_state.get("inventory") or [] if item.get("is_attuned") is True
     ]
-    if dict(state.get("equipment_activation") or {}).get("schema_version") == ACTIVATION_SCHEMA_VERSION:
+    if activation_marker_kind(state) == "valid_v1":
         new_state["equipment_activation"] = activation_marker(new_definition)
     else:
         new_state = plan_equipment_activation_migration(
             new_definition, new_state, allow_partial=True
         )["state"]
     return new_definition, new_state
+
+
+def validate_activation_repair_intent(prior_definition: Any, prior_state: dict[str, Any],
+                                      definition: Any, state: dict[str, Any], intent: Any) -> None:
+    """Rebuild a bounded form intent from original evidence, never from desired flags."""
+    from .character_service import CharacterStateValidationError
+    if (type(intent) is not tuple or len(intent) != 4
+            or type(intent[0]) is not str or type(intent[1]) is not int
+            or type(intent[2]) is not str or type(intent[3]) is not int
+            or intent[1] < 0 or intent[3] < -1 or len(intent[2]) > 160):
+        raise CharacterStateValidationError("Activation repair needs its exact reviewed form intent.")
+    choice, row_index, target_id, state_index = intent
+    if choice == "remap_definition":
+        expected_definition, expected_state = repair_definition_identity(
+            prior_definition, prior_state,
+            definition_index=row_index, state_index=state_index, new_id=target_id)
+    else:
+        if (choice not in {"preserve", "remap", "discard", "seed_missing"}
+                or state_index != -1 or (choice != "remap" and target_id)):
+            raise CharacterStateValidationError("Activation repair intent is incompatible with its row choice.")
+        expected_definition = prior_definition
+        expected_state = repair_activation_state(
+            prior_definition, prior_state,
+            row_index=row_index, choice=choice, target_id=target_id)
+    if (activation_frame_digest(expected_definition.to_dict()) != activation_frame_digest(definition.to_dict())
+            or activation_frame_digest(expected_state) != activation_frame_digest(state)):
+        raise CharacterStateValidationError("Activation repair differs from its original observations and explicit intent.")
+
+
+def definition_identity_repair_disposition(prior_definition: Any, prior_state: dict[str, Any],
+                                           definition: Any, state: dict[str, Any],
+                                           intent: Any) -> tuple[Any, ...] | None:
+    """Prove a complete ID-only repair, without qualifying retired item mechanics."""
+    if intent is None:
+        return None
+    validate_activation_repair_intent(prior_definition, prior_state, definition, state, intent)
+    if intent[0] != "remap_definition":
+        return None
+    from .character_service import CharacterStateValidationError
+
+    def refuse() -> None:
+        raise CharacterStateValidationError(
+            "Definition-ID repair needs complete unambiguous resulting equipment and no affected item custody links.")
+
+    catalog, inventory = definition.equipment_catalog, state.get("inventory")
+    if type(catalog) is not list or type(inventory) is not list:
+        refuse()
+    for row in catalog:
+        if (type(row) is not dict or ("is_currency_only" in row
+                and type(row["is_currency_only"]) is not bool)):
+            refuse()
+        if not row.get("is_currency_only"):
+            identity = row.get("id")
+            if type(identity) is not str or not identity or identity != identity.strip():
+                refuse()
+    physical_ids = []
+    for row in inventory:
+        require_activation_values(row)
+        identity = row.get("id")
+        if type(identity) is not str or not identity or identity != identity.strip():
+            refuse()
+        physical_ids.append(identity)
+        if row.get("unlinked_activation_discarded") is not True:
+            refs = [row[key] for key in ("id", "catalog_ref") if key in row]
+            if any(type(value) is not str or not value or value != identity for value in refs):
+                refuse()
+    analysis = analyze_activation(definition, state)
+    if (analysis["blocked"] or len(physical_ids) != len(set(physical_ids))
+            or any(row["status"] not in {"exact", "discarded_unlinked"} for row in analysis["rows"])):
+        refuse()
+
+    old_rows = [row for row in prior_definition.equipment_catalog
+                if isinstance(row, dict) and not row.get("is_currency_only")]
+    # The validated destination may already name an orphan custody record,
+    # even though it is unused by ordinary catalogue/inventory rows.
+    affected = {str(old_rows[intent[1]].get("id") or "").strip(), intent[2]}
+    if intent[3] >= 0:
+        old_row = prior_state["inventory"][intent[3]]
+        affected.update(str(old_row.get(key) or "").strip() for key in ("id", "catalog_ref"))
+    affected.discard("")
+    link_fields = {"equipment_ref", "equipment_refs", "item_ref", "item_refs", "target_item_ref",
+                   "catalog_ref", "item_id", "item_owner_ids", "item_transition_cleared_charges",
+                   "physical_id", "catalog_id",
+                   "source_row_id", "spell_source_row_id"}
+
+    def has_link(value: Any) -> bool:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key == "target_id" and isinstance(child, str) and any(
+                        child == f"item_charge:{identity}" for identity in affected):
+                    return True
+                if key in link_fields and (
+                        isinstance(child, str) and child in affected
+                        or isinstance(child, list) and any(isinstance(item, str) and item in affected for item in child)):
+                    return True
+                if has_link(child):
+                    return True
+        elif isinstance(value, list):
+            return any(has_link(child) for child in value)
+        return False
+
+    # Existing native item associations and state ledgers have their own
+    # custody protocols. Identity repair neither rewrites nor renews them.
+    if has_link(prior_definition.source) or has_link(prior_definition.spellcasting):
+        refuse()
+    for field in ("item_spell_storage", "item_prepared_ammunition", "artificer_assignments"):
+        ledger = prior_state.get(field)
+        if (isinstance(ledger, dict) and any(key in affected for key in ledger)
+                or has_link(ledger)):
+            refuse()
+    assignments = prior_state.get("artificer_assignments")
+    if isinstance(assignments, dict):
+        for kind in ("infusions", "tinkering"):
+            member = assignments.get(kind)
+            entries = member.get("entries") if isinstance(member, dict) else None
+            for entry in entries if isinstance(entries, list) else []:
+                obj = entry.get("object") if isinstance(entry, dict) else None
+                if isinstance(obj, dict):
+                    object_id, physical_id = obj.get("id"), obj.get("physical_id")
+                    if (obj.get("mode") == "inventory" and isinstance(object_id, str) and object_id in affected
+                            or isinstance(physical_id, str) and physical_id in {
+                                f"inventory:{identity}" for identity in affected}):
+                        refuse()
+    return (intent, activation_frame_digest(prior_definition.to_dict()),
+            activation_frame_digest(prior_state), activation_frame_digest(definition.to_dict()),
+            activation_frame_digest(state))

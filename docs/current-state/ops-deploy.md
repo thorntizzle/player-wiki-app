@@ -450,6 +450,20 @@ blocks readiness with a bounded reason; a failed append rolls back the marker.
 Postcommit readback checks both marker and transition records, and uncertainty
 requires inspection before any further action.
 
+For the single deprecated legacy `index`,
+`legacy_page_exclusion.exclude_legacy_index` is a private operator service on a
+trusted closed v18 target. It binds the reviewed complete page row and exact
+regular source file to the existing exclusion seal, and uses the ordinary
+exclusion reader to prove the claim before and after commit. It preserves the
+page row and file; a blocked exclusion is neither admission nor publication.
+The service refuses active targets, ambiguous or already-admitted identities,
+page journal records, a different existing claim, or source/preimage drift. It
+does not authorize another page exclusion. Its caller must own exclusive
+target access, quiesce external file writers and supply the exact expected
+source and marker digests. Commit/readback uncertainty requires inspection;
+it is not permission to retry. No web endpoint or automatic startup action
+creates this seal.
+
 For activated page-image mirror conflicts, inspect the
 manager-only content page list for the affected page and repair reason. Preserve
 the differing file while investigating it; compare or restore the canonical

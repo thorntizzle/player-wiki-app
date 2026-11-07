@@ -169,6 +169,9 @@ LEVEL_ONE_BUILDER_STATIC_KEYS = frozenset(
 LEVEL_UP_BUILDER_STATIC_KEYS = frozenset(
     {
         "hp_gain",
+        "advancement_record_type",
+        "advancement_recorded_at",
+        "advancement_evidence",
         "subclass_slug",
         "advancement_mode",
         "target_class_row_id",

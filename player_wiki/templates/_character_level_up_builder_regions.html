@@ -78,20 +78,7 @@
         {% endif %}
       {% endif %}
 
-      <label class="field">
-        <span>{{ 'Physical Hit Die contribution' if level_up.physical_hp_input else 'Hit Point Gain' }}</span>
-        <input
-          type="number"
-          name="hp_gain"
-          min="1"
-          value="{{ level_up['values'].hp_gain }}"
-          placeholder="6"
-          data-live-preview-trigger="{{ level_up.field_live_preview.hp_gain.live_preview_trigger }}"
-          data-live-preview-regions="{{ level_up.field_live_preview.hp_gain.live_preview_regions }}"
-          data-live-preview-debounce-ms="{{ level_up.field_live_preview.hp_gain.live_preview_debounce_ms }}"
-        >
-        <small>{{ 'Enter the physical die contribution only; current Constitution is applied separately by the retained recipe.' if level_up.physical_hp_input else "Enter the HP increase for this level based on your table's method." }}</small>
-      </label>
+      {% include '_character_advancement_hp_fields.html' %}
     </div>
   </section>
 {% endif %}

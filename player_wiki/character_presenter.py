@@ -2649,7 +2649,8 @@ def _present_character_detail(
     capability_entries = {entry["physical_id"]: entry for entry in source_authority.item_capability_entries(record.definition)} if source_authority is not None and build_inventory else {}
     include_external_choices = (any(entry["capability"].get("storage") for entry in capability_entries.values())
         and has_request_context() and can_manage_campaign_content(campaign.slug))
-    for item in list(state.get("inventory") or []) if build_inventory else []:
+    from .character_equipment_activation import effective_inventory_rows
+    for item in effective_inventory_rows(record.definition, state) if build_inventory else []:
         item_ref = str(item.get("catalog_ref") or item.get("id") or "").strip()
         inventory_item_id = str(item.get("id") or "").strip()
         charge_status = numeric_status(f"item_charge:{inventory_item_id}", resource=True)

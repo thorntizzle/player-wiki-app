@@ -3268,8 +3268,10 @@ def create_app() -> Flask:
             if item_catalog is not None
             else build_character_item_catalog(campaign_slug)
         )
+        from .character_equipment_activation import effective_definition, effective_inventory_rows
+        effective_equipment_definition, _ = effective_definition(record.definition, record.state_record.state)
         normalized_definition_equipment = _normalize_equipment_payloads(
-            list(record.definition.equipment_catalog or []),
+            list(effective_equipment_definition.equipment_catalog or []),
             item_catalog=item_catalog,
         )
         campaign_item_page_options = build_character_page_link_options(
@@ -3278,7 +3280,7 @@ def create_app() -> Flask:
         )
         inventory_by_ref = {
             build_character_inventory_item_ref(item): dict(item)
-            for item in list((record.state_record.state or {}).get("inventory") or [])
+            for item in effective_inventory_rows(record.definition, record.state_record.state)
             if build_character_inventory_item_ref(item)
         }
         supplemental_items: list[dict[str, object]] = []
@@ -3366,7 +3368,8 @@ def create_app() -> Flask:
             campaign_page_records=campaign_page_records,
         )
         equipment_items: list[dict[str, object]] = []
-        for inventory_item in list((record.state_record.state or {}).get("inventory") or []):
+        from .character_equipment_activation import effective_inventory_rows
+        for inventory_item in effective_inventory_rows(record.definition, record.state_record.state):
             item_ref = build_character_inventory_item_ref(inventory_item)
             if not item_ref:
                 continue

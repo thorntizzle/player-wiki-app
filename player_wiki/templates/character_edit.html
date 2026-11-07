@@ -281,4 +281,7 @@
       </div>
     </form>
   </article>
+  {% if edit_context.external_proficiency_allowed %}
+    {% include '_character_external_proficiency.html' %}
+  {% endif %}
 {% endblock %}
