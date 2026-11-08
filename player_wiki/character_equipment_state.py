@@ -80,7 +80,7 @@ def build_reserved_equipment_state_update_result(record: Any, item_id: str,
             if page_claim and systems_claim and not is_definition:
                 raise CommittedSourceConflict("Equipment has conflicting source links.")
             if page_claim:
-                link = _exact_page_link(page_value, owner,
+                link = _exact_page_link(page_value, owner + ".page_ref",
                                         "item_context" if systems_claim else "item")
                 pages.add(link)
                 if systems_claim:
@@ -94,7 +94,7 @@ def build_reserved_equipment_state_update_result(record: Any, item_id: str,
                     if title.strip():
                         page_titles.setdefault(link.identity, []).append(title.strip())
             if systems_claim:
-                link = _exact_systems_link(systems_value, owner, "item")
+                link = _exact_systems_link(systems_value, owner + ".systems_ref", "item")
                 entries.add(link)
                 identities.setdefault(ref, set()).add((link.source_kind, link.identity))
             elif not page_claim and str(row.get("source_kind") or "").strip().lower() in {
