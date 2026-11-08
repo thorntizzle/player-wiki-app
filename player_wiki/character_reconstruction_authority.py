@@ -744,6 +744,26 @@ class PendingNativeReconstruction:
                 or digest(desired_state) != self.origin.get("prior_state_digest")):
             raise SourceRepairError("The reconstruction target or exact preserved state changed.")
 
+    def replacement_owner_annotations(self, prior_record, definition, desired_state, actor_id):
+        """Admit only freshly proved feature-owner additions to retained claims."""
+        if (type(self) is not PendingNativeReconstruction
+                or type(self.resource_mappings) is not tuple
+                or any(type(row) is not dict for row in self.resource_mappings)):
+            raise SourceRepairError("Reconstruction owner annotations need their exact pending proof.")
+        self.recheck(prior_record, definition, desired_state, actor_id)
+        mappings = _resource_owner_mappings(prior_record.definition, definition)
+        if mappings != self.resource_mappings:
+            raise SourceRepairError("Reconstruction owner annotations changed from their source proof.")
+        annotations = {}
+        for mapping in mappings:
+            if mapping["field"] != "features":
+                continue
+            identity = mapping["id"]
+            if identity in annotations:
+                raise SourceRepairError("Reconstruction feature-owner annotations are ambiguous.")
+            annotations[identity] = mapping["class_row_id"]
+        return annotations
+
     def recheck(self, prior_record, definition, desired_state, actor_id):
         self.validate_binding(prior_record, definition, desired_state, actor_id)
         if current_target_tuple(definition.campaign_slug, definition.character_slug) != (

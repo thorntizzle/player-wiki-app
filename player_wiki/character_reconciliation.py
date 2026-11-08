@@ -1064,6 +1064,19 @@ def validate_native_grant_transition(prior_record, definition, state, *,
                         if identity in owner_annotations and owner_annotations[identity] != admission["class_row_id"]:
                             raise CharacterStateConflictError("Replacement owner annotations conflict.")
                         owner_annotations[identity] = admission["class_row_id"]
+        reconstruction = reviewed_source_proof.native_reconstruction
+        if reconstruction is not None:
+            from .character_reconstruction_authority import PendingNativeReconstruction
+            if (type(reconstruction) is not PendingNativeReconstruction
+                    or operation_kind != "character_update_apply"
+                    or pending_numeric_authority is not None or result is not None
+                    or reviewed_source_proof.native_elective_decision is not None):
+                raise CharacterStateConflictError("Replacement owner annotations need their separate reconstruction proof.")
+            try:
+                owner_annotations = reconstruction.replacement_owner_annotations(
+                    prior_record, definition, state, actor_id)
+            except (TypeError, ValueError) as exc:
+                raise CharacterStateConflictError(str(exc)) from exc
     if relink_target and operation_kind != "character_update_apply":
         raise CharacterStateConflictError("Replacement relink needs the reviewed manager Update operation.")
     try:
