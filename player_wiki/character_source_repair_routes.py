@@ -37,7 +37,7 @@ from .item_spell_support import parse_item_spell_support
 _SALT = "character-source-repair-review-v1"
 _TTL = 600
 _SYSTEMS_TYPES = ("item", "spell", "classfeature", "subclassfeature", "feat", "optionalfeature", "feature")
-_FORM_FIELDS = frozenset({CSRF_FIELD_NAME, "intent", "action", "family", "target_id", "source", "metric", "target_kind", "confirm_value", "confirmed_score", "confirmed_fixed_bonus", "confirmed_skill_level", "spell_origin_mode", "automatic_spell_ids", "remove_spell_id", "confirm_spell_removal", "confirm_current_spells", "confirm_prepared_set", "prepared_spell_ids", "item_only_spell_id", "item_only_grant_id", "confirm_item_only", "item_only_evidence"})
+_FORM_FIELDS = frozenset({CSRF_FIELD_NAME, "intent", "action", "family", "target_id", "source", "metric", "target_kind", "confirm_value", "confirmed_score", "confirmed_fixed_bonus", "confirmed_skill_level", "spell_origin_mode", "automatic_spell_ids", "remove_spell_id", "confirm_spell_removal", "confirm_current_spells", "confirm_prepared_set", "prepared_spell_ids", "same_physical_item_link", "confirm_same_physical_item_link", "item_only_spell_id", "item_only_grant_id", "confirm_item_only", "item_only_evidence"})
 _APPLY_FIELDS = frozenset({CSRF_FIELD_NAME, "intent", "review_token"})
 _SKILL_LEVELS = ("none", "half_proficient", "proficient", "expertise")
 _SKILL_PASSIVES = {"investigation": "passive_investigation", "insight": "passive_insight", "perception": "passive_perception"}
@@ -280,6 +280,16 @@ def _spell_origin_request():
         result["item_only_correction"] = {"item_spell_id": values["item_only_grant_id"],
             "confirmation": "player_confirmed_item_only_not_spellbook", "evidence_note": values["item_only_evidence"]}
     return result
+
+
+def _atomic_item_request():
+    selected = _one("same_physical_item_link", max_bytes=64) if "same_physical_item_link" in request.form else ""
+    confirmed = _one("confirm_same_physical_item_link", max_bytes=8) if "confirm_same_physical_item_link" in request.form else ""
+    if not selected and not confirmed:
+        return None
+    if confirmed != "yes" or not selected:
+        raise SourceRepairError("Select and explicitly confirm the same physical item's current source link.")
+    return {"option": selected}
 
 
 def _sources(dependencies: Any, campaign_slug: str, campaign: object, *, source_read_phase=None) -> tuple[dict[str, Any], ...]:
@@ -1130,7 +1140,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                     route_source_owner = SourceReadOwner.owned(get_db(), campaign_slug, character_slug)
                 return route_source_owner
 
-            def prepare_native(action_id, spell_origin_request=None, *, source_read_owner=None):
+            def prepare_native(action_id, spell_origin_request=None, atomic_item_request=None, *, source_read_owner=None):
                 from .character_native_requalification import prepare_native_requalification
                 from .character_source_reads import native_character_source_context
                 owner = source_owner(source_read_owner)
@@ -1144,6 +1154,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                     campaign_page_records=source_pages,
                     action_id=action_id, actor_id=actor_id, connection=get_db(),
                     spell_origin_request=spell_origin_request,
+                    atomic_item_request=atomic_item_request,
                     source_read_owner=owner, campaign=campaign,
                 )
 
@@ -1185,18 +1196,20 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                 checkpoint = result.spell_checkpoint
                 if checkpoint is not None and (type(checkpoint) is not PendingSpellCheckpoint
                         or not checkpoint.matches_definition(result.candidate)
-                        or result.provenance.get("schema_version") not in {5, 6}
+                        or result.provenance.get("schema_version") not in {5, 6, 7}
                         or result.provenance.get("spell_origin_plan", {}).get("current_checkpoint") != checkpoint.checkpoint):
                     raise SourceRepairError("The current spell confirmation changed before projection.")
                 bases = result.provenance.get("renewed_source_bases", {})
                 prospective = tuple({"authorization": marker, "source_basis_digest": bases[marker["target_id"]]}
                                     if marker.get("provenance") == "native_requalification" else marker
                                     for marker in result.authorizations)
-                return _authority(result.candidate.to_dict(), native_state(result, source_read_phase=source_read_phase), dependencies,
+                authority = _authority(result.candidate.to_dict(), native_state(result, source_read_phase=source_read_phase), dependencies,
                                   campaign_slug, campaign, witnesses,
                                   (*numeric_witnesses, *prospective),
                                   state_revision=record.state_record.revision, source_read_phase=source_read_phase,
                                   prospective_spell_checkpoint=checkpoint)
+                return result.bind_atomic_history(authority,
+                    _character_source_service(dependencies, campaign_slug, campaign, source_read_phase=source_read_phase))
 
             def native_grant_review(result, *, source_read_phase=None):
                 from .character_spell_grants import inspect_native_grant_proposal
@@ -1360,7 +1373,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             audit_action = "manual_authorize"
                             audit_record = authorization
                         elif action == "native_requalify":
-                            native_result = prepare_native(claims.get("action_id"), claims.get("spell_origin_request"))
+                            native_result = prepare_native(claims.get("action_id"), claims.get("spell_origin_request"), claims.get("atomic_item_request"))
                             candidate = native_result.candidate.to_dict()
                             transition_state, expected_delta = native_evaluation(native_result)
                             authorization_batch = native_result.authorizations
@@ -1519,7 +1532,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                     claims["target_id"], connection=get_db(),
                                 )
                             elif action == "native_requalify":
-                                current_native = prepare_native(claims["action_id"], claims.get("spell_origin_request"), source_read_owner=source_read_owner)
+                                current_native = prepare_native(claims["action_id"], claims.get("spell_origin_request"), claims.get("atomic_item_request"), source_read_owner=source_read_owner)
                                 current_candidate = current_native.candidate.to_dict()
                                 if canonical_digest({"provenance": current_native.provenance,
                                                      "authorizations": current_native.authorizations,
@@ -1580,7 +1593,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             same_physical_mapping=same_physical_mapping,
                             refresh_review_basis=refresh_review_basis,
                             refresh_numeric_authority=(lambda *, source_read_owner=None: native_authority_guarded(prepare_native(
-                                claims["action_id"], claims.get("spell_origin_request"), source_read_owner=source_read_owner), source_read_owner=source_read_owner))
+                                claims["action_id"], claims.get("spell_origin_request"), claims.get("atomic_item_request"), source_read_owner=source_read_owner), source_read_owner=source_read_owner))
                                 if native_result is not None else None,
                             native_requalification_markers=tuple(authorization_batch) if native_result is not None else (),
                             native_spell_origin_plan=(native_result.provenance.get("spell_origin_plan")
@@ -1637,7 +1650,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             saved_witnesses = load_verified_numeric_actions(
                                 campaign_slug, character_slug, strict=True,
                             )
-                            if native_result.provenance.get("schema_version") in {4, 5, 6}:
+                            if native_result.provenance.get("schema_version") in {4, 5, 6, 7}:
                                 from .character_spell_grants import grant_model_digest, qualify_native_grants
                                 saved_view = qualify_native_grants(result.definition,
                                     _character_source_service(dependencies, campaign_slug, campaign),
@@ -1647,7 +1660,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                     == native_result.provenance["spell_origin_plan"]["grant_model_digest"]
                                     and {row["id"] for row in saved_view.occurrences if row.get("status") == "VERIFIED"}
                                     == set(native_result.provenance["spell_origin_plan"]["supported_grant_ids"]))
-                            if native_result.provenance.get("schema_version") in {5, 6}:
+                            if native_result.provenance.get("schema_version") in {5, 6, 7}:
                                 from .character_spell_reconstruction import NativeSpellReconstructionFact, validate_saved_spell_checkpoint
                                 checkpoint = native_result.provenance["spell_origin_plan"]["current_checkpoint"]
                                 validate_saved_spell_checkpoint(record.definition, result.definition, checkpoint)
@@ -1682,7 +1695,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                      readback_authority.field_status(marker["target_id"]).is_effective)
                                 for marker in authorization_batch
                             )
-                            if native_result.provenance.get("schema_version") in {5, 6}:
+                            if native_result.provenance.get("schema_version") in {5, 6, 7}:
                                 pools = [pool for pool in readback_authority.spell_choice_ledger["pools"]
                                          if pool["class_row_id"] == checkpoint["class_row"]["row_id"]]
                                 confirmed_candidate = confirmed_candidate and bool(pools) and all(
@@ -1723,7 +1736,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             require_update_activation(record, record.definition, state, actor_id=actor_id)
                         if action != "native_requalify" and any(name in request.form for name in (
                                 "spell_origin_mode", "automatic_spell_ids", "remove_spell_id", "confirm_spell_removal", "confirm_current_spells",
-                                "confirm_prepared_set", "prepared_spell_ids",
+                                "confirm_prepared_set", "prepared_spell_ids", "same_physical_item_link", "confirm_same_physical_item_link",
                                 "item_only_spell_id", "item_only_grant_id", "confirm_item_only", "item_only_evidence")):
                             raise SourceRepairError("Spell-origin correction is available only in native requalification.")
                         if action == "relink":
@@ -1775,7 +1788,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             if _one("confirm_value") != "yes":
                                 raise SourceRepairError("Confirm review of the retained native inputs and current sources.")
                             action_id = uuid4().hex
-                            native_result = prepare_native(action_id, _spell_origin_request())
+                            native_result = prepare_native(action_id, _spell_origin_request(), _atomic_item_request())
                             candidate = native_result.candidate.to_dict()
                             _review_state, delta = native_evaluation(native_result)
                             extra = {"action_id": action_id,
@@ -1784,8 +1797,10 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                                                              "state": native_state(native_result)})}
                             if "spell_origin_plan" in native_result.provenance:
                                 extra["spell_origin_request"] = native_result.provenance["spell_origin_plan"]["request"]
+                            if native_result.atomic_item_adoption is not None:
+                                extra["atomic_item_request"] = native_result.atomic_item_adoption.request()
                             summary = ("Confirm current spell roles, migrate feature grants, and preserve play state"
-                                       if native_result.provenance.get("schema_version") in {5, 6} else
+                                       if native_result.provenance.get("schema_version") in {5, 6, 7} else
                                        "Migrate source-feature spell grants, preserve historical observations, and revalidate native values"
                                        if "spell_origin_plan" in native_result.provenance else
                                        "Revalidate retained native choices against current sources and derive current values")
@@ -1917,13 +1932,15 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                                     for template in native_result.candidate.resource_templates
                                                     for row in state.get("resources", []) if row.get("id") == template["id"]
                                                 ]}
-                            if native_result.provenance.get("schema_version") == 6:
+                            if native_result.provenance.get("schema_version") in {6, 7}:
                                 review["native"]["current_resource_inputs"] = deepcopy(native_result.provenance["current_resource_inputs"])
+                            if native_result.provenance.get("schema_version") == 7:
+                                review["native"]["atomic_item_adoption"] = deepcopy(native_result.provenance["atomic_item_adoption"])
                             if "spell_origin_plan" in native_result.provenance:
                                 review["native"]["spell_origins"] = native_result.provenance["spell_origin_plan"]
-                                if native_result.provenance["schema_version"] in {4, 5, 6}:
+                                if native_result.provenance["schema_version"] in {4, 5, 6, 7}:
                                     review["native"]["feature_grants"] = native_grant_review_guarded(native_result)
-                                if native_result.provenance["schema_version"] in {5, 6}:
+                                if native_result.provenance["schema_version"] in {5, 6, 7}:
                                     checkpoint = native_result.provenance["spell_origin_plan"]["current_checkpoint"]
                                     review["native"]["current_spell_mode"] = checkpoint["mode"]
                                     from .character_spell_reconstruction import _marks as checkpoint_marks
@@ -1979,6 +1996,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
             display_choices = tuple({"family": choice["family"], "value": _source_option(choice),
                                      "label": choice["label"], "identity": choice["value"]} for choice in choices)
             preparation_options = ()
+            atomic_item_options = ()
             if request.method == "GET":
                 from .character_spell_reconstruction import current_preparation_adoption_options
                 from .character_source_reads import native_character_source_context
@@ -1987,12 +2005,16 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                         systems_service=service, campaign=campaign,
                         purpose="current-preparation-options") as (_phase, _service, _pages, _owner):
                     preparation_options = current_preparation_adoption_options(record.definition, _service)
+                    if preparation_options:
+                        from .character_atomic_source_adoption import adoption_options
+                        atomic_item_options = adoption_options(record.definition, _service, _pages)
             response = make_response(render_template(
                 "character_source_repair.html", campaign=campaign, character=record.definition,
                 manager_generation=manager_generation,
                 targets=targets, manual_targets=manual_targets,
                 numeric_targets=numeric_targets, sources=display_choices,
                 metrics=sorted(MANUAL_METRICS), review=review, preparation_options=preparation_options,
+                atomic_item_options=atomic_item_options,
                 outcome=outcome, activation_repair_required=activation_repair_required, active_nav="characters",
             ), status_code)
             response.headers["Cache-Control"] = "private, no-store"

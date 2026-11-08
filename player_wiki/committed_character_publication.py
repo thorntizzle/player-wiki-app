@@ -1527,13 +1527,48 @@ def _append_transition_renewals(connection, campaign, slug, renewals):
 def _authenticated_reconstruction_item_ids(prior_definition, definition,
                                           candidate_authority, prior_state, *,
                                           reconstruction=None, prior_record=None,
-                                          actor_id=None, same_physical_mapping=None, source_read_owner=None):
+                                          actor_id=None, same_physical_mapping=None, source_read_owner=None,
+                                          native_result=None):
     """Qualify additive source authentication of exact retained physical owners.
 
     This decision is shared by both retirement consumers. A stored mapping or
     a caller-supplied item ID alone never exempts an owner from retirement.
     Currentness is rechecked by the publisher before each validation boundary.
     """
+    if native_result is not None:
+        from .character_native_requalification import NativeRequalification
+        from .character_source_reads import SourceReadOwner, native_character_source_context
+        from flask import current_app
+        if (type(native_result) is not NativeRequalification or reconstruction is not None
+                or same_physical_mapping is not None or prior_record is None
+                or prior_definition.to_dict() != prior_record.definition.to_dict()
+                or prior_state != prior_record.state_record.state):
+            raise CharacterStateConflictError("Atomic physical source adoption has conflicting ownership.")
+        native_result._validate_candidate_binding(prior_record, actor_id)
+        adoption = native_result.atomic_item_adoption
+        if adoption is None:
+            return frozenset()
+        if not native_result.permits_item_mapping(prior_record, definition, adoption.mapping.target_id, actor_id):
+            raise CharacterStateConflictError("The atomic item delta changed.")
+        owned = source_read_owner is None
+        owner = source_read_owner if source_read_owner is not None else SourceReadOwner.owned(
+            get_db(), definition.campaign_slug, definition.character_slug)
+        try:
+            with native_character_source_context(prior_record, source_read_owner=owner,
+                    systems_service=current_app.extensions["systems_service"],
+                    purpose="atomic-item-publication-check") as (phase, service, pages, _owner):
+                if phase is None:
+                    raise CharacterStateConflictError("Atomic item adoption needs an initialized source snapshot.")
+                native_result.validate_binding(prior_record, actor_id, source_read_phase=phase)
+                adoption.mapping.validate_sources(prior_record, service, pages)
+                native_result.bind_atomic_history(candidate_authority, service)
+            owner.checkpoint()
+        finally:
+            if owned:
+                owner.close()
+        if candidate_authority.status_for("item", adoption.mapping.target_id) != "VERIFIED":
+            raise CharacterStateConflictError("The atomic physical item's current source is not qualified.")
+        return frozenset({adoption.mapping.target_id})
     if same_physical_mapping is not None:
         from .character_reconstruction_items import PendingSamePhysicalItemMapping
         from .character_source_reads import SourceReadOwner, native_character_source_context
@@ -1589,7 +1624,7 @@ def _authenticated_reconstruction_item_ids(prior_definition, definition,
 def _reject_retired_item_spell_rows(prior_definition, definition,
                                     candidate_authority=None, prior_state=None, *,
                                     reconstruction=None, prior_record=None, actor_id=None,
-                                    same_physical_mapping=None, source_read_owner=None):
+                                    same_physical_mapping=None, source_read_owner=None, native_result=None):
     """Raw removal or relink cannot carry the old item's spell claims."""
     from .system_policy import is_dnd_5e_system
     if not is_dnd_5e_system(definition.system):
@@ -1602,6 +1637,7 @@ def _reject_retired_item_spell_rows(prior_definition, definition,
         prior_definition, definition, candidate_authority, prior_state,
         reconstruction=reconstruction, prior_record=prior_record, actor_id=actor_id,
         same_physical_mapping=same_physical_mapping, source_read_owner=source_read_owner,
+        native_result=native_result,
     )
     relinked = {item_id for item_id, old in previous.items()
                 if item_id and item_id not in authenticated and (item_id not in current
@@ -1714,7 +1750,7 @@ def _exact_item_transition_baseline(prior_definition, definition,
                                      reconstruction=None, prior_record=None, actor_id=None,
                                      prior_authority_provider=None,
                                      same_physical_mapping=None, source_read_owner=None, source_read_phase=None,
-                                     activation_repair_intent=None, repaired_state=None):
+                                     activation_repair_intent=None, repaired_state=None, native_result=None):
     """Bind retired physical owners and their exact approved source bytes.
 
     Aggregate values are handled separately. Their saved totals are never an
@@ -1753,6 +1789,7 @@ def _exact_item_transition_baseline(prior_definition, definition,
         prior_definition, definition, candidate_authority, prior_state,
         reconstruction=reconstruction, prior_record=prior_record, actor_id=actor_id,
         same_physical_mapping=same_physical_mapping, source_read_owner=source_read_owner,
+        native_result=native_result,
     )
     retired = [(item_id, item) for item_id, item in zip(old_ids, old_items)
                if item_id not in authenticated and (item_id not in new_by_id
@@ -2322,18 +2359,18 @@ def prepare_native_requalification_audit(coordinator, prior_record, definition, 
         raise CharacterStateConflictError("Native audit publication inputs changed before review or apply.")
     payload = dict(metadata)
     proof = payload.get("native_requalification")
-    if (not isinstance(proof, dict) or proof.get("schema_version") not in {1, 2, 3, 4, 5, 6}
+    if (not isinstance(proof, dict) or proof.get("schema_version") not in {1, 2, 3, 4, 5, 6, 7}
             or proof.get("prior_generation") != source["revision"]
             or proof.get("prior_definition_digest") != canonical_digest(prior_record.definition.to_dict())
             or proof.get("prior_state_revision") != row["revision"]
             or proof.get("prior_state_digest") != canonical_digest(prior_record.state_record.state)
             or payload.get("candidate_digest") != canonical_digest(definition.to_dict())
-            or proof["schema_version"] in {3, 4, 5, 6}
+            or proof["schema_version"] in {3, 4, 5, 6, 7}
                 and canonical_digest(desired_state) != canonical_digest(prior_record.state_record.state)):
         raise CharacterStateConflictError("Native audit prior, candidate or exact state changed.")
     final = {"published_definition_digest": canonical_digest(definition.to_dict()),
              "published_revision": int(source["revision"]) + 1,
-             "published_state_revision": (row["revision"] if proof["schema_version"] in {3, 4, 5, 6} else
+             "published_state_revision": (row["revision"] if proof["schema_version"] in {3, 4, 5, 6, 7} else
                  row["revision"] + int(canonical_digest(desired_state) != canonical_digest(prior_record.state_record.state)))}
     if any(key in payload and payload[key] != value for key, value in final.items()):
         raise CharacterStateConflictError("Native audit publication revisions changed.")
@@ -2684,9 +2721,16 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         validate_transition(prior_record, definition, elective, actor_id=updated_by_user_id, state=desired_state)
     native_proof = (reviewed_source_proof if reviewed_source_proof is not None
                     and reviewed_source_proof.native_result is not None else None)
+    atomic_native = (native_proof.native_result if native_proof is not None
+        and native_proof.native_result.atomic_item_adoption is not None else None)
     if native_proof is not None and operation_kind != "character_update_apply":
         raise CharacterStateConflictError("Native retention is unavailable for this update.")
-    if reconstruction is None and same_physical_mapping is None:
+    if atomic_native is not None:
+        from .character_native_requalification import NativeRequalification
+        if type(atomic_native) is not NativeRequalification:
+            raise CharacterStateConflictError("Atomic item adoption needs its genuine native result.")
+        atomic_native.validate_binding(prior_record, updated_by_user_id)
+    if reconstruction is None and same_physical_mapping is None and atomic_native is None:
         _reject_retired_item_spell_rows(prior_record.definition, definition)
     expected_config, _ = config(definition.campaign_slug)
     if reconcile_reimport_state and operation_kind not in {"markdown_import", "pdf_import"}:
@@ -2754,11 +2798,12 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         reviewed_source_proof.recheck(prior_record, definition, desired_state,
                                       authority, expected_config["revision"], source_read_owner=source_read_owner,
                                       source_read_refresh=ordinary_item_reads)
-    if reconstruction is not None or same_physical_mapping is not None:
+    if reconstruction is not None or same_physical_mapping is not None or atomic_native is not None:
         _reject_retired_item_spell_rows(
             prior_record.definition, definition, authority, prior_record.state_record.state,
             reconstruction=reconstruction, prior_record=prior_record, actor_id=updated_by_user_id,
             same_physical_mapping=same_physical_mapping, source_read_owner=source_read_owner,
+            native_result=atomic_native,
         )
     if trusted_spell_choice_authoring and operation_kind != "interactive_update":
         raise CharacterStateConflictError("Spell choice authority is unavailable for this update.")
@@ -2777,6 +2822,7 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         prior_authority_provider=load_prior_authority,
         same_physical_mapping=same_physical_mapping, source_read_owner=source_read_owner,
         activation_repair_intent=activation_repair_intent, repaired_state=desired_state,
+        native_result=atomic_native,
     )
     if not item_baseline[0] and dict(definition.source or {}).get(
             "item_transition_withheld_resources") != dict(
@@ -3227,11 +3273,12 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         if (locked_source != expected_source
                 or locked_source.config_revision != locked_config["revision"]):
             raise CommittedSourceConflict("Character source changed before publication.")
-        if reconstruction is not None or same_physical_mapping is not None:
+        if reconstruction is not None or same_physical_mapping is not None or atomic_native is not None:
             _reject_retired_item_spell_rows(
                 prior_record.definition, definition, refreshed, prior_record.state_record.state,
                 reconstruction=reconstruction, prior_record=prior_record, actor_id=updated_by_user_id,
                 same_physical_mapping=same_physical_mapping, source_read_owner=source_read_owner,
+                native_result=atomic_native,
             )
         if _exact_item_transition_baseline(
             prior_record.definition, definition, None, refreshed, prior_record.state_record.state,
@@ -3239,6 +3286,7 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
             prior_authority_provider=load_locked_prior_authority,
             same_physical_mapping=same_physical_mapping, source_read_owner=source_read_owner,
             activation_repair_intent=activation_repair_intent, repaired_state=desired_state,
+            native_result=atomic_native,
         ) != item_baseline:
             raise CharacterStateConflictError("Item baseline changed before publication.")
         if item_baseline[0]:

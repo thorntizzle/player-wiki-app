@@ -13,7 +13,7 @@ from .character_read_foundation import build_read_spell_catalog, read_enabled_sp
 
 from copy import deepcopy
 from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 from typing import Any
@@ -948,6 +948,9 @@ def _modifier_retention_edges(authority, history):
     return result
 
 
+_MODIFIER_RETENTION_ISSUER = object()
+
+
 @dataclass(frozen=True, slots=True)
 class _ModifierHistoryRetention:
     """Detached continuation data, never a current native-grant witness."""
@@ -959,6 +962,7 @@ class _ModifierHistoryRetention:
     entries_json: str
     edges_json: str
     history_json: str
+    _issuer: object = field(repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1774,7 +1778,8 @@ class SourceAuthority:
         _require_modifier_retention_rows(definition, history)
         return replace(self, modifier_history_retention=_ModifierHistoryRetention(
             self.definition_digest, numeric_value_digest(definition.to_dict()), self.state_digest, state_revision,
-            self.source_snapshot_digest, _canonical(entries), _canonical(edges), _canonical(history)))
+            self.source_snapshot_digest, _canonical(entries), _canonical(edges), _canonical(history),
+            _MODIFIER_RETENTION_ISSUER))
 
     def retained_spell_modifier_history(self, definition):
         from .character_spell_properties import FIELD, item_spell_property_facts, normalize_item_spell_properties
@@ -1790,6 +1795,7 @@ class SourceAuthority:
         retention = self.modifier_history_retention
         if retention is not None:
             if (type(retention) is not _ModifierHistoryRetention
+                    or retention._issuer is not _MODIFIER_RETENTION_ISSUER
                     or retention.definition_digest != self.definition_digest
                     or numeric_value_digest(definition.to_dict()) not in {
                         retention.definition_digest, retention.raw_definition_digest}
@@ -3124,7 +3130,7 @@ def _validated_spell_checkpoint_result(result, prior_record, candidate, state, a
     from .character_source_reads import phase_of
     if (type(result) is not NativeRequalification or type(result.spell_checkpoint) is not PendingSpellCheckpoint
             or result.candidate.to_dict() != candidate.to_dict() or state != prior_record.state_record.state
-            or result.provenance.get("schema_version") not in {5, 6}):
+            or result.provenance.get("schema_version") not in {5, 6, 7}):
         raise ValueError("Current spell confirmation needs its exact native issuer-bound result.")
     checkpoint = result.spell_checkpoint
     data = checkpoint.checkpoint

@@ -49,7 +49,8 @@ def prepare_exact_reconstruction_state(prior_record, definition, state, authorit
                 or activation_frame_digest(native_requalification_state(prior_record, native_result, actor_id))
                    != activation_frame_digest(state)):
             fail("Native readiness changed before Review.")
-        native_activation_readiness(prior_record, definition, state, final=True)
+        native_activation_readiness(prior_record, definition, state, final=True,
+                                    atomic_item_adoption=native_result.atomic_item_adoption)
     else:
         require_update_activation(prior_record, definition, state,
             reconstruction=mapping_proof, actor_id=actor_id,
@@ -80,6 +81,7 @@ def prepare_exact_reconstruction_state(prior_record, definition, state, authorit
 
     old_items = indexed(prior_record.definition.equipment_catalog, lambda row: row.get("id"), "equipment")
     new_items = indexed(definition.equipment_catalog, lambda row: row.get("id"), "equipment")
+    item_native_result = (native_result if spell_origin_proof is None else spell_origin_proof.native_result)
     if set(old_items) != set(new_items):
         fail("Reconstruction must retain every physical item owner.")
     for identity in old_items:
@@ -87,8 +89,10 @@ def prepare_exact_reconstruction_state(prior_record, definition, state, authorit
         for key in ("entry_key", "source_id", "slug"):
             if dict(old_items[identity].get("systems_ref") or {}).get(key) != dict(new_items[identity].get("systems_ref") or {}).get(key):
                 from .character_reconstruction_authority import PendingNativeReconstruction
-                if not (isinstance(mapping_proof, PendingNativeReconstruction)
-                        and mapping_proof.permits_item_mapping(prior_record, definition, identity)):
+                if not ((isinstance(mapping_proof, PendingNativeReconstruction)
+                        and mapping_proof.permits_item_mapping(prior_record, definition, identity))
+                        or item_native_result is not None
+                        and item_native_result.permits_item_mapping(prior_record, definition, identity, actor_id)):
                     fail("An equipment source mapping needs exact authenticated reconstruction proof.")
                 mapped = True
         if not mapped and activation_frame_digest(old_items[identity]) != activation_frame_digest(new_items[identity]):

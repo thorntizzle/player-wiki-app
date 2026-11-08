@@ -38,6 +38,11 @@
         <p>{{ review.summary }}</p>
         {% if review.native is defined %}
           <p>Complete prospective audit: {{ review.native.audit_bytes }} of 65,536 UTF-8 bytes. Apply rechecks the full sanitized payload and current publication revisions before writing.</p>
+          {% if review.native.atomic_item_adoption is defined %}
+          <h3>Same physical item, current source</h3>
+          <p>Link {{ review.native.atomic_item_adoption.mapping.item_id }} to {{ review.native.atomic_item_adoption.mapping.systems_ref.title }} ({{ review.native.atomic_item_adoption.mapping.systems_ref.source_id }}). Its page evidence, physical identity, equipped state, attunement, hand and all play state stay unchanged. This is saved together with the reviewed current spell adoption.</p>
+          <p>Prior item spell representations remain historical observations and grant no additional spell access.</p>
+          {% endif %}
           <h3>Retained native inputs and choices</h3>
           <ul>{% for input in review.native.inputs %}<li>{{ input.target }}: {{ input.value }} (confirmed action {{ input.audit }}, generation {{ input.generation }}).</li>{% endfor %}</ul>
           {% if review.native.background_tools %}<p>Current background instrument choices: {{ review.native.background_tools | join(', ') }}.</p>{% endif %}
@@ -206,6 +211,15 @@
                 {% for spell in preparation_options %}<option value="{{ spell.id }}">{{ spell.name }} — level {{ spell.level }} ({{ spell.source }})</option>{% endfor %}
               </select>
             </fieldset>
+            {% if atomic_item_options %}
+            <fieldset>
+              <legend>Optional same-physical item source</legend>
+              <p>During this first current-preparation adoption, link one existing page-only item to its uniquely matched approved Systems source. This preserves its inventory and play state.</p>
+              <label for="same-physical-item-link">Physical item and current source</label>
+              <select id="same-physical-item-link" name="same_physical_item_link"><option value="">No item link</option>{% for item in atomic_item_options %}<option value="{{ item.value }}">{{ item.label }}</option>{% endfor %}</select>
+              <label><input type="checkbox" name="confirm_same_physical_item_link" value="yes"> Confirm this is the same physical item and review its link together with current spells.</label>
+            </fieldset>
+            {% endif %}
             {% endif %}
             <div class="field"><label for="automatic-spell-ids">Existing spell IDs in the correction subset</label><input id="automatic-spell-ids" name="automatic_spell_ids" maxlength="2200" placeholder="Exact spell IDs, separated by commas"></div>
             <details><summary>Existing spell IDs</summary><ul>{% for spell in character.spellcasting.spells %}<li>{{ spell.name }}: {{ spell.id }}</li>{% endfor %}</ul></details>

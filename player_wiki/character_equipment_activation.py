@@ -87,7 +87,7 @@ def activation_frame_digest(value: Any) -> str:
         ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
 
 
-def native_activation_readiness(prior_record, definition, state, *, final=False):
+def native_activation_readiness(prior_record, definition, state, *, final=False, atomic_item_adoption=None):
     """Non-entitling native facts; never repair or initialize activation.
 
     The producer has to authenticate its original before calling this helper.
@@ -168,7 +168,17 @@ def native_activation_readiness(prior_record, definition, state, *, final=False)
         fail()
     old, _ = typed_rows(prior_record.definition, prior_state)
     new, analysis = typed_rows(definition, state)
-    if (activation_frame_digest(old) != activation_frame_digest(new)
+    expected = old
+    if atomic_item_adoption is not None:
+        from .character_atomic_source_adoption import PendingAtomicItemSpellAdoption
+        from .character_source_repair import SourceRepairError
+        if type(atomic_item_adoption) is not PendingAtomicItemSpellAdoption:
+            fail()
+        try:
+            expected = atomic_item_adoption.expected_activation_items(prior_record, definition, state)
+        except (SourceRepairError, TypeError, ValueError, KeyError) as exc:
+            raise ActivationPrerequisiteError("Atomic item-source activation preservation changed.") from exc
+    if (activation_frame_digest(expected) != activation_frame_digest(new)
             or activation_frame_digest(prior_state.get("inventory")) != activation_frame_digest(state.get("inventory"))
             or ("equipment_activation" in prior_state) != ("equipment_activation" in state)
             or activation_frame_digest(prior_state.get("equipment_activation"))
@@ -202,7 +212,8 @@ def require_update_activation(prior_record, definition, state, *, reconstruction
             raise ActivationPrerequisiteError("Native activation requires its exact reviewed proof.")
         native_proof.native_activation_binding(prior_record, definition, state, actor_id,
                                                source_read_owner=source_read_owner)
-        return native_activation_readiness(prior_record, definition, state, final=True)
+        return native_activation_readiness(prior_record, definition, state, final=True,
+            atomic_item_adoption=native_proof.native_result.atomic_item_adoption)
     analysis = analyze_activation(definition, state)
     if reconstruction is not None:
         from .character_reconstruction_authority import PendingNativeReconstruction

@@ -677,7 +677,8 @@ class PendingReviewedSourceProof:
                         or self._digest(result.provenance.get("spell_origin_plan")) != self._digest(self.native_spell_origin_plan)
                         or self._digest(desired) != self.desired_state_digest):
                     raise CharacterStateConflictError("Reviewed native result changed before publication.")
-            native_activation_readiness(prior_record, definition, state, final=True)
+            native_activation_readiness(prior_record, definition, state, final=True,
+                                        atomic_item_adoption=self.native_result.atomic_item_adoption)
             unchanged_state = self._digest(state) == self.prior_state_digest
             self._native_phase(phase, request_facts=facts, prior_facts=prior)
             if source_read_owner is not None:
@@ -733,7 +734,7 @@ class PendingReviewedSourceProof:
                         from .character_spell_reconstruction import PendingSpellCheckpoint, validate_saved_spell_checkpoint
                         result = self.native_result
                         if (type(result) is not NativeRequalification
-                                or result.provenance.get("schema_version") not in {5, 6}
+                                or result.provenance.get("schema_version") not in {5, 6, 7}
                                 or result.provenance.get("spell_origin_plan") != self.native_spell_origin_plan
                                 or result.candidate.to_dict() != definition.to_dict()
                                 or tuple(result.authorizations) != self.native_requalification_markers
@@ -1053,7 +1054,7 @@ def validate_native_grant_transition(prior_record, definition, state, *,
             from .character_native_requalification import NativeRequalification, _admission_feature_rows
             if type(result) is not NativeRequalification:
                 raise CharacterStateConflictError("Replacement owner custody has an unsupported native proof.")
-            if result.provenance.get("schema_version") == 6:
+            if result.provenance.get("schema_version") in {6, 7}:
                 reviewed_source_proof._require_native_complete_binding(prior_record, actor_id)
                 result._validate_candidate_binding(prior_record, actor_id, reviewed_source_proof.native_action_id)
                 if (result.candidate.to_dict() != definition.to_dict() or state != prior_record.state_record.state
@@ -1121,7 +1122,7 @@ def validate_native_grant_transition(prior_record, definition, state, *,
             if plan.get("schema_version") in {3, 4, 5}:
                 from .character_native_requalification import NativeRequalification
                 result = reviewed_source_proof.native_result
-                if (type(result) is not NativeRequalification or result.provenance.get("schema_version") not in {5, 6}
+                if (type(result) is not NativeRequalification or result.provenance.get("schema_version") not in {5, 6, 7}
                         or result.provenance.get("spell_origin_plan") != plan):
                     raise CharacterStateConflictError("Current spell adoption needs its exact reviewed native result.")
                 checkpoint_result = result

@@ -1172,7 +1172,7 @@ def load_verified_numeric_actions(campaign_slug: str, character_slug: str, *,
                         row, metadata, tuple(witnesses)))
                 continue
             requalification = metadata.get("native_requalification")
-            if isinstance(requalification, dict) and requalification.get("schema_version") in {5, 6}:
+            if isinstance(requalification, dict) and requalification.get("schema_version") in {5, 6, 7}:
                 if type(raw_metadata) is not str or len(raw_metadata.encode("utf-8")) > 65536:
                     continue
                 metadata = _strict_grant_audit_json(raw_metadata)
