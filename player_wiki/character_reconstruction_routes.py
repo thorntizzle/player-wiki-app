@@ -118,6 +118,11 @@ def semantic_rows(before, after, systems_service=None):
         rows.append(SemanticDiffRow(SemanticCategory.BUILD, "unresolved_proficiencies", "Retained unresolved proficiency dependencies",
             ChangeKind.UPDATED, "Retained observations", ", ".join(unresolved) + ": retained without a source grant; dependent mechanics remain unqualified"))
     frame = dict(after.source.get("native_reconstruction_choices") or {})
+    from .character_reconstruction_features import FRAME as FEATURE_SOURCE_FRAME
+    if frame.get(FEATURE_SOURCE_FRAME) != dict(before.source.get("native_reconstruction_choices") or {}).get(FEATURE_SOURCE_FRAME):
+        rows.append(SemanticDiffRow(SemanticCategory.BUILD, FEATURE_SOURCE_FRAME, "Explicit retained feature source adoption",
+            ChangeKind.UPDATED, "Original reference and content retained in history",
+            json.dumps(frame.get(FEATURE_SOURCE_FRAME, []), ensure_ascii=False, sort_keys=True)))
     from .character_infusion_recipes import FRAME as RECIPE_FRAME
     old_recipes = dict(before.source.get("native_reconstruction_choices") or {}).get(RECIPE_FRAME)
     if frame.get(RECIPE_FRAME) != old_recipes:

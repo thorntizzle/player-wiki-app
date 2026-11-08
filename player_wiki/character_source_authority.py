@@ -419,7 +419,10 @@ def _current_payload(
             return None, "source identity changed"
         if kind == "feature" and expected_feature is not None:
             from .divine_avatar_forms import _declares_divine_avatar_feature, _avatar_feature_source
-            if _declares_divine_avatar_feature(expected_feature):
+            current_metadata = getattr(entry, "metadata", {})
+            current_avatar = (type(current_metadata) is dict and _declares_divine_avatar_feature(
+                {field: current_metadata[field] for field in _FEATURE_EFFECT_FIELDS if field in current_metadata}))
+            if _declares_divine_avatar_feature(expected_feature) or current_avatar:
                 if _avatar_feature_source(expected_feature) != (source_kind, source_key):
                     return None, "source identity changed"
                 ref = expected_feature["systems_ref"]
@@ -1041,12 +1044,18 @@ class SourceAuthority:
                 return context
         context.update(valid=True, blocked=frozenset())
         activation = divine_avatar_activation_kind(input_state)
+        from .character_reconstruction_features import reference_owner_ids
+        reference_ids = reference_owner_ids(input_definition)
+        if reference_ids is None:
+            context["blocked"] = frozenset(all_paths)
+            return context
         candidates = []
         counts = Counter(_text(row.get("id")) for row in input_definition.features if type(row) is dict)
         for row in input_definition.features:
             if type(row) is not dict:
                 continue
-            if _declares_divine_avatar_feature(row):
+            if (_text(row.get("id")) in reference_ids or _declares_divine_avatar_feature(row)
+                    or _current_divine_avatar_feature_frame(row, self) is not None):
                 candidates.append(row)
         avatar_paths = {"stats.armor_class", "stats.passive_perception", "stats.passive_insight",
             "__spellcasting__", "__preparation__"}
@@ -1069,13 +1078,14 @@ class SourceAuthority:
                 blocked.update(all_paths)
         for row in candidates:
             identity = _text(row.get("id"))
-            if (not registered_divine_avatar_feature(row) or counts.get(identity) != 1
+            current_frame = _current_divine_avatar_feature_frame(row, self)
+            if ((not registered_divine_avatar_feature(row) and current_frame is None) or counts.get(identity) != 1
                     or len(candidates) != 1):
                 blocked.update(all_paths)
                 continue
             status = self.status_for("feature", identity)
             if status == VERIFIED:
-                if _current_divine_avatar_feature_frame(row, self) is None:
+                if current_frame is None:
                     blocked.update(all_paths)
                     continue
             else:

@@ -107,7 +107,7 @@
         </p>
         <p class="meta">This warning remains visible until the damage is resolved or the recorded form ending is corrected.</p>
 
-        {% if avatar_actions_enabled %}
+        {% if avatar_actions_enabled or (divine_avatar_forms_can_edit and divine_avatar_forms_state.can_resolve_pending) %}
           <div class="action-group">
             {% if divine_avatar_forms_state.can_resolve_pending %}
               {% call destructive_confirmation(

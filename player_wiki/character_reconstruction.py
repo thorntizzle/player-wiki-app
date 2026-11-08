@@ -238,6 +238,7 @@ def reconstruction_context(definition, service, pages, values=None, *, state=Non
                     if not any(row["boundary"] == boundary for row in boundaries):
                         boundaries.append({"value": str(index), "boundary": boundary, "label": label})
     from .character_reconstruction_items import choice_fields as item_choice_fields
+    from .character_reconstruction_features import choice_fields as feature_source_fields
     from .character_skill_adoptions import choice_fields as skill_adoption_fields
     from .character_tracker_associations import choice_fields as tracker_fields
     from .character_feature_proficiency_grants import automatic_fields
@@ -247,6 +248,7 @@ def reconstruction_context(definition, service, pages, values=None, *, state=Non
             "automatic_expertise_fields": automatic_fields(definition, service),
             "tracker_association_fields": tracker_fields(definition, state, service, pages, values) if state is not None else [],
             "item_mapping_fields": item_choice_fields(definition, service, pages, dict(values or {})),
+            "feature_source_fields": feature_source_fields(definition, service, dict(values or {})),
             "row": rows[0], "choice_sections": choices, "feature_selections": feature_selections,
             "hp_boundaries": boundaries,
             "historical_hp_adjustment": dict(definition.stats.get("manual_adjustments") or {}).get("max_hp"),
@@ -271,6 +273,7 @@ def compose_reconstruction(*, record, inputs, systems_service, campaign_page_rec
         state=record.state_record.state)
     allowed = (STATIC_FIELDS | {field["name"] for section in context["choice_sections"] for field in section["fields"]}
                | {field["name"] for field in context["item_mapping_fields"]}
+               | {field["name"] for field in context["feature_source_fields"]}
                | {field["name"] for field in context["skill_adoption_fields"]}
                | {field["name"] for field in context["tracker_association_fields"]}
                | {field["name"] for field in context["automatic_expertise_fields"]})
@@ -404,6 +407,8 @@ def compose_reconstruction(*, record, inputs, systems_service, campaign_page_rec
     from .character_reconstruction_items import compose_mappings
     source["native_reconstruction_choices"]["item_source_mappings"] = compose_mappings(
         record.definition, payload, systems_service, campaign_page_records, values)
+    from .character_reconstruction_features import compose as compose_feature_sources
+    compose_feature_sources(record.definition, payload, systems_service, values)
     from .character_reconstruction_proficiencies import apply_weapon_mappings
     mapped_weapons, weapon_mappings = apply_weapon_mappings(record.definition, context["class"], choices)
     payload["proficiencies"]["weapons"] = mapped_weapons

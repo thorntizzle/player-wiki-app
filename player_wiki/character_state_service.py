@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 from .divine_avatar_forms import (
+    DIVINE_AVATAR_CURRENT_SOURCE_ACTIONS,
     divine_avatar_forms_state_from,
     end_divine_avatar_form_automatically,
     transition_divine_avatar_form,
@@ -267,9 +268,7 @@ class CharacterStateService:
     ) -> CharacterStateRecord:
         definition = record.definition
         from .committed_publication import active
-        if active() and str(action or "").strip().lower().replace("-", "_") in {
-            "activate", "mourning_wave", "strength_of_remembrance",
-        }:
+        if active() and str(action or "").strip().lower().replace("-", "_") in DIVINE_AVATAR_CURRENT_SOURCE_ACTIONS:
             authority = self.current_authority(record)
             if authority is None:
                 raise ValueError("Divine Avatar Form source authority is unavailable.")

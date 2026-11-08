@@ -40,6 +40,12 @@ DIVINE_AVATAR_ACTION_SUCCESS_MESSAGES = {
     "advance_turn": "Avatar of Mourning advanced one turn.",
 }
 
+# Undo restores active form state, so it is not a source-free cleanup action.
+DIVINE_AVATAR_CURRENT_SOURCE_ACTIONS = frozenset({
+    "activate", "mourning_wave", "strength_of_remembrance", "undo_last_action",
+})
+DIVINE_AVATAR_RECORDED_ACTIONS = frozenset(DIVINE_AVATAR_ACTION_SUCCESS_MESSAGES) - DIVINE_AVATAR_CURRENT_SOURCE_ACTIONS
+
 
 @dataclass(frozen=True, slots=True)
 class DivineAvatarFormAdapter:
@@ -560,8 +566,8 @@ def _declares_divine_avatar_feature(feature):
     return False
 
 
-def registered_divine_avatar_feature(feature) -> bool:
-    """Recognize a closed versioned footprint, never ownership or activation."""
+def _closed_divine_avatar_selection(feature, *, allow_reference=False) -> bool:
+    """Validate the raw carrier; an empty footprint never proves a grant."""
     if not _avatar_plain_map(feature) or type(feature.get("id")) is not str or not feature["id"]:
         return False
     option = feature.get("campaign_option", {})
@@ -593,7 +599,7 @@ def registered_divine_avatar_feature(feature) -> bool:
     containers = [value for value in (feature.get("mechanic_effects"), option.get("mechanic_effects"))
                   if not _avatar_empty(value)]
     if not containers:
-        return False
+        return allow_reference
     expected = {"kind": DIVINE_AVATAR_FORM_GRANT_KIND, "mechanic_key": DIVINE_AVATAR_MECHANIC_KEY,
         "mechanic_version": DIVINE_AVATAR_MECHANIC_VERSION, "form_key": AVATAR_OF_MOURNING_FORM_KEY,
         "form_version": AVATAR_OF_MOURNING_FORM_VERSION}
@@ -615,6 +621,11 @@ def registered_divine_avatar_feature(feature) -> bool:
     return True
 
 
+def registered_divine_avatar_feature(feature) -> bool:
+    """Recognize a closed versioned footprint, never ownership or activation."""
+    return _closed_divine_avatar_selection(feature)
+
+
 def _divine_avatar_feature_effect_eligible(feature):
     """Benefit eligibility is separate from the registered dependency footprint."""
     if feature.get("mechanics_suppressed") is True:
@@ -631,7 +642,7 @@ def _current_divine_avatar_feature_frame(feature, source_authority):
     """Structural current owner/payload proof; not positive effect eligibility."""
     from .character_source_authority import SourceAuthority, AuthorityGrant
     if (type(source_authority) is not SourceAuthority
-            or not registered_divine_avatar_feature(feature)
+            or not _closed_divine_avatar_selection(feature, allow_reference=True)
             or source_authority.status_for("feature", feature["id"]) != "VERIFIED"):
         return None
     identity = _avatar_feature_source(feature)
@@ -645,7 +656,8 @@ def _current_divine_avatar_feature_frame(feature, source_authority):
             if (grant.source_kind, grant.source_key) != identity:
                 return None
             matching.append(grant)
-    if not matching:
+    if (not matching or any(type(grant.effect_id) is not str or not grant.effect_id for grant in matching)
+            or len({grant.grant_id for grant in matching}) != len(matching)):
         return None
     payload = source_authority.approved_payload("feature", feature["id"])
     current = {"id": feature["id"], **payload}
@@ -670,9 +682,9 @@ def _current_divine_avatar_feature_frame(feature, source_authority):
     return result
 
 
-def divine_avatar_activation_kind(state) -> str:
+def divine_avatar_activation_kind(state, *, allow_active_end_conditions=False) -> str:
     """Classify raw current state; malformed presence never becomes absence."""
-    if not _avatar_plain_map(state, 256):
+    if type(allow_active_end_conditions) is not bool or not _avatar_plain_map(state, 256):
         return "unknown"
     if "feature_states" not in state:
         return "inactive"  # Existing absent-feature-state schema default.
@@ -750,7 +762,7 @@ def divine_avatar_activation_kind(state) -> str:
         return "unknown"
     # Validate lifecycle facts even when the active-form selector is empty.
     # Compatibility normalization must not erase malformed present containers.
-    if divine_avatar_state_invariant_errors(state):
+    if divine_avatar_state_invariant_errors(state, allow_active_end_conditions=allow_active_end_conditions):
         return "unknown"
     if not active:
         return "inactive"
@@ -759,9 +771,24 @@ def divine_avatar_activation_kind(state) -> str:
     vitals = state.get("vitals")
     exhaustion = state.get("exhaustion_level", 0)
     if (not _avatar_plain_map(vitals) or type(vitals.get("current_hp")) is not int
-            or vitals["current_hp"] <= 0 or type(exhaustion) is not int or not 0 <= exhaustion < 6):
+            or type(exhaustion) is not int or not 0 <= exhaustion <= 6
+            or not allow_active_end_conditions and (vitals["current_hp"] <= 0 or exhaustion >= 6)):
         return "unknown"
     return "active"
+
+
+def _recorded_divine_avatar_form(definition, state, form_key, *, allow_active_end_conditions=False):
+    """A supported current tracking subject, never a feature/effect grant."""
+    if (not supports_divine_avatar_forms(getattr(definition, "system", None))
+            or form_key != AVATAR_OF_MOURNING_FORM_KEY
+            or divine_avatar_activation_kind(state, allow_active_end_conditions=allow_active_end_conditions) == "unknown"):
+        return False
+    features = state.get("feature_states")
+    root = features.get(DIVINE_AVATAR_FORMS_STATE_KEY) if type(features) is dict else None
+    forms = root.get("forms") if type(root) is dict else None
+    payload = forms.get(form_key) if type(forms) is dict else None
+    return (type(payload) is dict and type(payload.get("form_version", 1)) is int
+            and payload.get("form_version", 1) == AVATAR_OF_MOURNING_FORM_VERSION)
 
 
 def qualified_divine_avatar_numeric_effects(definition, state, source_authority):
@@ -769,7 +796,13 @@ def qualified_divine_avatar_numeric_effects(definition, state, source_authority)
     if (not supports_divine_avatar_forms(getattr(definition, "system", None))
             or source_authority is None or divine_avatar_activation_kind(state) != "active"):
         return {}
-    candidates = [row for row in definition.features if registered_divine_avatar_feature(row)]
+    from .character_reconstruction_features import reference_owner_ids
+    reference_ids = reference_owner_ids(definition)
+    if reference_ids is None:
+        return {}
+    candidates = [row for row in definition.features if (type(row) is dict and row.get("id") in reference_ids)
+                  or _declares_divine_avatar_feature(row)
+                  or _current_divine_avatar_feature_frame(row, source_authority) is not None]
     if len(candidates) != 1:
         return {}
     row = candidates[0]
@@ -1171,11 +1204,8 @@ def end_divine_avatar_form_automatically(
     normalized_form_key = normalize_divine_avatar_form_key(form_key)
     if normalized_form_key != AVATAR_OF_MOURNING_FORM_KEY:
         raise ValueError("Choose a supported Divine Avatar Form.")
-    grants = {
-        (grant["form_key"], grant["form_version"])
-        for grant in divine_avatar_form_grants(definition)
-    }
-    if (normalized_form_key, AVATAR_OF_MOURNING_FORM_VERSION) not in grants:
+    if not _recorded_divine_avatar_form(definition, next_state, normalized_form_key,
+                                        allow_active_end_conditions=True):
         raise ValueError("Divine Avatar Forms are not recorded on this character sheet.")
     errors = divine_avatar_state_invariant_errors(
         next_state,
@@ -1231,17 +1261,19 @@ def transition_divine_avatar_form(
     if not supports_divine_avatar_forms(getattr(definition, "system", None)):
         raise ValueError("Divine Avatar Forms are only supported on D&D 5E character sheets.")
     normalized_form_key = normalize_divine_avatar_form_key(form_key)
-    grants = {
-        (grant["form_key"], grant["form_version"])
-        for grant in divine_avatar_form_grants(definition)
-    }
-    if (normalized_form_key, AVATAR_OF_MOURNING_FORM_VERSION) not in grants:
-        raise ValueError("Divine Avatar Forms are not recorded on this character sheet.")
     normalized_action = _clean_token(action).replace("-", "_").casefold()
+    recorded_action = normalized_action in DIVINE_AVATAR_RECORDED_ACTIONS and _recorded_divine_avatar_form(
+        definition, state, normalized_form_key, allow_active_end_conditions=normalized_action == "end")
+    if normalized_action == "end" and not recorded_action:
+        raise ValueError("The recorded Divine Avatar Form state needs review before it can end.")
+    if not recorded_action:
+        grants = {(grant["form_key"], grant["form_version"]) for grant in divine_avatar_form_grants(definition)}
+        if (normalized_form_key, AVATAR_OF_MOURNING_FORM_VERSION) not in grants:
+            raise ValueError("Divine Avatar Forms are not recorded on this character sheet.")
     if normalized_action not in DIVINE_AVATAR_ACTION_SUCCESS_MESSAGES:
         raise ValueError("Choose a supported Avatar of Mourning action.")
     _require_confirmation(normalized_action, confirmed)
-    errors = divine_avatar_state_invariant_errors(state)
+    errors = divine_avatar_state_invariant_errors(state, allow_active_end_conditions=normalized_action == "end")
     if errors:
         raise ValueError(errors[0])
 
@@ -1605,7 +1637,7 @@ def present_divine_avatar_forms_state(
     )
     intrinsic_state_errors = divine_avatar_state_invariant_errors(state)
     state_errors = [
-        *(["The Avatar source is unresolved. Stored tracking and obligations are shown for review only; automatic effects and all Avatar actions are unavailable."]
+        *(["The Avatar source is unresolved. Automatic effects and powers are unavailable; valid stored forms can still be ended and existing end damage recorded."]
           if display_only else []),
         *intrinsic_state_errors,
         *[
@@ -1615,6 +1647,8 @@ def present_divine_avatar_forms_state(
         ],
     ]
     actions_enabled = not display_only and not state_errors
+    cleanup_available = _recorded_divine_avatar_form(definition, state, AVATAR_OF_MOURNING_FORM_KEY,
+                                                    allow_active_end_conditions=True)
     raw_undo_snapshot = forms_state.get("undo_snapshot")
     undo_snapshot = (
         dict(raw_undo_snapshot) if isinstance(raw_undo_snapshot, dict) else {}
@@ -1649,7 +1683,7 @@ def present_divine_avatar_forms_state(
                 "form_version": AVATAR_OF_MOURNING_FORM_VERSION,
                 "label": "Avatar of Mourning",
                 "active": active,
-                "end_available": bool(not display_only and active and not intrinsic_state_errors),
+                "end_available": bool(cleanup_available and active),
                 "status_label": "Active" if active else ("Recharging" if cooldown_active else "Ready"),
                 "cooldown_active": cooldown_active,
                 "cooldown_days": AVATAR_OF_MOURNING_COOLDOWN_DAYS,
@@ -1727,7 +1761,7 @@ def present_divine_avatar_forms_state(
         "exhaustion_level": _bounded_int((state or {}).get("exhaustion_level"), maximum=6),
         "pending_resolution": pending,
         "last_resolution": last_resolution,
-        "can_resolve_pending": bool(actions_enabled and pending),
+        "can_resolve_pending": bool((actions_enabled or cleanup_available) and pending),
         "can_correct_pending": bool(actions_enabled and pending),
         "can_correct_last_resolution": bool(
             actions_enabled and last_resolution and not active_form and not pending

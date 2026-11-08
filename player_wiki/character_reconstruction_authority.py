@@ -172,6 +172,10 @@ def reconstruction_source_links(definition, *, require_origin=True, retained=Fal
     # source links. Normal owner/recipe/model links still own reservation.
     from .character_feature_history import stored as history_relations
     history_relations(definition)
+    from .character_reconstruction_features import stored as feature_source_history, FRAME as FEATURE_SOURCE_FRAME
+    for index, mapping in enumerate(feature_source_history(definition)):
+        exact(mapping["systems_ref"])
+        links[(*base, FEATURE_SOURCE_FRAME, index, "systems_ref")] = {"kind": "reconstruction_feature"}
     from .character_infusion_recipes import stored as recipe_choices, FRAME as RECIPE_FRAME
     for index, recipe in enumerate(recipe_choices(definition)):
         links[(*base, RECIPE_FRAME, index, "systems_ref")] = {"kind": "reconstruction_feature"}
@@ -714,6 +718,7 @@ class PendingNativeReconstruction:
     proficiency_conditions: tuple[dict[str, Any], ...] = ()
     artificer_recipes: tuple[dict[str, Any], ...] = ()
     feature_history: tuple[dict[str, Any], ...] = ()
+    feature_source_mappings: tuple[dict[str, Any], ...] = ()
 
     def permits_resource_owner_mapping(self, prior_record, definition, identity):
         return (definition.to_dict() == self.candidate.to_dict()
@@ -775,6 +780,7 @@ class PendingNativeReconstruction:
                 or current.markers != self.markers or current.bases != self.bases
                 or current.origin != self.origin
                 or current.item_mappings != self.item_mappings
+                or current.feature_source_mappings != self.feature_source_mappings
                 or current.resource_mappings != self.resource_mappings
                 or current.parent_facet_mappings != self.parent_facet_mappings
                 or current.armor_model_choices != self.armor_model_choices
@@ -818,6 +824,8 @@ def issue_reconstruction(*, record, candidate, systems_service, campaign_page_re
     proficiency_conditions = validate_conditions(record.definition, candidate, systems_service, witnesses=numeric)
     from .character_reconstruction_items import validate_mappings
     item_mappings = validate_mappings(record.definition, candidate, systems_service, campaign_page_records)
+    from .character_reconstruction_features import validate as validate_feature_sources, ORIGIN as FEATURE_SOURCE_ORIGIN
+    feature_source_mappings = validate_feature_sources(record.definition, candidate, systems_service)
     from .character_armor_models import validate as validate_armor, custody as armor_custody, digest as armor_digest
     armor_choices = validate_armor(record.definition, candidate, systems_service)
     from .character_tracker_associations import validate as validate_trackers, custody as tracker_custody
@@ -859,6 +867,8 @@ def issue_reconstruction(*, record, candidate, systems_service, campaign_page_re
               "recipe_digest": digest(recipe_for_source(candidate.source))}
     if item_mappings:
         origin["item_mapping_digest"] = digest(list(item_mappings))
+    if feature_source_mappings:
+        origin[FEATURE_SOURCE_ORIGIN] = digest(list(feature_source_mappings))
     if resource_mappings:
         origin["resource_owner_mapping_digest"] = digest(list(resource_mappings))
     if parent_facet_mappings:
@@ -915,6 +925,11 @@ def issue_reconstruction(*, record, candidate, systems_service, campaign_page_re
         pending.append({"authorization": marker, "source_basis_digest": basis})
     candidate = CharacterDefinition.from_dict(payload)
     authority = authority_for(candidate, pending)
+    from .divine_avatar_forms import _current_divine_avatar_feature_frame
+    for mapping in feature_source_mappings:
+        selected = next(row for row in candidate.features if row["id"] == mapping["feature_id"])
+        if _current_divine_avatar_feature_frame(selected, authority) is None:
+            raise SourceRepairError("The selected feature needs its exact verified current grant.")
     candidate = reconstruct_source_row_formulas(candidate, authority, systems_service)
     payload = deepcopy(candidate.to_dict())
     values = numeric_target_values(candidate, state)
@@ -955,7 +970,7 @@ def issue_reconstruction(*, record, candidate, systems_service, campaign_page_re
     return PendingNativeReconstruction(candidate, tuple(markers), bases,
         authority.source_snapshot_digest, origin, authority, refresh, item_mappings, resource_mappings, parent_facet_mappings,
         armor_choices, skill_adoptions, tracker_associations, automatic_expertise, proficiency_conditions, artificer_recipes,
-        feature_history)
+        feature_history, feature_source_mappings)
 
 
 def reconstruct_source_row_formulas(candidate, authority, systems_service):
@@ -1044,6 +1059,11 @@ def verified_reconstruction_batch(connection, campaign, character, audit_row, me
         if not _sha256_hex(origin["artificer_recipe_digest"]):
             return ()
     from .character_feature_history import ORIGIN as HISTORY_ORIGIN
+    from .character_reconstruction_features import ORIGIN as FEATURE_SOURCE_ORIGIN
+    if isinstance(origin, dict) and FEATURE_SOURCE_ORIGIN in origin:
+        origin_fields.add(FEATURE_SOURCE_ORIGIN)
+        if not _sha256_hex(origin[FEATURE_SOURCE_ORIGIN]):
+            return ()
     if isinstance(origin, dict) and HISTORY_ORIGIN in origin:
         origin_fields.add(HISTORY_ORIGIN)
         if not _sha256_hex(origin[HISTORY_ORIGIN]):
@@ -1119,6 +1139,11 @@ def verified_reconstruction_batch(connection, campaign, character, audit_row, me
         mappings = validate_mappings(CharacterDefinition.from_dict(prior_payload), definition)
         if (mappings and digest(list(mappings)) != origin.get("item_mapping_digest")
                 or not mappings and "item_mapping_digest" in origin):
+            return ()
+        from .character_reconstruction_features import validate as validate_feature_sources
+        feature_mappings = validate_feature_sources(CharacterDefinition.from_dict(prior_payload), definition)
+        if (feature_mappings and digest(list(feature_mappings)) != origin.get(FEATURE_SOURCE_ORIGIN)
+                or not feature_mappings and FEATURE_SOURCE_ORIGIN in origin):
             return ()
         resource_mappings = _resource_owner_mappings(CharacterDefinition.from_dict(prior_payload), definition)
         if (resource_mappings and digest(list(resource_mappings)) != origin.get("resource_owner_mapping_digest")
