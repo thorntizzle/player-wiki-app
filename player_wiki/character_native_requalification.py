@@ -144,8 +144,15 @@ def _check_prospective_aggregate_parity(
             or numeric_value_digest(candidate.to_dict()) != candidate_digest
             or numeric_value_digest(state) != state_digest):
         _fail()
+    # Raw source authority has no current item context yet. The same binder
+    # derives these immutable outputs for v2 casting and v4 prepared items;
+    # their contents are not retained witness/input/custody objects.
+    item_context_outputs = {'item_spell_context_json', 'item_prepared_context_json'}
+    for name in item_context_outputs:
+        if type(getattr(authority, name)) is not str or type(getattr(bound, name)) is not str:
+            _fail()
     for attribute in fields(SourceAuthority):
-        if attribute.name not in {'field_statuses', 'resource_statuses'}:
+        if attribute.name not in {'field_statuses', 'resource_statuses', *item_context_outputs}:
             if getattr(bound, attribute.name) is not getattr(authority, attribute.name):
                 _fail()  # No witness/input/source/custody replacement by binding.
     for path in selected:
