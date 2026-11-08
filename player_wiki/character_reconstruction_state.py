@@ -129,9 +129,15 @@ def prepare_exact_reconstruction_state(prior_record, definition, state, authorit
                                                           source_read_owner=source_read_owner)
     removed = {row["spell_id"] for row in plan["removed"]} if plan is not None else set()
     automatic = {row["spell_id"] for row in plan["automatic"]} if plan is not None else set()
-    if plan is not None and plan.get("schema_version") in {3, 4}:
+    preparation_ids = set()
+    if plan is not None and plan.get("schema_version") in {3, 4, 5}:
         from .character_spell_reconstruction import validate_saved_spell_checkpoint
         validate_saved_spell_checkpoint(prior_record.definition, definition, plan["current_checkpoint"])
+        if plan["schema_version"] == 5:
+            if plan["current_checkpoint"]["schema_version"] != 3:
+                fail("Explicit current preparations need their exact checkpoint.")
+            preparation_ids = {entry["spell_id"] for entry in plan["current_checkpoint"]["entries"]
+                               if entry["role"] in {"prepared", "available"}}
     if not removed <= set(old_spells) or set(old_spells) - removed != set(new_spells):
         fail("Reconstruction must retain every existing spell identity.")
     for identity, old in old_spells.items():
@@ -141,6 +147,8 @@ def prepare_exact_reconstruction_state(prior_record, definition, state, authorit
         if plan is not None and plan.get("schema_version") == 2 and old != current:
             fail("Feature-grant migration must preserve every raw spell observation.")
         for key in ("class_row_id", "spell_source_row_id", "is_prepared", "prepared", "always_prepared", "is_always_prepared"):
+            if identity in preparation_ids and key in {"is_prepared", "prepared"}:
+                continue  # Exact alias changes were validated against the real original above.
             if (plan is not None and plan.get("schema_version") == 1
                     and identity in automatic and key in {"always_prepared", "is_always_prepared"}):
                 continue  # The authenticated exact whole-book delta checked above owns only these flags.

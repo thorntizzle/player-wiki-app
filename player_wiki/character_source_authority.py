@@ -6138,9 +6138,9 @@ def validate_native_spell_choice_capacity_transition(prior_definition, candidate
             raise ValueError("First native model adoption needs its exact reviewed source proof.")
         adoption = adoption_proof.native_spell_origin_delta(prior_record, candidate_definition, state, actor_id,
             source_read_phase=phase_of(systems_service))
-        if not isinstance(adoption, dict) or adoption.get("schema_version") not in {2, 3, 4}:
+        if not isinstance(adoption, dict) or adoption.get("schema_version") not in {2, 3, 4, 5}:
             raise ValueError("First native model adoption needs its exact reviewed migration.")
-        if adoption["schema_version"] in {3, 4}:
+        if adoption["schema_version"] in {3, 4, 5}:
             result = adoption_proof.native_result
             checkpoint = _validated_spell_checkpoint_result(result, prior_record, candidate_definition, state, actor_id, systems_service)
             # Only a freshly bound native issuer result may supply these pending numeric witnesses.
@@ -6220,7 +6220,11 @@ def validate_native_spell_choice_capacity_transition(prior_definition, candidate
         snapshots = []
         for phase, model in (("prior", prior_ledger), ("prospective", ledger)):
             for pool in model["pools"]:
-                if pool["status"] == "KNOWN" and pool["remaining"] is not None and pool["remaining"] < 0:
+                replacing_current_preparations = (checkpoint is not None
+                    and checkpoint.checkpoint["schema_version"] == 3 and phase == "prior"
+                    and pool["kind"] == "prepared")
+                if (pool["status"] == "KNOWN" and pool["remaining"] is not None and pool["remaining"] < 0
+                        and not replacing_current_preparations):
                     raise ValueError("A proved class choice bound is exceeded during adoption.")
                 if checkpoint is not None and phase == "prospective" and pool["status"] != "KNOWN":
                     raise ValueError("The complete current reconstruction capacity is unresolved.")

@@ -120,16 +120,105 @@ def _scope(definition):
             "ability_inputs_digest": _digest({key: deepcopy(definition.stats[key]) for key in ("ability_inputs",) if key in definition.stats})}
 
 
+def legacy_class_spell_adoption_required(definition, class_row_id=None):
+    """A retained reconstructed pool is readable, but not an ordinary editor.
+
+    Canonical available-list observations need not have an active choice yet.
+    Their existing model/custody checks, rather than a per-row flag, own that
+    distinction. This predicate supplies no authority or migration exception.
+    """
+    from .character_spell_grants import has_native_grants
+    if (not isinstance(definition.source.get("native_reconstruction_choices"), dict)
+            or has_native_grants(definition)):
+        return False
+    rows = definition.spellcasting.get("spells", [])
+    if type(rows) is not list:
+        return True
+    return any(isinstance(row, dict) and row.get("class_row_id")
+               and not row.get("spell_source_row_id")
+               and (class_row_id is None or row["class_row_id"] == class_row_id)
+               for row in rows)
+
+
+LEGACY_SPELL_ADOPTION_MESSAGE = (
+    "Adopt current class spell ownership in Character Source Repair before "
+    "changing these retained spell choices. Nothing was saved."
+)
+
+
+def _preparation_ids(prior, values):
+    """Closed current-manager intent, never a historical acquisition claim."""
+    from .character_spell_grants import has_native_grants
+    _class(prior)
+    if (has_native_grants(prior) or type(values) is not list or len(values) > 128
+            or any(not _text(value) or len(value.encode("utf-8")) > 128 for value in values)
+            or len(set(values)) != len(values)
+            or any(_STATE in row for row in _rows(prior).values())):
+        _fail("Current preparation adoption requires unique retained IDs and an unmigrated reconstructed pool.")
+    return sorted(values)
+
+
+def _with_preparation(raw, selected):
+    tokens, _ = _marks(raw)
+    if tokens - {"prepared", "p"}:
+        _fail("Current preparation adoption cannot reinterpret another retained spell mark.")
+    result = deepcopy(raw)
+    if selected or "mark" in result:
+        result["mark"] = "Prepared" if selected else ""
+    for key in ("prepared", "is_prepared"):
+        if key in result:
+            result[key] = selected
+    return result
+
+
+def current_preparation_adoption_options(definition, systems_service):
+    """Non-entitling GET choices; Review repeats complete source validation."""
+    from .character_source_authority import (current_native_automatic_spell_origins,
+        _reconstructed_spell_choice_eligibility, _source_derived_spell_choice_bases)
+    from .character_builder_foundation import _spellcasting_mode_from_progression
+    if not legacy_class_spell_adoption_required(definition):
+        return ()
+    try:
+        _preparation_ids(definition, [])
+        cls = _class(definition)
+        automatic = current_native_automatic_spell_origins(definition, systems_service)
+        probe = deepcopy(definition)
+        probe.spellcasting["spells"] = [row for row in _rows(probe).values()
+            if row.get("class_row_id") == cls["row_id"] and not row.get("spell_source_row_id")
+            and row["id"] not in automatic]
+        eligible = _reconstructed_spell_choice_eligibility(probe, {cls["row_id"]: cls},
+            systems_service, enforce_capacity=False)
+        bases = _source_derived_spell_choice_bases(probe, systems_service=systems_service,
+            pages={}, verified_class_rows=frozenset({cls["row_id"]}), source_snapshot_digest=_digest(cls))
+        options = []
+        for raw in probe.spellcasting["spells"]:
+            frame = eligible.get(raw["id"])
+            if (frame is None or _spellcasting_mode_from_progression(frame["profile"]) != "prepared"
+                    or f"spell_choice:{raw['id']}" not in bases):
+                continue
+            matches = [row for row in frame["selections"] if row["id"] == raw["id"]]
+            if len(matches) != 1 or matches[0]["level"] <= 0:
+                continue
+            _with_preparation(raw, False)
+            options.append({"id": raw["id"], "name": raw.get("name") or raw["id"],
+                "level": matches[0]["level"], "source": _ref(raw)["source_id"]})
+        return tuple(sorted(options, key=lambda row: (row["level"], row["name"].casefold(), row["id"])))
+    except (SourceRepairError, TypeError, ValueError):
+        return ()
+
+
 def _check_checkpoint(checkpoint, candidate):
     """Historical structural validation; this does not issue audit authority."""
-    if (type(checkpoint) is not dict or set(checkpoint) != _FIELDS
-            or type(checkpoint["schema_version"]) is not int or checkpoint["schema_version"] not in {1, 2}
+    explicit = type(checkpoint) is dict and checkpoint.get("schema_version") == 3
+    if (type(checkpoint) is not dict or set(checkpoint) != _FIELDS | ({"prepared_selection"} if explicit else set())
+            or type(checkpoint["schema_version"]) is not int or checkpoint["schema_version"] not in {1, 2, 3}
             or any(not _text(checkpoint[key]) for key in ("campaign_slug", "character_slug", "action_id"))
             or any(type(checkpoint[key]) is not int or checkpoint[key] < 1 for key in ("actor_id", "prior_generation"))
             or type(checkpoint["prior_state_revision"]) is not int or checkpoint["prior_state_revision"] < 0
             or any(not _sha(checkpoint[key]) for key in _DIGEST_FIELDS)
             or type(checkpoint["mode"]) is not str or checkpoint["mode"] not in {"prepared", "known", "wizard"}
             or (checkpoint["schema_version"] == 2) != (checkpoint["mode"] == "wizard")
+            or explicit and checkpoint["mode"] != "prepared"
             or any(type(checkpoint[key]) is not int or checkpoint[key] < 0
                    for key in ("cantrip_limit", "prepared_limit", "known_limit", "maximum_spell_level"))
             or checkpoint["maximum_spell_level"] > 9
@@ -198,6 +287,15 @@ def _check_checkpoint(checkpoint, candidate):
         _fail("The current ordinary spell selections exceed their complete source limits.")
     if book_prepared > checkpoint["prepared_limit"]:
         _fail("The current spellbook preparations exceed their complete source limit.")
+    if explicit:
+        selection = checkpoint["prepared_selection"]
+        ids = [entry["spell_id"] for entry in entries if entry["role"] == "prepared"]
+        if (type(selection) is not dict or set(selection) != {"class_row_id", "spell_ids"}
+                or selection["class_row_id"] != checkpoint["class_row"]["row_id"]
+                or type(selection["spell_ids"]) is not list or selection["spell_ids"] != sorted(ids)
+                or any(not _text(value) or len(value.encode("utf-8")) > 128 for value in ids)
+                or len(ids) > 128):
+            _fail("The explicit current prepared set differs from its complete checkpoint.")
     return rows
 
 
@@ -215,6 +313,9 @@ def validate_saved_spell_checkpoint(prior, candidate, checkpoint):
     """
     rows = _check_checkpoint(checkpoint, candidate)
     old = _rows(prior)
+    explicit = checkpoint["schema_version"] == 3
+    if explicit:
+        selected = _preparation_ids(prior, checkpoint["prepared_selection"]["spell_ids"])
     if (checkpoint["prior_definition_digest"] != _digest(prior.to_dict())
             or any(checkpoint["prior_" + key] != value for key, value in _scope(prior).items())
             or _class(prior) != checkpoint["class_row"]
@@ -227,6 +328,8 @@ def validate_saved_spell_checkpoint(prior, candidate, checkpoint):
     for entry in checkpoint["entries"]:
         before = old[entry["spell_id"]]
         expected = deepcopy(before)
+        if explicit and entry["role"] in {"prepared", "available"}:
+            expected = _with_preparation(before, entry["spell_id"] in selected)
         if entry["role"] in _SELECTED:
             if _STATE in before and before[_STATE] != "active":
                 _fail("An actual retired spell decision cannot become a current confirmation.")
@@ -272,11 +375,13 @@ class PendingSpellCheckpoint:
 
 
 def prepare_current_spell_checkpoint(prior, candidate, systems_service, *, actor_id, action_id,
-                                     prior_generation, prior_state_revision, automatic_ids):
-    """Confirm current prepared/known-class roles without changing any raw marks.
+                                     prior_generation, prior_state_revision, automatic_ids,
+                                     prepared_spell_ids=None):
+    """Confirm current roles, optionally adopting an explicit preparation set.
 
     `automatic_ids` is the complete source-plan raw-ID set, never a client
     subset. Numeric capacity still needs the caller's qualified ability ledger.
+    Without explicit preparations, the historical raw-mark contract is unchanged.
     """
     from .character_spell_grants import validate_native_grant_model
     from .character_source_authority import _reconstructed_spell_choice_eligibility, _source_derived_spell_choice_bases
@@ -289,6 +394,7 @@ def prepare_current_spell_checkpoint(prior, candidate, systems_service, *, actor
         _fail()
     cls = _class(candidate)
     old, rows = _rows(prior), _rows(candidate)
+    explicit_ids = _preparation_ids(prior, prepared_spell_ids) if prepared_spell_ids is not None else None
     for field_name, kind in (("systems_ref", "class"), ("subclass_ref", "subclass")):
         ref = cls.get(field_name)
         if field_name == "subclass_ref" and ref in (None, {}):
@@ -304,12 +410,15 @@ def prepare_current_spell_checkpoint(prior, candidate, systems_service, *, actor
         _fail("Automatic roles require the complete source-derived migration mapping.")
     # Probe only ordinary observations. Migrated legacy aggregate flags are not
     # elective eligibility, and repeated issuance must compare the same input.
-    probe = deepcopy(candidate)
-    probe.spellcasting["spells"] = [deepcopy(raw) for raw in rows.values()
-        if raw["id"] not in automatic and not raw.get("spell_source_row_id")]
-    for raw in probe.spellcasting["spells"]:
-        if _STATE not in old[raw["id"]] and raw.get(_STATE) == "active":
-            raw.pop(_STATE)
+    def ordinary_probe(current):
+        probe = deepcopy(current)
+        probe.spellcasting["spells"] = [deepcopy(raw) for raw in _rows(current).values()
+            if raw["id"] not in automatic and not raw.get("spell_source_row_id")]
+        for raw in probe.spellcasting["spells"]:
+            if _STATE not in old[raw["id"]] and raw.get(_STATE) == "active":
+                raw.pop(_STATE)
+        return probe
+    probe = ordinary_probe(candidate)
     eligible = _reconstructed_spell_choice_eligibility(probe, {cls["row_id"]: cls}, systems_service,
         enforce_capacity=False, current_wizard_preparation=True)
     ordinary_ids = {raw["id"] for raw in probe.spellcasting["spells"]}
@@ -321,6 +430,26 @@ def prepare_current_spell_checkpoint(prior, candidate, systems_service, *, actor
     mode = _spellcasting_mode_from_progression(frame["profile"])
     if mode not in {"prepared", "known", "wizard"}:
         _fail("The current class has no supported spell checkpoint mode.")
+    if explicit_ids is not None:
+        if mode != "prepared":
+            _fail("Explicit preparation adoption supports prepared classes only.")
+        leveled = {row["id"] for row in frame["selections"] if row["level"] > 0}
+        if not set(explicit_ids) <= leveled:
+            _fail("Choose only retained ordinary leveled spells of the current class.")
+        candidate = deepcopy(candidate)
+        for index, raw in enumerate(candidate.spellcasting["spells"]):
+            if raw["id"] in leveled:
+                candidate.spellcasting["spells"][index] = _with_preparation(raw, raw["id"] in explicit_ids)
+        rows = _rows(candidate)
+        probe = ordinary_probe(candidate)
+        eligible = _reconstructed_spell_choice_eligibility(probe, {cls["row_id"]: cls}, systems_service,
+            enforce_capacity=False, current_wizard_preparation=True)
+        if set(eligible) != ordinary_ids:
+            _fail("Current preparation adoption changed its source-eligible observation inventory.")
+        frame = eligible[next(iter(sorted(ordinary_ids)))]
+        if (any(_digest(value) != _digest(frame) for value in eligible.values())
+                or _spellcasting_mode_from_progression(frame["profile"]) != "prepared"):
+            _fail()
     limits = {key: frame[key] for key in ("cantrip_limit", "prepared_limit", "known_limit", "maximum_spell_level")}
     if any(type(value) is not int or value < 0 for value in limits.values()):
         _fail("The current cantrip, preparation and known limits must be complete.")
@@ -356,6 +485,9 @@ def prepare_current_spell_checkpoint(prior, candidate, systems_service, *, actor
         **{"prior_" + key: value for key, value in _scope(prior).items()}, **_scope(proposed),
         "class_row": deepcopy(cls), "mode": mode, **limits,
         "source_facts_digest": _digest({"eligibility": frame, "list_bases": bases}), "entries": entries}
+    if explicit_ids is not None:
+        checkpoint.update(schema_version=3,
+            prepared_selection={"class_row_id": cls["row_id"], "spell_ids": explicit_ids})
     validate_saved_spell_checkpoint(prior, proposed, checkpoint)
     pending = PendingSpellCheckpoint(_json(checkpoint))
     object.__setattr__(pending, "_issuer", _ISSUER)

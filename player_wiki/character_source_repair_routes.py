@@ -37,7 +37,7 @@ from .item_spell_support import parse_item_spell_support
 _SALT = "character-source-repair-review-v1"
 _TTL = 600
 _SYSTEMS_TYPES = ("item", "spell", "classfeature", "subclassfeature", "feat", "optionalfeature", "feature")
-_FORM_FIELDS = frozenset({CSRF_FIELD_NAME, "intent", "action", "family", "target_id", "source", "metric", "target_kind", "confirm_value", "confirmed_score", "confirmed_fixed_bonus", "confirmed_skill_level", "spell_origin_mode", "automatic_spell_ids", "remove_spell_id", "confirm_spell_removal", "confirm_current_spells", "item_only_spell_id", "item_only_grant_id", "confirm_item_only", "item_only_evidence"})
+_FORM_FIELDS = frozenset({CSRF_FIELD_NAME, "intent", "action", "family", "target_id", "source", "metric", "target_kind", "confirm_value", "confirmed_score", "confirmed_fixed_bonus", "confirmed_skill_level", "spell_origin_mode", "automatic_spell_ids", "remove_spell_id", "confirm_spell_removal", "confirm_current_spells", "confirm_prepared_set", "prepared_spell_ids", "item_only_spell_id", "item_only_grant_id", "confirm_item_only", "item_only_evidence"})
 _APPLY_FIELDS = frozenset({CSRF_FIELD_NAME, "intent", "review_token"})
 _SKILL_LEVELS = ("none", "half_proficient", "proficient", "expertise")
 _SKILL_PASSIVES = {"investigation": "passive_investigation", "insight": "passive_insight", "perception": "passive_perception"}
@@ -245,12 +245,13 @@ def _one(name: str, *, max_bytes: int = 1600) -> str:
 
 def _spell_origin_request():
     item_fields = ("item_only_spell_id", "item_only_grant_id", "confirm_item_only", "item_only_evidence")
-    fields = ("spell_origin_mode", "automatic_spell_ids", "remove_spell_id", "confirm_spell_removal", "confirm_current_spells", *item_fields)
+    fields = ("spell_origin_mode", "automatic_spell_ids", "remove_spell_id", "confirm_spell_removal", "confirm_current_spells", "confirm_prepared_set", *item_fields)
     values = {name: _one(name, max_bytes=2200) if name in request.form else "" for name in fields}
-    if not any(values.values()):
+    if not any(values.values()) and "prepared_spell_ids" not in request.form:
         return None
     if (values["spell_origin_mode"] != "yes" or values["confirm_spell_removal"] not in {"", "yes"}
-            or values["confirm_current_spells"] not in {"", "yes"}):
+            or values["confirm_current_spells"] not in {"", "yes"}
+            or values["confirm_prepared_set"] not in {"", "yes"}):
         raise SourceRepairError("Explicitly select spell-origin correction and confirm any unsupported removal.")
     automatic = [value.strip() for value in values["automatic_spell_ids"].split(",")] if values["automatic_spell_ids"] else []
     result = {"automatic_ids": automatic,
@@ -258,6 +259,16 @@ def _spell_origin_request():
               "confirm_removal": values["confirm_spell_removal"] == "yes"}
     if values["confirm_current_spells"] == "yes":
         result["confirm_current_spells"] = True
+    if values["confirm_prepared_set"] == "yes":
+        ids = request.form.getlist("prepared_spell_ids")
+        if (values["confirm_current_spells"] != "yes" or any(values[field] for field in item_fields)
+                or len(ids) > 128 or len(set(ids)) != len(ids)
+                or any(not value or value != value.strip() or "\x00" in value
+                       or len(value.encode("utf-8")) > 128 for value in ids)):
+            raise SourceRepairError("Explicitly confirm one complete current preparation set using unique retained spells.")
+        result["prepared_spell_ids"] = sorted(ids)
+    elif "prepared_spell_ids" in request.form:
+        raise SourceRepairError("Confirm current preparation adoption before selecting its spells.")
     if any(values[field] for field in item_fields):
         if (values["confirm_item_only"] != "yes" or not values["item_only_spell_id"]
                 or not values["item_only_grant_id"] or not values["item_only_evidence"]
@@ -1698,7 +1709,9 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             outcome = "Manager action applied and confirmed by durable readback."
                         record = result
                     elif intent == "review":
-                        if set(request.form) - _FORM_FIELDS or any(len(request.form.getlist(key)) != 1 for key in request.form):
+                        if (set(request.form) - _FORM_FIELDS
+                                or len(request.form.getlist("prepared_spell_ids")) > 128
+                                or any(len(request.form.getlist(key)) != 1 for key in request.form if key != "prepared_spell_ids")):
                             abort(400)
                         action = _one("action")
                         authorization = None
@@ -1710,6 +1723,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             require_update_activation(record, record.definition, state, actor_id=actor_id)
                         if action != "native_requalify" and any(name in request.form for name in (
                                 "spell_origin_mode", "automatic_spell_ids", "remove_spell_id", "confirm_spell_removal", "confirm_current_spells",
+                                "confirm_prepared_set", "prepared_spell_ids",
                                 "item_only_spell_id", "item_only_grant_id", "confirm_item_only", "item_only_evidence")):
                             raise SourceRepairError("Spell-origin correction is available only in native requalification.")
                         if action == "relink":
@@ -1915,11 +1929,16 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                     from .character_spell_reconstruction import _marks as checkpoint_marks
                                     prepared_spells = {row["id"]: checkpoint_marks(row)[1]
                                                        for row in native_result.candidate.spellcasting.get("spells", [])}
+                                    previous_preparations = {row["id"]: checkpoint_marks(row)[1]
+                                        for row in record.definition.spellcasting.get("spells", [])}
+                                    review["native"]["explicit_preparations"] = checkpoint["schema_version"] == 3
+                                    review["native"]["current_prepared_limit"] = checkpoint["prepared_limit"]
                                     spell_names = {row["id"]: row.get("name", row["id"])
                                                    for row in native_result.candidate.spellcasting.get("spells", [])}
                                     review["native"]["current_spells"] = [
-                                        {**entry, "name": spell_names[entry["spell_id"]],
-                                         "prepared": prepared_spells[entry["spell_id"]]}
+                                         {**entry, "name": spell_names[entry["spell_id"]],
+                                          "prepared": prepared_spells[entry["spell_id"]],
+                                          "previous_prepared": previous_preparations[entry["spell_id"]]}
                                         for entry in checkpoint["entries"]]
                         if action == "relink" and family == "item":
                             review["links"] = _repair_link_review(definition, candidate, family, target_id)
@@ -1959,12 +1978,21 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
 
             display_choices = tuple({"family": choice["family"], "value": _source_option(choice),
                                      "label": choice["label"], "identity": choice["value"]} for choice in choices)
+            preparation_options = ()
+            if request.method == "GET":
+                from .character_spell_reconstruction import current_preparation_adoption_options
+                from .character_source_reads import native_character_source_context
+                service = dependencies.get_systems_service().character_read_view()
+                with native_character_source_context(record, source_read_owner=source_owner(),
+                        systems_service=service, campaign=campaign,
+                        purpose="current-preparation-options") as (_phase, _service, _pages, _owner):
+                    preparation_options = current_preparation_adoption_options(record.definition, _service)
             response = make_response(render_template(
                 "character_source_repair.html", campaign=campaign, character=record.definition,
                 manager_generation=manager_generation,
                 targets=targets, manual_targets=manual_targets,
                 numeric_targets=numeric_targets, sources=display_choices,
-                metrics=sorted(MANUAL_METRICS), review=review,
+                metrics=sorted(MANUAL_METRICS), review=review, preparation_options=preparation_options,
                 outcome=outcome, activation_repair_required=activation_repair_required, active_nav="characters",
             ), status_code)
             response.headers["Cache-Control"] = "private, no-store"

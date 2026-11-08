@@ -727,7 +727,7 @@ class NativeRequalification:
             plan = self.provenance.get("spell_origin_plan")
             if (type(self.spell_checkpoint) is not PendingSpellCheckpoint
                     or self.provenance.get("schema_version") not in {5, 6}
-                    or not isinstance(plan, dict) or plan.get("schema_version") not in {3, 4}
+                    or not isinstance(plan, dict) or plan.get("schema_version") not in {3, 4, 5}
                     or self.spell_checkpoint.checkpoint != plan.get("current_checkpoint")
                     or any(plan["current_checkpoint"].get(key) != value for key, value in (
                         ("actor_id", actor_id), ("action_id", binding[6]),
@@ -1324,9 +1324,12 @@ def prepare_spell_origin_correction(definition, systems_service, request, *,
     base_keys = {"automatic_ids", "remove_ids", "confirm_removal"}
     checkpoint_requested = isinstance(request, dict) and "confirm_current_spells" in request
     item_only = isinstance(request, dict) and "item_only_correction" in request
+    preparation_set = isinstance(request, dict) and "prepared_spell_ids" in request
     if (not isinstance(request, dict) or set(request) != base_keys | ({"confirm_current_spells"} if checkpoint_requested else set())
             | ({"item_only_correction"} if item_only else set())
+            | ({"prepared_spell_ids"} if preparation_set else set())
             or checkpoint_requested and request["confirm_current_spells"] is not True
+            or preparation_set and (not checkpoint_requested or item_only)
             or item_only and (not checkpoint_requested or request["automatic_ids"] != []
                              or request["confirm_removal"] is not True)
             or definition.system != "DND-5E"
@@ -1353,6 +1356,9 @@ def prepare_spell_origin_correction(definition, systems_service, request, *,
     by_id = {row["id"]: row for row in spells}
     if not set([*automatic, *removed]) <= set(by_id):
         _fail()
+    if preparation_set:
+        from .character_spell_reconstruction import _preparation_ids
+        _preparation_ids(definition, request["prepared_spell_ids"])
     try:
         migrated, model = prepare_feature_grant_migration(
             definition, systems_service, prior_generation=prior_generation,
@@ -1411,9 +1417,12 @@ def prepare_spell_origin_correction(definition, systems_service, request, *,
         corrected, checkpoint, _ = prepare_current_spell_checkpoint(
             definition, corrected, systems_service, actor_id=actor_id, action_id=action_id,
             prior_generation=prior_generation, prior_state_revision=prior_state_revision,
-            automatic_ids={row["spell_id"] for row in adoption_rows})
-        plan["schema_version"] = 4 if item_only else 3
+            automatic_ids={row["spell_id"] for row in adoption_rows},
+            prepared_spell_ids=request.get("prepared_spell_ids") if preparation_set else None)
+        plan["schema_version"] = 5 if preparation_set else 4 if item_only else 3
         plan["request"]["confirm_current_spells"] = True
+        if preparation_set:
+            plan["request"]["prepared_spell_ids"] = sorted(request["prepared_spell_ids"])
         if item_only:
             plan["request"]["item_only_correction"] = deepcopy(request["item_only_correction"])
         plan["current_checkpoint"] = checkpoint
@@ -1428,7 +1437,7 @@ def _saved_spell_origin_correction(prior, candidate, plan):
     authenticates the exact original observations, mapping and removal delta;
     it never says those sources remain eligible today.
     """
-    if isinstance(plan, dict) and type(plan.get("schema_version")) is int and plan["schema_version"] in {3, 4}:
+    if isinstance(plan, dict) and type(plan.get("schema_version")) is int and plan["schema_version"] in {3, 4, 5}:
         return _saved_current_spell_origin_correction(prior, candidate, plan)
     return _saved_spell_origin_comparison(prior, candidate, plan, checkpoint_validated=False)
 
@@ -1529,6 +1538,17 @@ def _saved_current_spell_origin_correction(prior, candidate, plan):
     request = old_plan.get("request")
     if (not isinstance(request, dict) or request.pop("confirm_current_spells", None) is not True):
         _fail()
+    explicit = plan["schema_version"] == 5
+    if explicit:
+        selected = request.pop("prepared_spell_ids", None)
+        if (type(checkpoint) is not dict or checkpoint.get("schema_version") != 3
+                or type(checkpoint.get("class_row")) is not dict
+                or type(selected) is not list
+                or checkpoint.get("prepared_selection") != {
+                    "class_row_id": checkpoint.get("class_row", {}).get("row_id"), "spell_ids": selected}):
+            _fail()
+    elif type(checkpoint) is dict and checkpoint.get("schema_version") == 3:
+        _fail()
     item_only_correction = None
     if plan["schema_version"] == 4:
         item_only_correction = request.pop("item_only_correction", None)
@@ -1537,16 +1557,27 @@ def _saved_current_spell_origin_correction(prior, candidate, plan):
     old_plan["schema_version"] = 2
     # The schema-2 reader still sees the original raw book, with only its exact
     # grant/removal containers. Only newly added current-state metadata is
-    # stripped; the pure checkpoint validator authenticates it separately.
+    # stripped. Version5 also restores only the exact preparation fields that
+    # the pure checkpoint validator authenticates against the actual original.
     old_rows = {row["id"]: row for row in prior.spellcasting.get("spells", [])}
+    validate_saved_spell_checkpoint(prior, candidate, checkpoint)
     stripped = deepcopy(candidate.to_dict())
+    preparation_ids = ({entry["spell_id"] for entry in checkpoint["entries"]
+        if entry["role"] in {"prepared", "available"}} if explicit else set())
     for row in stripped["spellcasting"].get("spells", []):
         old = old_rows.get(row.get("id"))
         if old is not None and CLASS_CHOICE_STATE_FIELD not in old:
             row.pop(CLASS_CHOICE_STATE_FIELD, None)
+        if old is not None and row["id"] in preparation_ids:
+            # Only the separately validated current-preparation bit is restored
+            # for the unchanged historical grant/removal comparator.
+            for key in ("mark", "prepared", "is_prepared"):
+                if key in old:
+                    row[key] = deepcopy(old[key])
+                else:
+                    row.pop(key, None)
     stripped_definition = CharacterDefinition.from_dict(stripped)
     old_plan["result_spellcasting_digest"] = _digest(stripped_definition.spellcasting)
-    validate_saved_spell_checkpoint(prior, candidate, checkpoint)
     _saved_spell_origin_comparison(prior, stripped_definition, old_plan, checkpoint_validated=True,
                                   item_only_correction=item_only_correction)
     if plan["result_spellcasting_digest"] != _digest(candidate.spellcasting):
@@ -1741,12 +1772,13 @@ def _prepare_native_requalification(*, record: Any, systems_service: Any,
             prior_definition_digest=_digest(definition.to_dict()),
             prior_state_revision=record.state_record.revision,
             actor_id=actor_id, action_id=action_id)
-        if spell_origin_plan.get("schema_version") in {3, 4}:
+        if spell_origin_plan.get("schema_version") in {3, 4, 5}:
             from .character_spell_reconstruction import prepare_current_spell_checkpoint
             working_definition, checkpoint, spell_checkpoint = prepare_current_spell_checkpoint(
                 definition, working_definition, systems_service, actor_id=actor_id, action_id=action_id,
                 prior_generation=record.committed_revision, prior_state_revision=record.state_record.revision,
-                automatic_ids={row["spell_id"] for row in spell_origin_plan["automatic"]})
+                automatic_ids={row["spell_id"] for row in spell_origin_plan["automatic"]},
+                prepared_spell_ids=spell_origin_plan["request"].get("prepared_spell_ids"))
             if checkpoint != spell_origin_plan["current_checkpoint"]:
                 _fail()
     background_tools = _current_background_tools(definition, systems_service)
@@ -1858,7 +1890,8 @@ def _prepare_native_requalification(*, record: Any, systems_service: Any,
         candidate, checkpoint, spell_checkpoint = prepare_current_spell_checkpoint(
             definition, candidate, systems_service, actor_id=actor_id, action_id=action_id,
             prior_generation=record.committed_revision, prior_state_revision=record.state_record.revision,
-            automatic_ids={row["spell_id"] for row in spell_origin_plan["automatic"]})
+            automatic_ids={row["spell_id"] for row in spell_origin_plan["automatic"]},
+            prepared_spell_ids=spell_origin_plan["request"].get("prepared_spell_ids"))
         spell_origin_plan["current_checkpoint"] = checkpoint
         spell_origin_plan["result_spellcasting_digest"] = _digest(candidate.spellcasting)
     # HP is recomputed from the immutable native baseline/events. The retained
@@ -2129,7 +2162,7 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
                 corrected, expected_plan = _saved_spell_origin_correction(prior_definition, definition, plan)
                 if proof["schema_version"] in {5, 6}:
                     checkpoint = plan.get("current_checkpoint")
-                    if (plan.get("schema_version") not in {3, 4} or not isinstance(checkpoint, dict)
+                    if (plan.get("schema_version") not in {3, 4, 5} or not isinstance(checkpoint, dict)
                             or any(checkpoint.get(key) != value for key, value in (
                                 ("actor_id", actor), ("action_id", metadata.get("action_id")),
                                 ("prior_generation", prior_revision),
@@ -2411,7 +2444,7 @@ def _verified_spell_grant_migration_custody(connection, campaign, character, aud
             return ()
         if proof["schema_version"] in {5, 6}:
             checkpoint = plan.get("current_checkpoint")
-            if (plan.get("schema_version") not in {3, 4} or type(checkpoint) is not dict
+            if (plan.get("schema_version") not in {3, 4, 5} or type(checkpoint) is not dict
                     or any(checkpoint.get(key) != value for key, value in (
                         ("actor_id", actor), ("action_id", metadata.get("action_id")),
                         ("prior_generation", proof["prior_generation"]),

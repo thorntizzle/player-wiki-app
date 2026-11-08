@@ -287,6 +287,14 @@ def build_character_spell_management_context(
             for row in section["rows"]:
                 row["can_remove"] = False
                 row["can_toggle_prepared"] = False
+    from .character_spell_reconstruction import legacy_class_spell_adoption_required, LEGACY_SPELL_ADOPTION_MESSAGE
+    for section in sections:
+        if (section.get("row_kind") == "class"
+                and legacy_class_spell_adoption_required(definition, section.get("class_row_id"))):
+            section.update(can_manage=False, can_add_cantrip=False, can_add_spell=False,
+                           unavailable_message=LEGACY_SPELL_ADOPTION_MESSAGE)
+            for row in section["rows"]:
+                row["can_remove"] = row["can_toggle_prepared"] = False
     return {
         "sections": sections,
         "is_multiclass": len(managed_class_rows) > 1,
@@ -906,6 +914,10 @@ def apply_character_spell_management_edit(
     section = _resolve_spell_management_section(manager, target_class_row_id)
     if section is None:
         raise CharacterEditValidationError("Choose a valid spellcasting class row.")
+    from .character_spell_reconstruction import legacy_class_spell_adoption_required, LEGACY_SPELL_ADOPTION_MESSAGE
+    if (section.get("row_kind") == "class"
+            and legacy_class_spell_adoption_required(current_definition, section.get("class_row_id"))):
+        raise CharacterEditValidationError(LEGACY_SPELL_ADOPTION_MESSAGE)
     from .committed_publication import active
     activated = active()
     if activated and (source_authority is None or eligibility_definition is None):

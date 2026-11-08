@@ -728,7 +728,7 @@ class PendingReviewedSourceProof:
                         source_read_phase=source_read_phase,
                         purpose="pending-spell-origin") as (_source_phase, source_service, _pages, _owner):
                     checkpoint_result = None
-                    if self.native_spell_origin_plan.get("schema_version") in {3, 4}:
+                    if self.native_spell_origin_plan.get("schema_version") in {3, 4, 5}:
                         from .character_native_requalification import NativeRequalification
                         from .character_spell_reconstruction import PendingSpellCheckpoint, validate_saved_spell_checkpoint
                         result = self.native_result
@@ -770,7 +770,8 @@ class PendingReviewedSourceProof:
                             actor_id=actor_id, action_id=self.native_action_id,
                             prior_generation=prior_record.committed_revision,
                             prior_state_revision=prior_record.state_record.revision,
-                            automatic_ids={row["spell_id"] for row in plan["automatic"]})
+                            automatic_ids={row["spell_id"] for row in plan["automatic"]},
+                            prepared_spell_ids=plan["request"].get("prepared_spell_ids"))
                         if (checkpoint_candidate.to_dict() != checkpoint_result.candidate.to_dict()
                                 or not pending.matches_definition(checkpoint_candidate)):
                             raise ValueError("The final current spell confirmation changed during reissue.")
@@ -1088,6 +1089,25 @@ def validate_native_grant_transition(prior_record, definition, state, *,
     present = ("native_spell_grants" in definition.spellcasting
                or "native_acquisitions" in definition.source)
     prior_present = ("native_spell_grants" in old.spellcasting or "native_acquisitions" in old.source)
+    # Browser, advanced-editor and full-definition ingress converge here.
+    # Refuse the unsupported legacy edit before the generic custody-error
+    # adapter, so callers can explain the supported adoption route truthfully.
+    from .character_spell_reconstruction import legacy_class_spell_adoption_required, LEGACY_SPELL_ADOPTION_MESSAGE
+    if legacy_class_spell_adoption_required(old):
+        def class_observations(owner):
+            rows = owner.spellcasting.get("spells")
+            return ([row for row in rows if isinstance(row, dict)
+                and row.get("class_row_id") and not row.get("spell_source_row_id")]
+                if isinstance(rows, list) else None)
+        reconstruction = (reviewed_source_proof.native_reconstruction
+            if type(reviewed_source_proof) is PendingReviewedSourceProof else None)
+        first_adoption = (present and not prior_present
+            and type(reviewed_source_proof) is PendingReviewedSourceProof)
+        if (class_observations(old) != class_observations(definition)
+                and not first_adoption and reconstruction is None):
+            raise CharacterStateConflictError(LEGACY_SPELL_ADOPTION_MESSAGE)
+        # This predicate grants no exception to custody: first adoption and
+        # the reconstruction issuer are independently authenticated below/above.
     try:
         adoption_proof = None
         checkpoint_result = None
@@ -1096,9 +1116,9 @@ def validate_native_grant_transition(prior_record, definition, state, *,
                     or type(reviewed_source_proof) is not PendingReviewedSourceProof):
                 raise CharacterStateConflictError("First native model adoption needs its exact reviewed migration.")
             plan = reviewed_source_proof.native_spell_origin_delta(prior_record, definition, state, actor_id, source_read_owner=source_read_owner)
-            if not isinstance(plan, dict) or plan.get("schema_version") not in {2, 3, 4}:
+            if not isinstance(plan, dict) or plan.get("schema_version") not in {2, 3, 4, 5}:
                 raise CharacterStateConflictError("First native model adoption needs its exact reviewed migration.")
-            if plan.get("schema_version") in {3, 4}:
+            if plan.get("schema_version") in {3, 4, 5}:
                 from .character_native_requalification import NativeRequalification
                 result = reviewed_source_proof.native_result
                 if (type(result) is not NativeRequalification or result.provenance.get("schema_version") not in {5, 6}
@@ -1158,7 +1178,7 @@ def validate_native_grant_transition(prior_record, definition, state, *,
             return decisions
         if reviewed_source_proof is not None:
             plan = reviewed_source_proof.native_spell_origin_delta(prior_record, definition, state, actor_id, source_read_owner=source_read_owner)
-            if plan is not None and plan.get("schema_version") in {2, 3, 4}:
+            if plan is not None and plan.get("schema_version") in {2, 3, 4, 5}:
                 return decisions
         if present and isinstance(pending_numeric_authority, PendingNativeLevelUpAuthority):
             pending_numeric_authority.recheck(prior_record, definition, state)
@@ -1680,7 +1700,7 @@ class CharacterPublicationCoordinator:
             automatic_ids = {row["spell_id"] for row in origin_plan["automatic"]} if origin_plan is not None else set()
             from .character_spell_reconstruction import checkpoint_choice_ids
             checkpoint_ids = (checkpoint_choice_ids(origin_plan["current_checkpoint"], definition)
-                              if origin_plan is not None and origin_plan.get("schema_version") in {3, 4} else set())
+                              if origin_plan is not None and origin_plan.get("schema_version") in {3, 4, 5} else set())
             for key, value in new_choices.items():
                 if key[0] != "spell_choice" or old_choices.get(key) == value:
                     continue

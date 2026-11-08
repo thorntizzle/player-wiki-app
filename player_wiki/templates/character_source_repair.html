@@ -53,14 +53,18 @@
               {% for role, label in [('cantrip', 'Chosen cantrips'), ('book', 'Ordinary spellbook spells'), ('known', 'Ordinary known spells'), ('prepared', 'Ordinary prepared spells'), ('available', 'Other observed class-list spells, currently unprepared'), ('automatic', 'Retained observations mapped to automatic feature grants'), ('item', 'Separate item spell access')] %}
                 {% set spells = review.native.current_spells | selectattr('role', 'equalto', role) | list %}
                 <h4>{{ label }} ({{ spells | length }})</h4>
-                <ul>{% for spell in spells %}<li>{{ spell.name }} ({{ spell.spell_id }}){% if role == 'book' %}: {% if spell.prepared %}prepared{% else %}unprepared{% endif %}{% endif %}</li>{% endfor %}</ul>
+                <ul>{% for spell in spells %}<li>{{ spell.name }} ({{ spell.spell_id }}){% if review.native.explicit_preparations and role in ('prepared', 'available') %}: stored {% if spell.previous_prepared %}prepared{% else %}unprepared{% endif %}; now {% if spell.prepared %}prepared{% else %}unprepared{% endif %}{% elif role == 'book' %}: {% if spell.prepared %}prepared{% else %}unprepared{% endif %}{% endif %}</li>{% endfor %}</ul>
               {% endfor %}
+              {% if review.native.explicit_preparations %}
+              <p>The explicit ordinary preparation set is checked against the current limit of {{ review.native.current_prepared_limit }}. Prior observations remain in history; the entire play state remains unchanged.</p>
+              {% else %}
               <p>Chosen cantrip, known, prepared and spellbook rows receive current active-choice metadata. Existing preparation marks and the entire play state remain unchanged.</p>
+              {% endif %}
             {% endif %}
             <h3>Feature-grant migration and exact correction</h3>
-            <p>Proposed source-feature facts are separate from historical observations. Raw spell flags, preparation marks, base facts and unknown fields remain preserved. An automatic grant does not assert a historical player selection.</p>
+            <p>Proposed source-feature facts are separate from historical observations. {% if review.native.explicit_preparations %}Only the reviewed ordinary preparation fields and current-choice metadata change; prior observations remain in history. {% else %}Raw spell flags and preparation marks remain preserved. {% endif %}Base facts and unknown fields remain preserved. An automatic grant does not assert a historical player selection.</p>
             <ul>{% for origin in review.native.spell_origins.automatic %}
-                {% if review.native.spell_origins.schema_version in [2, 3, 4] %}
+                {% if review.native.spell_origins.schema_version in [2, 3, 4, 5] %}
               <li><strong>{{ origin.spell_id }}</strong> ({{ origin.class_row_id }}): {% if origin.correction_target %}selected correction target; {% endif %}proposed mapping to {{ origin.grant_ids | join(', ') }}. Historical origin remains UNKNOWN; the exact raw observation is retained ({{ origin.unresolved_observation_digest }}).</li>
               {% else %}
               <li><strong>{{ origin.spell_id }}</strong> ({{ origin.class_row_id }}): always prepared {{ origin.before_flags.is_always_prepared }} to {{ origin.after_flags.is_always_prepared }}; bonus known {{ origin.before_flags.is_bonus_known }} to {{ origin.after_flags.is_bonus_known }}. Current owners: {{ origin.owners | join(', ') }}.</li>
@@ -192,6 +196,17 @@
             <div class="field"><label><input type="checkbox" name="spell_origin_mode" value="yes"> Include an explicit feature-grant migration and correction plan.</label></div>
             <div class="field"><label><input type="checkbox" name="confirm_current_spells" value="yes"> Confirm current cantrips and ordinary prepared, known or spellbook spells while migrating feature grants.</label></div>
             <p>For a Wizard, confirm all current spellbook memberships and their separate preparations. For a prepared caster, confirm current preparation and other eligible class-list observations. For a known caster, confirm current known selections. Feature grants and item spells stay separate. Correction and removal IDs may both stay empty when confirming this complete checkpoint. The next screen shows every role before Apply.</p>
+            {% if preparation_options %}
+            <fieldset>
+              <legend>Current ordinary preparations</legend>
+              <label><input type="checkbox" name="confirm_prepared_set" value="yes"> Adopt an explicit current preparation set.</label>
+              <p>Also select feature-grant migration and complete current-spell confirmation above. Choose the ordinary spells prepared now. Leaving the selection empty while opting in records no ordinary preparations. Existing observations and history remain; automatic feature spells and item spells stay separate.</p>
+              <label for="prepared-spell-ids">Prepared now</label>
+              <select id="prepared-spell-ids" name="prepared_spell_ids" multiple size="8">
+                {% for spell in preparation_options %}<option value="{{ spell.id }}">{{ spell.name }} — level {{ spell.level }} ({{ spell.source }})</option>{% endfor %}
+              </select>
+            </fieldset>
+            {% endif %}
             <div class="field"><label for="automatic-spell-ids">Existing spell IDs in the correction subset</label><input id="automatic-spell-ids" name="automatic_spell_ids" maxlength="2200" placeholder="Exact spell IDs, separated by commas"></div>
             <details><summary>Existing spell IDs</summary><ul>{% for spell in character.spellcasting.spells %}<li>{{ spell.name }}: {{ spell.id }}</li>{% endfor %}</ul></details>
             <div class="field"><label for="remove-spell-id">Unsupported unlinked spell to remove</label><select id="remove-spell-id" name="remove_spell_id"><option value="">Keep all rows</option>{% for spell in character.spellcasting.spells %}{% if spell.class_row_id and not spell.systems_ref and not spell.page_ref and not spell.spell_source_row_id %}<option value="{{ spell.id }}">{{ spell.name }} ({{ spell.id }})</option>{% endif %}{% endfor %}</select></div>
