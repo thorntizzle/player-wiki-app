@@ -75,7 +75,7 @@ def _valid_rule(rule):
     return rule.get("basis") == _rule_basis(rule)
 
 
-def qualify_rule(authority, definition, systems_service, pool):
+def _source_rule_facts(definition, systems_service, pool, *, verified_feature=None):
     from .character_source_authority import _current_systems_entry, _source_identity
     if pool is None:
         return None
@@ -105,7 +105,7 @@ def qualify_rule(authority, definition, systems_service, pool):
         retained = [row for row in definition.features if isinstance(row, dict)
             and isinstance(row.get("systems_ref"), dict) and row["systems_ref"].get("slug") == slug]
         if (len(retained) > 1 or any(row.get("mechanics_suppressed")
-                or authority.status_for("feature", str(row.get("id") or "")) != "VERIFIED"
+                or (verified_feature is not None and not verified_feature(row))
                 or row.get("class_row_id") != pool["class_row_id"] for row in retained)):
             return None
         sources.append(_reference(entry))
@@ -113,6 +113,22 @@ def qualify_rule(authority, definition, systems_service, pool):
         "sources": sources, "feature_ids": sorted(row["feature"]["id"] for row in members)}
     rule["basis"] = _rule_basis(rule)
     return rule if _valid_rule(rule) else None
+
+
+def source_rule_facts(definition, systems_service, pool):
+    """Current source/owner facts only; these issue no mechanical authority.
+
+    Historical classification can bind this same source contract before numeric
+    issuance. Only qualify_rule may admit it to an actual slot provider.
+    """
+    return _source_rule_facts(definition, systems_service, pool)
+
+
+def qualify_rule(authority, definition, systems_service, pool):
+    # Check each retained feature before reading the next source, preserving
+    # the qualifier's early-refusal and callback ordering.
+    return _source_rule_facts(definition, systems_service, pool,
+        verified_feature=lambda row: authority.status_for("feature", str(row.get("id") or "")) == "VERIFIED")
 
 
 

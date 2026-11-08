@@ -981,15 +981,31 @@ infusion summaries and alternate action/custom item warnings are not silently
 cleared by typed knowledge or capacity support. Catalog admission and genuine
 character adoption/operational verification remain separate from source support.
 
-Reconstruction separately offers two explicit historical associations: a retained
+Reconstruction separately offers three explicit historical associations: a retained
 Artificer Infusions summary to its authenticated typed recipe set and Infuse Item
 owner, and a retained STR Thunder Gauntlets action to the unique selected Guardian
-Gauntlets owner. These finite source contracts preserve the entire original row;
+Gauntlets owner, and an explicitly selected inert conversion summary to the
+existing owned PHB Sorcerer Font of Magic feature and current Flexible Casting
+rule. These finite source contracts preserve the entire original row;
 they add no source link to that row, grant, tracker, attack or hand assignment.
 Recipe/model confirmation is required in the same proposal or existing retained
 frame. The form defaults these associations to unresolved; unresolved choices
 retain their source warnings. With no adopted history, these checks impose no
 additional feature-identity requirement on ordinary reads or writes.
+
+Conversion-summary classification is an explicit history decision, never an
+inferred match of a name, description, imported slug or character identity. Only
+source-less descriptive bonus-action class-feature rows without mechanical
+fields, trackers or competing owners are eligible for that choice. It requires
+the exact current Font of Magic, Sorcery Points and Flexible Casting source
+contracts and an unambiguous existing Sorcerer resource owner. Preparation binds
+source and owner facts without issuing authority; the final association also
+requires the actual qualified Flexible Casting provider and resource binding.
+The retained row gains no source link, feature acquisition or conversion action.
+The independent current rule remains the sole owner of the conversion controls.
+Spent counters and advancing the same class do not change the history identity.
+Existing saved rows stay unchanged until a genuine reviewed reconstruction
+explicitly adopts the relation; installing source support alone hides nothing.
 
 Relations carry exact prior-row, dependency and current-source identities through
 the normal reconstruction proof, origin/audit recovery and publication transition.

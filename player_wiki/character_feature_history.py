@@ -1,4 +1,4 @@
-"""Two explicit historical relations; neither supplies a mechanical owner.
+"""Explicit historical relations; none supplies a mechanical owner.
 
 Owner IDs refer to existing source-linked features. History stays byte-for-byte
 in the definition; current source and recovered custody qualify only its citation.
@@ -18,6 +18,9 @@ CUSTODY = "feature_history_custody"
 UNKNOWN = "__unresolved_feature_history__"
 RECIPES = "artificer_recipe_summary"
 STR_ACTION = "guardian_strength_alternative"
+CONVERSION = "sorcerer_conversion_summary"
+_FONT = "dnd-5e|classfeature|phb|fontofmagic-sorcerer-phb-2"
+_SORCERER = "dnd-5e|class|phb|sorcerer"
 _FIELDS = {"schema_version", "feature_id", "prior_feature_json", "relation",
            "owner_feature_id", "class_row_id", "source_digest", "dependency_digest"}
 
@@ -46,6 +49,14 @@ def _relation(feature):
     if (feature.get("name") == "Guardian Armor: Thunder Gauntlets (STR)"
             and feature.get("activation_type") == "action"):
         return STR_ACTION
+    # This discovers an explicit classification choice, never semantic identity
+    # or an acquisition. A name/prose match cannot associate a row automatically.
+    if (feature.get("source") in (None, "")
+            and feature.get("activation_type") == "bonus_action"
+            and type(feature.get("name")) is str and feature["name"].strip()
+            and type(feature.get("description_markdown")) is str
+            and feature["description_markdown"].strip()):
+        return CONVERSION
     return None
 
 
@@ -61,6 +72,46 @@ def _unique_owner(definition, service, key, class_id):
             or rows[0].get("page_ref") or rows[0].get("class_row_id") not in (None, "", class_id)):
         raise SourceRepairError("Historical relation needs a unique current mechanical owner.")
     return rows[0]
+
+
+def _conversion_structure(definition):
+    """Stable retained owner identity; no counters, source verdict or grant."""
+    features = _features(definition)
+    parents = [row for row in features.values()
+               if type(row.get("systems_ref")) is dict and row["systems_ref"].get("entry_key") == _FONT]
+    if len(parents) != 1:
+        raise SourceRepairError("Conversion history needs one existing Font of Magic owner.")
+    parent = parents[0]
+    class_id = parent.get("class_row_id")
+    classes = [row for row in definition.profile.get("classes", []) if type(row) is dict
+               and row.get("row_id") == class_id]
+    templates = [row for row in definition.resource_templates
+                 if type(row) is dict and row.get("id") == "sorcery-points"]
+    members = [row for row in features.values() if row.get("tracker_ref") == "sorcery-points"]
+    if (type(class_id) is not str or not class_id or len(classes) != 1
+            or type(classes[0].get("systems_ref")) is not dict
+            or classes[0]["systems_ref"].get("entry_key") != _SORCERER
+            or len(templates) != 1 or templates[0].get("class_row_id") != class_id
+            or parent not in members or any(row.get("class_row_id") != class_id for row in members)):
+        raise SourceRepairError("Conversion history needs an unambiguous existing Sorcerer pool owner.")
+    return parent, {"class": {key: deepcopy(classes[0].get(key)) for key in ("row_id", "systems_ref")},
+        "members": sorted(({key: deepcopy(row.get(key)) for key in
+                             ("id", "class_row_id", "systems_ref", "tracker_ref")} for row in members),
+                          key=lambda row: row["id"]),
+        "template": {key: deepcopy(templates[0].get(key)) for key in ("id", "class_row_id")}}
+
+
+def _conversion_sources(definition, service):
+    from .character_source_authority import _current_managed_pool_owners
+    from .character_flexible_casting import source_rule_facts
+    parent, _ = _conversion_structure(definition)
+    pools = _current_managed_pool_owners(definition, systems_service=service, pages={})
+    rule = source_rule_facts(definition, service, pools.get("sorcery-points"))
+    if (rule is None or parent["id"] not in rule["feature_ids"]
+            or parent.get("class_row_id") != rule["class_row_id"]
+            or _unique_owner(definition, service, _FONT, rule["class_row_id"]) != parent):
+        raise SourceRepairError("Conversion history needs the exact current Flexible Casting source contract.")
+    return parent, rule
 
 
 def _base(definition, feature, service):
@@ -80,6 +131,9 @@ def _base(definition, feature, service):
         class_id = contract["class_row_id"]
         owners = [_unique_owner(definition, service, key, class_id) for key in (MODEL, ARCANE, GAUNTLETS, FIELD)]
         parent, source_basis = owners[2], contract
+    elif relation == CONVERSION:
+        parent, source_basis = _conversion_sources(definition, service)
+        class_id = source_basis["class_row_id"]
     else:
         raise SourceRepairError("This historical relation is unsupported.")
     if feature.get("class_row_id") not in (None, "", class_id) or feature["id"] == parent["id"]:
@@ -91,6 +145,9 @@ def _base(definition, feature, service):
 
 
 def _dependency(definition, relation, service=None):
+    if relation == CONVERSION:
+        _, identity = _conversion_structure(definition)
+        return digest(identity)
     if relation == RECIPES:
         from .character_infusion_recipes import validate
     else:
@@ -113,9 +170,13 @@ def choice_fields(definition, service, values):
         result.append({"name": _field(feature["id"]), "label": "Historical association: " + feature["name"],
             "kind": "feature_history", "group_key": "reconstruction:feature_history:" + feature["id"],
             "selected": values.get(_field(feature["id"]), UNKNOWN),
-            "help_text": "Retain this row as history of the current owner. It supplies no additional benefit or action. Confirm the owning recipe/model choices separately.",
+            "help_text": ("Explicitly classify this exact retained row as a historical conversion summary. The current Sorcerer source owns Flexible Casting; this row supplies no benefit or action."
+                          if row["relation"] == CONVERSION else
+                          "Retain this row as history of the current owner. It supplies no additional benefit or action. Confirm the owning recipe/model choices separately."),
             "options": [{"label": "Unresolved; retain source warning", "value": UNKNOWN},
-                        {"label": "Associate with the current owner as history only", "value": digest(row)}]})
+                        {"label": ("Associate with current Sorcerer Flexible Casting as history only"
+                                   if row["relation"] == CONVERSION else
+                                   "Associate with the current owner as history only"), "value": digest(row)}]})
     return result
 
 
@@ -139,7 +200,7 @@ def stored(definition):
     frame = definition.source.get("native_reconstruction_choices")
     origin = definition.source.get("native_reconstruction")
     rows = frame.get(FRAME, []) if type(frame) is dict else []
-    if (type(rows) is not list or len(rows) > 2
+    if (type(rows) is not list or len(rows) > 3
             or not rows and type(origin) is dict and ORIGIN in origin):
         raise SourceRepairError("Historical associations are missing or malformed.")
     if not rows:
@@ -150,7 +211,7 @@ def stored(definition):
         if (type(row) is not dict or set(row) != _FIELDS
                 or type(row["schema_version"]) is not int or row["schema_version"] != 1
                 or any(type(row[key]) is not str or not row[key] for key in _FIELDS - {"schema_version"})
-                or row["relation"] not in {RECIPES, STR_ACTION}
+                or row["relation"] not in {RECIPES, STR_ACTION, CONVERSION}
                 or row["feature_id"] in seen or row["relation"] in relations
                 or len(row["prior_feature_json"]) > 100000
                 or row["owner_feature_id"] == row["feature_id"]):
@@ -234,6 +295,14 @@ def qualified(definition, state, authority, service):
             if row["relation"] == RECIPES:
                 from .character_infusion_recipes import view
                 if not view(definition, state, authority, service)["available"]:
+                    continue
+            elif row["relation"] == CONVERSION:
+                from .character_flexible_casting import RULE_KEY
+                from .character_spell_slots import grant_binding
+                parent, rule = _conversion_sources(definition, service)
+                binding = grant_binding(authority, "feature", RULE_KEY, row["class_row_id"])
+                if (parent["id"] != row["owner_feature_id"] or binding is None
+                        or binding.get("rule") != rule):
                     continue
             else:
                 from .character_armor_models import qualified as armor_qualified, MODEL, ARCANE, GAUNTLETS, FIELD
