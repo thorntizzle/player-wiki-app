@@ -89,6 +89,28 @@ def canonical_recipe(value: Any, *, faces: int | None = None) -> dict[str, Any]:
     return deepcopy(value)
 
 
+def _retained_whole_gain(gain: Any, *, reference_modifier: int, modifier: int,
+                         faces: int | None) -> int:
+    gain = _integer(gain, 1, 1000)
+    # The observed whole gain remains exact at its reference modifier even
+    # when its method or physical components cannot be recovered.
+    if modifier == reference_modifier:
+        return gain
+    if faces is None:
+        raise HitPointRecipeError("Recalculating a retained whole HP gain needs qualified Hit Die bounds.")
+    faces = _integer(faces, 1, 100)
+    if gain == 1:
+        low, high = 1, min(faces, 1 - reference_modifier)
+    else:
+        low = high = gain - reference_modifier
+    if not 1 <= low <= high <= faces:
+        raise HitPointRecipeError("The retained whole HP gain does not prove compatible physical contributions.")
+    minimum, maximum = max(1, low + modifier), max(1, high + modifier)
+    if minimum != maximum:
+        raise HitPointRecipeError("The retained whole HP gain is ambiguous after Constitution changes; review its physical contribution evidence.")
+    return minimum
+
+
 def evaluate_recipe(value: Any, history: Any, *, level: int, constitution: int,
                     faces: int | None = None) -> int:
     """Evaluate physical contributions and current CON exactly once.
@@ -102,16 +124,25 @@ def evaluate_recipe(value: Any, history: Any, *, level: int, constitution: int,
     _integer(constitution, 0, 100)
     if not isinstance(history, list) or len(history) > 512 or len(history) < recipe["history_start"]:
         raise HitPointRecipeError("The HP recipe's retained history is unavailable.")
-    total = sum((rational(row["aggregate"]) for row in recipe["pools"]), Fraction())
-    total += sum((rational(row["amount"]) for row in recipe["corrections"]), Fraction())
     current = recipe["boundary_level"]
     modifier = (constitution - 10) // 2
-    if modifier < 0 and any(row["policy"] == "accepted_pool" and (
-            faces is None or rational(row["aggregate"]) != faces * (row["to_level"] - row["from_level"] + 1))
-            for row in recipe["pools"]):
-        raise HitPointRecipeError("Negative Constitution needs individual HP contributions before minimum-one arithmetic can be proved.")
+    total = Fraction()
+    for row in recipe["pools"]:
+        amount = rational(row["aggregate"])
+        count = row["to_level"] - row["from_level"] + 1
+        if row["policy"] == "accepted_pool":
+            if modifier < 0:
+                if faces is None or amount != faces * count:
+                    raise HitPointRecipeError("Negative Constitution needs individual HP contributions before minimum-one arithmetic can be proved.")
+                total += count * max(1, faces + modifier)
+            else:
+                total += amount + modifier * count
+        else:
+            # A maximum pool has the same physical contribution at each level;
+            # a known_gain pool is one explicit physical contribution.
+            total += count * max(1, amount / count + modifier)
+    total += sum((rational(row["amount"]) for row in recipe["corrections"]), Fraction())
     reference_modifier = (recipe["reference_constitution"] - 10) // 2
-    total += modifier * recipe["boundary_level"]
     for index, event in enumerate(history[recipe["history_start"]:], start=recipe["history_start"]):
         if not isinstance(event, dict):
             raise HitPointRecipeError("The HP continuation event is malformed.")
@@ -125,8 +156,8 @@ def evaluate_recipe(value: Any, history: Any, *, level: int, constitution: int,
                 raise HitPointRecipeError(
                     "Retained whole HP gains with continuing effects need explicit included-effect evidence; "
                     "this reconstruction cannot publish that ambiguous combination.")
-            # A retained whole gain is not relabeled as an original die roll.
-            total += _integer(event.get("max_hp_delta"), 1, 1000) + modifier - reference_modifier
+            total += _retained_whole_gain(event.get("max_hp_delta"),
+                reference_modifier=reference_modifier, modifier=modifier, faces=faces)
         else:
             total += max(1, _integer(event.get("physical_hp_gain"), 1, faces or 100) + modifier)
         current += 1

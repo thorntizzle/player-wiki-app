@@ -1890,7 +1890,8 @@ def _prepare_native_requalification(*, record: Any, systems_service: Any,
         # Historical bootstrap current is not a rule maximum or a refill.
         retained_template = next(row for row in definition.resource_templates if row["id"] == template["id"])
         expected["initial_current"] = retained_template.get("initial_current")
-        if (any(template.get(key) != value for key, value in expected.items() if key not in {"max", "initial_current"})
+        # Retained notes are history; the proof still binds the current recipe.
+        if (any(template.get(key) != value for key, value in expected.items() if key not in {"max", "initial_current", "notes"})
                 or not reconstructed and (type(expected["initial_current"]) is not int
                     or expected["initial_current"] < 0)):
             _fail()
