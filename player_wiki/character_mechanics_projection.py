@@ -489,43 +489,50 @@ def build_effective_character_values(
         )
         activation_warnings = list(activation_warnings) + list(legacy_warnings)
     normalization_page_records = _normalization_page_records(campaign_page_records, campaign=campaign)
-    source_authority = None
-    source_warnings: list[dict[str, str]] = []
-    if activated and not is_xianxia_system(projected_definition.system):
-        try:
-            from . import character_source_repair
+    def qualify_sources():
+        source_authority = None
+        if activated and not is_xianxia_system(projected_definition.system):
+            try:
+                from . import character_source_repair
 
-            verified_manual_actions = character_source_repair.load_verified_manual_actions(
-                campaign.slug, projected_definition.character_slug,
-                **({"connection": phase_of(systems_service).connection} if phase_of(systems_service) is not None else {})
-            )
-            load_numeric = getattr(character_source_repair, "load_verified_numeric_actions", None)
-            verified_numeric_actions = (
-                load_numeric(campaign.slug, projected_definition.character_slug,
-                    **({"connection": phase_of(systems_service).connection} if phase_of(systems_service) is not None else {}))
-                if callable(load_numeric) else ()
-            )
-        except SourceReadConnectionFatal:
-            raise
-        except (RuntimeError, TypeError, ValueError):
-            if phase_of(systems_service) is not None:
+                verified_manual_actions = character_source_repair.load_verified_manual_actions(
+                    campaign.slug, projected_definition.character_slug,
+                    **({"connection": phase_of(systems_service).connection} if phase_of(systems_service) is not None else {})
+                )
+                load_numeric = getattr(character_source_repair, "load_verified_numeric_actions", None)
+                verified_numeric_actions = (
+                    load_numeric(campaign.slug, projected_definition.character_slug,
+                        **({"connection": phase_of(systems_service).connection} if phase_of(systems_service) is not None else {}))
+                    if callable(load_numeric) else ()
+                )
+            except SourceReadConnectionFatal:
                 raise
-            # Offline renderers have no trusted audit reader. MANUAL fails closed.
-            verified_manual_actions = ()
-            verified_numeric_actions = ()
-        source_authority = build_source_authority(
-            definition=projected_definition,
-            state=state,
-            systems_service=systems_service,
-            campaign_page_records=normalization_page_records,
-            verified_manual_actions=tuple(verified_manual_actions),
-            verified_numeric_actions=tuple(verified_numeric_actions),
-            state_revision=state_revision,
-        )
-        source_warnings = [
-            {"code": code, "message": message}
-            for code, message in source_authority.warnings
-        ]
+            except (RuntimeError, TypeError, ValueError):
+                if phase_of(systems_service) is not None:
+                    raise
+                # Offline renderers have no trusted audit reader. MANUAL fails closed.
+                verified_manual_actions = ()
+                verified_numeric_actions = ()
+            source_authority = build_source_authority(
+                definition=projected_definition,
+                state=state,
+                systems_service=systems_service,
+                campaign_page_records=normalization_page_records,
+                verified_manual_actions=tuple(verified_manual_actions),
+                verified_numeric_actions=tuple(verified_numeric_actions),
+                state_revision=state_revision,
+            )
+        return projected_definition, list(activation_warnings), source_authority
+
+    from .character_request_context import qualified_character_prefix
+    projected_definition, activation_warnings, source_authority = qualified_character_prefix(
+        systems_service,
+        (definition, projected_definition, state, state_revision, normalization_page_records),
+        qualify_sources,
+    )
+    source_warnings = ([{"code": code, "message": message}
+                        for code, message in source_authority.warnings]
+                       if source_authority is not None else [])
     authority_input_definition = projected_definition
     projected_state = deepcopy(state or {})
     projection_warnings: list[dict[str, str]] = list(activation_warnings) + source_warnings
@@ -2509,3 +2516,19 @@ _NATIVE_READ_CATALOG_RECIPE = tuple((name, globals()[name]) for name in (
     "_build_scoped_item_catalog", "_build_scoped_spell_catalog",
     "normalize_definition_to_native_model",
 ))
+
+
+# Bind the actual qualification callbacks at trusted module initialization.
+from . import character_source_repair as _qualification_history
+_QUALIFIED_PREFIX_RECIPE = tuple((name, globals()[name]) for name in (
+    "effective_definition", "build_source_authority", "_normalization_page_records",
+))
+_QUALIFIED_HISTORY_RECIPE = tuple((name, getattr(_qualification_history, name)) for name in (
+    "load_verified_manual_actions", "load_verified_numeric_actions",
+))
+
+
+def ordinary_qualified_prefix():
+    return (all(globals().get(name) is original for name, original in _QUALIFIED_PREFIX_RECIPE)
+        and all(getattr(_qualification_history, name, None) is original
+                for name, original in _QUALIFIED_HISTORY_RECIPE))

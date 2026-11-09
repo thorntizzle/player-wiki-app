@@ -371,10 +371,18 @@ class SourceReadPhase:
             raise SourceReadConflict("Native character generation/state is unavailable.")
         pages = [(dict(row), source) for row, source in
                  _page_row_facts(campaign, connection=connection)]
-        return {"config": (settings_source, settings), "generation": generation,
+        basis = {"config": (settings_source, settings), "generation": generation,
                 "state": dict(state), "pages": pages,
                 "identity": source_identity(connection, campaign, character),
                 "audit": _audit_prefix(connection, campaign, character)}
+        if self.purpose == "selected-character-read":
+            # Numeric witnesses query historical generations directly, outside
+            # the Systems readset. Compare every column and row again freshly.
+            basis["character_history"] = [dict(row) for row in connection.execute(
+                "SELECT * FROM committed_source_generations WHERE campaign_slug=? "
+                "AND object_kind='character' AND object_ref=? ORDER BY revision",
+                (campaign, character)).fetchall()]
+        return basis
 
     def facts(self):
         self.require_open()
@@ -548,6 +556,10 @@ class SourceReadPhase:
         self._basis = None
         self._page_index = {}
         errors = []
+        context = getattr(self, "_qualified_context", None)
+        if context is not None:
+            context.close()
+            self._qualified_context = None
         for catalog in list(self._read_catalog_inputs):
             try:
                 catalog.close()

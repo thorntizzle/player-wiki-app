@@ -53,6 +53,15 @@ or live-data authority.
 
 ## Diagnostics And Live Health
 
+- `scripts/qualify_local_read.py` provides one fixed credential-free local
+  `/readyz` GET on explicit stopped isolated `.local` inputs, with complete
+  typed SQLite/file preservation, source identity, native-process closure and
+  timing evidence. It makes no live/network/Character request, installs no
+  data and grants no retry. [Local Read Qualification](../workflows/local-read-qualification.md)
+  owns invocation, quiet-corpus requirements and evidence limits. Its reusable
+  primitives live in `scripts/local_qualification.py`; this is optional focused
+  local tooling, not a standing candidate gate or a replacement backup.
+
 - The default-on, separately disableable `PLAYER_WIKI_INCIDENT_DIAGNOSTICS_ENABLED` stream emits privacy-bounded `incident_event_v1` records for access decisions, non-read requests, and named publication/apply outcomes. [Incident Diagnostics](../incident-diagnostics.md) owns its schema and runbook. It writes through the existing app logger; no new durable store or retention guarantee is added.
 - The older request trail and live timing stream remain off by default behind `PLAYER_WIKI_REQUEST_TRAIL_ENABLED` and `PLAYER_WIKI_LIVE_DIAGNOSTICS`. The request-trail payload no longer includes a path or remote address. It omits health/static requests.
 - `player_wiki/character_read_diagnostics.py` remains in the runtime and attaches request-scoped Character read timing and outcome headers only when `PLAYER_WIKI_LIVE_DIAGNOSTICS` is enabled. The dedicated Character read measurement harness was retired; the retained `scripts/measure_live_latency.py` measures Session and Combat surfaces. Production activation and monitoring require a separately authorized deployment/configuration decision.

@@ -6739,6 +6739,21 @@ class PhaseCharacterReadSystemsService(CharacterReadSystemsService):
             if entry_types is None or kind in entry_types))
         return (*context, identities)
 
+    def _build_builder_static_revision(self, campaign_slug, *, library, entry_types,
+                                       revision=None):
+        result = super()._build_builder_static_revision(
+            campaign_slug, library=library, entry_types=entry_types, revision=revision)
+        phase = self.source_read_phase
+        if (result is None or phase.purpose != "selected-character-read"
+                or phase.owner._reserved or type(phase._service) is not SystemsService):
+            return result
+        # Plain Quick readers never included the CharacterRead subset suffix
+        # in authority revision identity. Preserve that originating shape while
+        # get_cache_context and the private memo retain complete phase subsets.
+        context = phase.resolve("campaign-policy-context", campaign_slug,
+            lambda: SystemsService.get_cache_context(self, campaign_slug, entry_types=()))
+        return result[0], result[1], context, result[3]
+
     def ensure_builtin_library_seeded(self, library_slug):
         library = self.store.get_library(library_slug)
         if library is None:
@@ -6803,3 +6818,58 @@ def ordinary_current_input_service(service):
                    for name, _original in _CURRENT_INPUT_PHASE_METHODS)):
         return False
     return _CURRENT_INPUT_PHASE_SUPPORT(service)
+
+
+# Selected read adoption replaces these exact ordinary provider dispatches.
+_SELECTED_READ_ABSENT = object()
+
+
+def _selected_read_declaration(kind, name):
+    # Raw lookup over these fixed stock classes: never bind a custom descriptor.
+    for base in type.__getattribute__(kind, "__mro__"):
+        declaration = type.__getattribute__(base, "__dict__")
+        if name in declaration:
+            return declaration[name]
+    return _SELECTED_READ_ABSENT
+
+
+_SELECTED_READ_NAMES = tuple(dict.fromkeys((*_FEATURE_PROVIDER_METHODS, "__dict__",
+    *_CURRENT_INPUT_PROVIDER_METHODS, "character_read_view", "get_cache_context",
+    "get_durable_revision", "get_campaign_library_slug", "_campaign_policy_inputs",
+    "ensure_builtin_library_seeded", "get_builder_static_revision",
+    "get_builder_static_revision_for_character_read", "_build_builder_static_revision", "_get_campaign",
+    "_list_visible_campaign_mechanics_page_records", "_build_campaign_page_body_html",
+    "_enabled_entry_subset_for_request", "_expire_entry_subsets_for_revision",
+    "set_enabled_entry_subset_for_request", "search_entries_for_campaign",
+    "search_entries_for_character_read")))
+_SELECTED_READ_PROVIDERS = {kind: tuple((name, _selected_read_declaration(kind, name))
+    for name in _SELECTED_READ_NAMES
+    if _selected_read_declaration(kind, name) is not _SELECTED_READ_ABSENT)
+    for kind in (SystemsService, CharacterReadSystemsService)}
+_SELECTED_READ_PHASE = tuple((name, _selected_read_declaration(PhaseCharacterReadSystemsService, name))
+    for name in _SELECTED_READ_NAMES
+    if _selected_read_declaration(PhaseCharacterReadSystemsService, name) is not _SELECTED_READ_ABSENT)
+_SELECTED_READ_TYPES = (SystemsService, CharacterReadSystemsService)
+
+
+def ordinary_selected_character_service(service):
+    """No custom callback is invoked to determine selected-read eligibility."""
+    kind = type(service)
+    if not any(kind is original for original in _SELECTED_READ_TYPES):
+        return False
+    recipe = _SELECTED_READ_PROVIDERS[kind]
+    return (recipe is not None
+        and all(_selected_read_declaration(kind, name) is original for name, original in recipe)
+        and all(_selected_read_declaration(kind, name) is _SELECTED_READ_ABSENT
+                for name in ("store", "repository_store", "__getattr__"))
+        and type(vars(service)) is dict and all(type(name) is str for name in vars(service))
+        and not any(name in vars(service) for name, _original in recipe))
+
+
+def ordinary_selected_character_phase(service):
+    return (type(service) is _CURRENT_INPUT_PHASE_CLASS
+        and all(_selected_read_declaration(type(service), name) is original
+                for name, original in _SELECTED_READ_PHASE)
+        and not any(name in vars(service) for name, _original in _SELECTED_READ_PHASE)
+        and ordinary_current_input_service(service)
+        and ordinary_selected_character_service(service.source_read_phase._service))

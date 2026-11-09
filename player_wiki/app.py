@@ -150,6 +150,7 @@ from .character_page_records import (
     list_visible_character_page_records as list_visible_character_page_records_for_store,
     materialize_dnd_character_read_page_records,
 )
+from .character_request_context import selected_character_read_context
 from .character_read_projection import (
     build_character_read_projection_cache_key,
     build_dnd_character_read_shell_projection,
@@ -5018,541 +5019,550 @@ def create_app() -> Flask:
             is_dnd_5e_system(getattr(campaign, "system", ""))
             and is_dnd_5e_system(getattr(record.definition, "system", ""))
         )
-        from .committed_publication import active
-        from .db import get_db
-        source_phase_features_read = bool(
-            scoped_dnd_read
-            and requested_character_subpage == "features"
-            and request.method in {"GET", "HEAD"}
-            and status_code == 200
-            and not protected_conflict
-            and not get_db().in_transaction
-            and active()
-        )
-        character_read_effective_visibility = (
-            {
-                scope: get_effective_campaign_visibility(campaign_slug, scope)
-                for scope in ("campaign", "characters", "wiki", "systems")
-            }
-            if scoped_dnd_read
-            else {}
-        )
-        with measure_character_read_component("page-records"):
-            campaign_page_records = list_visible_character_page_records_for_store(
-                get_campaign_page_store(), campaign_slug, campaign,
-                include_body=not scoped_dnd_read, excluded_sections={"Sessions"},
+        with selected_character_read_context(
+            record, campaign=campaign, systems_service=get_systems_service(),
+            page_store=get_campaign_page_store(),
+            enabled=(scoped_dnd_read and requested_character_subpage in {"", "quick"}
+                and request.method in {"GET", "HEAD"} and status_code == 200
+                and not protected_conflict and notes_draft is None
+                and physical_description_draft is None and background_draft is None
+                and request.values.get("confirm_rest", "").strip().lower() not in {"short", "long"}),
+        ) as (read_systems_service, read_page_store):
+            from .committed_publication import active
+            from .db import get_db
+            source_phase_features_read = bool(
+                scoped_dnd_read
+                and requested_character_subpage == "features"
+                and request.method in {"GET", "HEAD"}
+                and status_code == 200
+                and not protected_conflict
+                and not get_db().in_transaction
+                and active()
             )
-            builder_campaign_page_records = [
-                page_record
-                for page_record in campaign_page_records
-                if str(page_record.page.section or "").strip()
-                in BUILDER_RELEVANT_CAMPAIGN_SECTIONS
-            ]
-        visible_campaign_page_manifest = list(campaign_page_records)
-
-        def materialize_feature_phase_pages(phase, phase_campaign, *, section):
-            # Rebuild the original shell-then-section body union in THIS
-            # snapshot; no Page from the earlier phase becomes trusted input.
+            character_read_effective_visibility = (
+                {
+                    scope: get_effective_campaign_visibility(campaign_slug, scope)
+                    for scope in ("campaign", "characters", "wiki", "systems")
+                }
+                if scoped_dnd_read
+                else {}
+            )
             with measure_character_read_component("page-records"):
-                shell_pages = materialize_dnd_character_read_page_records(
-                    phase.page_store(), campaign_slug, visible_campaign_page_manifest,
-                    record.definition, record.state_record.state or {},
-                    section="shell", campaign=phase_campaign,
+                campaign_page_records = list_visible_character_page_records_for_store(
+                    read_page_store, campaign_slug, campaign,
+                    include_body=not scoped_dnd_read, excluded_sections={"Sessions"},
                 )
-                if section == "shell":
-                    return shell_pages
-                return materialize_dnd_character_read_page_records(
-                    phase.page_store(), campaign_slug,
-                    shell_pages or visible_campaign_page_manifest,
-                    record.definition, record.state_record.state or {},
-                    section=section, campaign=phase_campaign,
-                )
+                builder_campaign_page_records = [
+                    page_record
+                    for page_record in campaign_page_records
+                    if str(page_record.page.section or "").strip()
+                    in BUILDER_RELEVANT_CAMPAIGN_SECTIONS
+                ]
+            visible_campaign_page_manifest = list(campaign_page_records)
 
-        include_controls_subpage = (
-            can_use_session_mode and campaign_supports_character_controls_routes(campaign)
-        )
-        shell_projection: dict[str, object] = {}
-        include_spellcasting_subpage = False
-        available_character_subpages: dict[str, str] = {}
-        character_subpage = ""
-        if scoped_dnd_read:
-            shell_campaign_page_records: list[object] | None = None
-            shell_projection_key = build_character_read_projection_cache_key(
-                "dnd-shell",
-                campaign_slug=campaign_slug,
-                record=record,
-                systems_service=get_systems_service(),
-                campaign_page_records=visible_campaign_page_manifest,
-                campaign_current_session=campaign.current_session,
-                effective_visibility=character_read_effective_visibility,
+            def materialize_feature_phase_pages(phase, phase_campaign, *, section):
+                # Rebuild the original shell-then-section body union in THIS
+                # snapshot; no Page from the earlier phase becomes trusted input.
+                with measure_character_read_component("page-records"):
+                    shell_pages = materialize_dnd_character_read_page_records(
+                        phase.page_store(), campaign_slug, visible_campaign_page_manifest,
+                        record.definition, record.state_record.state or {},
+                        section="shell", campaign=phase_campaign,
+                    )
+                    if section == "shell":
+                        return shell_pages
+                    return materialize_dnd_character_read_page_records(
+                        phase.page_store(), campaign_slug,
+                        shell_pages or visible_campaign_page_manifest,
+                        record.definition, record.state_record.state or {},
+                        section=section, campaign=phase_campaign,
+                    )
+
+            include_controls_subpage = (
+                can_use_session_mode and campaign_supports_character_controls_routes(campaign)
             )
+            shell_projection: dict[str, object] = {}
+            include_spellcasting_subpage = False
+            available_character_subpages: dict[str, str] = {}
+            character_subpage = ""
+            if scoped_dnd_read:
+                shell_campaign_page_records: list[object] | None = None
+                shell_projection_key = build_character_read_projection_cache_key(
+                    "dnd-shell",
+                    campaign_slug=campaign_slug,
+                    record=record,
+                    systems_service=read_systems_service,
+                    campaign_page_records=visible_campaign_page_manifest,
+                    campaign_current_session=campaign.current_session,
+                    effective_visibility=character_read_effective_visibility,
+                )
 
-            def build_character_shell_projection() -> dict[str, object]:
-                nonlocal shell_campaign_page_records
-                if source_phase_features_read and not get_db().in_transaction and active():
+                def build_character_shell_projection() -> dict[str, object]:
+                    nonlocal shell_campaign_page_records
+                    if source_phase_features_read and not get_db().in_transaction and active():
+                        from copy import deepcopy
+                        from .character_source_reads import native_character_source_context
+                        proposed = None
+                        with native_character_source_context(
+                            record, systems_service=read_systems_service, campaign=campaign,
+                            purpose="character-shell-read",
+                        ) as (phase, reader, _pages, _owner):
+                            if phase is not None:
+                                phase_campaign = phase.campaign()
+                                phase_pages = materialize_feature_phase_pages(
+                                    phase, phase_campaign, section="shell",
+                                )
+                                proposed = deepcopy(build_dnd_character_read_shell_projection(
+                                    phase_campaign, record, systems_service=reader,
+                                    campaign_page_records=phase_pages,
+                                ))
+                        if proposed is not None:
+                            return proposed
+                    with measure_character_read_component("page-records"):
+                        shell_campaign_page_records = materialize_dnd_character_read_page_records(
+                            read_page_store,
+                            campaign_slug,
+                            visible_campaign_page_manifest,
+                            record.definition,
+                            record.state_record.state or {},
+                            section="shell",
+                            campaign=campaign,
+                        )
+                    return build_dnd_character_read_shell_projection(
+                        campaign,
+                        record,
+                        systems_service=read_systems_service,
+                        campaign_page_records=shell_campaign_page_records,
+                    )
+
+                with measure_character_read_component("presentation"):
+                    shell_projection = load_cached_character_read_projection(
+                        shell_projection_key,
+                        build_character_shell_projection,
+                    )
+                include_spellcasting_subpage = bool(
+                    dnd5e_spellcasting_tools_supported
+                    and shell_projection.get("include_spellcasting")
+                )
+                available_character_subpages = get_character_read_subpage_labels(
+                    include_spellcasting=include_spellcasting_subpage,
+                    include_controls=include_controls_subpage,
+                )
+                character_subpage = normalize_character_read_subpage(
+                    requested_character_subpage,
+                    include_spellcasting=include_spellcasting_subpage,
+                    include_controls=include_controls_subpage,
+                )
+                if not source_phase_features_read:
+                    with measure_character_read_component("page-records"):
+                        campaign_page_records = materialize_dnd_character_read_page_records(
+                            read_page_store,
+                            campaign_slug,
+                            shell_campaign_page_records or visible_campaign_page_manifest,
+                            record.definition,
+                            record.state_record.state or {},
+                            section=character_subpage,
+                            campaign=campaign,
+                        )
+            shared_item_catalog: dict[str, object] | None = None
+            shared_spell_catalog: dict[str, object] | None = None
+            advancement_lane = character_advancement_lane(getattr(campaign, "system", ""))
+
+            def get_read_item_catalog() -> dict[str, object]:
+                nonlocal shared_item_catalog
+                if shared_item_catalog is None:
+                    with measure_character_read_component("catalogs"):
+                        shared_item_catalog = build_character_item_catalog(
+                            campaign_slug,
+                            campaign_page_records=campaign_page_records,
+                        )
+                return shared_item_catalog
+
+            def get_read_spell_catalog() -> dict[str, object]:
+                nonlocal shared_spell_catalog
+                if shared_spell_catalog is None:
+                    with measure_character_read_component("catalogs"):
+                        shared_spell_catalog = _build_spell_catalog(
+                            _list_campaign_enabled_entries(
+                                read_systems_service,
+                                campaign_slug,
+                                "spell",
+                            )
+                        )
+                return shared_spell_catalog
+
+            retraining_page_records = (
+                [
+                    page_record
+                    for page_record in visible_campaign_page_manifest
+                ]
+                if can_use_session_mode and native_character_tools_supported
+                else []
+            )
+            level_up_readiness = None
+            linked_feature_authoring: dict[str, object] = {
+                "supported": False,
+                "is_imported": False,
+                "message": "",
+            }
+            can_retrain = False
+            if can_use_session_mode and native_character_tools_supported:
+                header_projection_key = build_character_read_projection_cache_key(
+                    "dnd-header-actions",
+                    campaign_slug=campaign_slug,
+                    record=record,
+                    systems_service=read_systems_service,
+                    campaign_page_records=visible_campaign_page_manifest,
+                    campaign_current_session=campaign.current_session,
+                    effective_visibility=character_read_effective_visibility,
+                )
+
+                def build_character_header_projection() -> dict[str, object]:
+                    readiness = native_level_up_readiness(
+                        read_systems_service,
+                        campaign_slug,
+                        record.definition,
+                        campaign_page_records=builder_campaign_page_records,
+                    )
+                    linked_authoring = build_linked_feature_authoring_support(
+                        record.definition,
+                        readiness=readiness,
+                    )
+                    projected_can_retrain = False
+                    if retraining_page_records and bool(linked_authoring.get("supported")):
+                        retraining_context = build_native_character_retraining_context(
+                            record.definition,
+                            campaign_page_records=retraining_page_records,
+                            optionalfeature_catalog={
+                                str(entry.slug or "").strip(): entry
+                                for entry in _list_campaign_enabled_entries(
+                                    read_systems_service,
+                                    campaign_slug,
+                                    "optionalfeature",
+                                )
+                                if str(entry.slug or "").strip()
+                            },
+                            spell_catalog=get_read_spell_catalog(),
+                        )
+                        projected_can_retrain = bool(retraining_context.get("feature_rows"))
+                    return {
+                        "level_up_readiness": {
+                            "status": str(readiness.get("status") or "").strip(),
+                            "message": str(readiness.get("message") or "").strip(),
+                            "reasons": [
+                                str(reason or "").strip()
+                                for reason in list(readiness.get("reasons") or [])
+                                if str(reason or "").strip()
+                            ],
+                        },
+                        "linked_feature_authoring": {
+                            "supported": bool(linked_authoring.get("supported")),
+                            "is_imported": bool(linked_authoring.get("is_imported")),
+                            "message": str(linked_authoring.get("message") or "").strip(),
+                        },
+                        "can_retrain": projected_can_retrain,
+                    }
+
+                with measure_character_read_component("readiness"):
+                    header_projection = load_cached_character_read_projection(
+                        header_projection_key,
+                        build_character_header_projection,
+                    )
+                level_up_readiness = dict(
+                    header_projection.get("level_up_readiness") or {}
+                )
+                linked_feature_authoring = dict(
+                    header_projection.get("linked_feature_authoring") or {}
+                )
+                can_retrain = bool(header_projection.get("can_retrain"))
+            can_level_up = bool(
+                can_use_session_mode
+                and level_up_readiness
+                and level_up_readiness.get("status") == "ready"
+            )
+            can_prepare_level_up = bool(
+                can_manage_character
+                and level_up_readiness
+                and level_up_readiness.get("status") == "repairable"
+            )
+            can_use_xianxia_cultivation = bool(
+                can_manage_character
+                and advancement_lane == CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION
+                and is_xianxia_system(getattr(record.definition, "system", ""))
+            )
+            # Session mode for the legacy read-path is now a compatibility-only URL hint.
+            # Keep full-character reads in the read shell while preserving the requested page.
+            is_session_mode = False
+            character_read_mode_param = "session" if (requested_session_mode and can_use_session_mode) else None
+
+            confirm_rest = (
+                request.values.get("confirm_rest", "").strip().lower()
+                if requested_session_mode and can_use_session_mode
+                else ""
+            )
+            rest_preview = None
+            if confirm_rest in {"short", "long"}:
+                try:
+                    rest_preview = get_character_state_service().preview_rest(record, confirm_rest)
+                except ValueError as exc:
+                    flash(str(exc), "warning")
+
+            def present_selected_character():
+                nonlocal campaign_page_records
+                if source_phase_features_read and character_subpage == "features":
                     from copy import deepcopy
                     from .character_source_reads import native_character_source_context
                     proposed = None
-                    with native_character_source_context(
-                        record, systems_service=get_systems_service(), campaign=campaign,
-                        purpose="character-shell-read",
-                    ) as (phase, reader, _pages, _owner):
-                        if phase is not None:
-                            phase_campaign = phase.campaign()
-                            phase_pages = materialize_feature_phase_pages(
-                                phase, phase_campaign, section="shell",
-                            )
-                            proposed = deepcopy(build_dnd_character_read_shell_projection(
-                                phase_campaign, record, systems_service=reader,
-                                campaign_page_records=phase_pages,
-                            ))
+                    if not get_db().in_transaction and active():
+                        with native_character_source_context(
+                            record, systems_service=read_systems_service, campaign=campaign,
+                            purpose="character-section-read",
+                        ) as (phase, reader, _pages, _owner):
+                            if phase is not None:
+                                phase_campaign = phase.campaign()
+                                phase_pages = materialize_feature_phase_pages(
+                                    phase, phase_campaign, section=character_subpage,
+                                )
+                                proposed = deepcopy(present_dnd_character_section(
+                                    phase_campaign, record, section=character_subpage,
+                                    include_player_notes_section=not is_session_mode,
+                                    systems_service=reader, campaign_page_records=phase_pages,
+                                ))
                     if proposed is not None:
                         return proposed
-                with measure_character_read_component("page-records"):
-                    shell_campaign_page_records = materialize_dnd_character_read_page_records(
-                        get_campaign_page_store(),
-                        campaign_slug,
-                        visible_campaign_page_manifest,
-                        record.definition,
-                        record.state_record.state or {},
-                        section="shell",
-                        campaign=campaign,
-                    )
-                return build_dnd_character_read_shell_projection(
-                    campaign,
-                    record,
-                    systems_service=get_systems_service(),
-                    campaign_page_records=shell_campaign_page_records,
-                )
-
-            with measure_character_read_component("presentation"):
-                shell_projection = load_cached_character_read_projection(
-                    shell_projection_key,
-                    build_character_shell_projection,
-                )
-            include_spellcasting_subpage = bool(
-                dnd5e_spellcasting_tools_supported
-                and shell_projection.get("include_spellcasting")
-            )
-            available_character_subpages = get_character_read_subpage_labels(
-                include_spellcasting=include_spellcasting_subpage,
-                include_controls=include_controls_subpage,
-            )
-            character_subpage = normalize_character_read_subpage(
-                requested_character_subpage,
-                include_spellcasting=include_spellcasting_subpage,
-                include_controls=include_controls_subpage,
-            )
-            if not source_phase_features_read:
-                with measure_character_read_component("page-records"):
-                    campaign_page_records = materialize_dnd_character_read_page_records(
-                        get_campaign_page_store(),
-                        campaign_slug,
-                        shell_campaign_page_records or visible_campaign_page_manifest,
-                        record.definition,
-                        record.state_record.state or {},
+                    # A pre-dispatch decline retains the original unphased recipe.
+                    with measure_character_read_component("page-records"):
+                        fallback_shell_pages = shell_campaign_page_records
+                        if fallback_shell_pages is None:
+                            fallback_shell_pages = materialize_dnd_character_read_page_records(
+                                read_page_store, campaign_slug, visible_campaign_page_manifest,
+                                record.definition, record.state_record.state or {},
+                                section="shell", campaign=campaign,
+                            )
+                        campaign_page_records = materialize_dnd_character_read_page_records(
+                            read_page_store, campaign_slug,
+                            fallback_shell_pages or visible_campaign_page_manifest,
+                            record.definition, record.state_record.state or {},
+                            section=character_subpage, campaign=campaign,
+                        )
+                return (
+                    present_dnd_character_section(
+                        campaign,
+                        record,
                         section=character_subpage,
-                        campaign=campaign,
-                    )
-        shared_item_catalog: dict[str, object] | None = None
-        shared_spell_catalog: dict[str, object] | None = None
-        advancement_lane = character_advancement_lane(getattr(campaign, "system", ""))
-
-        def get_read_item_catalog() -> dict[str, object]:
-            nonlocal shared_item_catalog
-            if shared_item_catalog is None:
-                with measure_character_read_component("catalogs"):
-                    shared_item_catalog = build_character_item_catalog(
-                        campaign_slug,
+                        include_player_notes_section=not is_session_mode,
+                        systems_service=read_systems_service,
                         campaign_page_records=campaign_page_records,
                     )
-            return shared_item_catalog
-
-        def get_read_spell_catalog() -> dict[str, object]:
-            nonlocal shared_spell_catalog
-            if shared_spell_catalog is None:
-                with measure_character_read_component("catalogs"):
-                    shared_spell_catalog = _build_spell_catalog(
-                        _list_campaign_enabled_entries(
-                            app.extensions["systems_service"],
-                            campaign_slug,
-                            "spell",
-                        )
+                    if scoped_dnd_read
+                    else present_character_detail(
+                        campaign,
+                        record,
+                        include_player_notes_section=not is_session_mode,
+                        systems_service=read_systems_service,
+                        campaign_page_records=campaign_page_records,
                     )
-            return shared_spell_catalog
-
-        retraining_page_records = (
-            [
-                page_record
-                for page_record in visible_campaign_page_manifest
-            ]
-            if can_use_session_mode and native_character_tools_supported
-            else []
-        )
-        level_up_readiness = None
-        linked_feature_authoring: dict[str, object] = {
-            "supported": False,
-            "is_imported": False,
-            "message": "",
-        }
-        can_retrain = False
-        if can_use_session_mode and native_character_tools_supported:
-            header_projection_key = build_character_read_projection_cache_key(
-                "dnd-header-actions",
-                campaign_slug=campaign_slug,
-                record=record,
-                systems_service=get_systems_service(),
-                campaign_page_records=visible_campaign_page_manifest,
-                campaign_current_session=campaign.current_session,
-                effective_visibility=character_read_effective_visibility,
-            )
-
-            def build_character_header_projection() -> dict[str, object]:
-                readiness = native_level_up_readiness(
-                    get_systems_service(),
-                    campaign_slug,
-                    record.definition,
-                    campaign_page_records=builder_campaign_page_records,
                 )
-                linked_authoring = build_linked_feature_authoring_support(
-                    record.definition,
-                    readiness=readiness,
+            with measure_character_read_component("presentation"):
+                character = present_selected_character()
+            if scoped_dnd_read:
+                character.setdefault(
+                    "death_save_summary",
+                    shell_projection.get("death_save_summary"),
                 )
-                projected_can_retrain = False
-                if retraining_page_records and bool(linked_authoring.get("supported")):
-                    retraining_context = build_native_character_retraining_context(
-                        record.definition,
-                        campaign_page_records=retraining_page_records,
-                        optionalfeature_catalog={
-                            str(entry.slug or "").strip(): entry
-                            for entry in _list_campaign_enabled_entries(
-                                app.extensions["systems_service"],
-                                campaign_slug,
-                                "optionalfeature",
-                            )
-                            if str(entry.slug or "").strip()
-                        },
-                        spell_catalog=get_read_spell_catalog(),
-                    )
-                    projected_can_retrain = bool(retraining_context.get("feature_rows"))
-                return {
-                    "level_up_readiness": {
-                        "status": str(readiness.get("status") or "").strip(),
-                        "message": str(readiness.get("message") or "").strip(),
-                        "reasons": [
-                            str(reason or "").strip()
-                            for reason in list(readiness.get("reasons") or [])
-                            if str(reason or "").strip()
-                        ],
-                    },
-                    "linked_feature_authoring": {
-                        "supported": bool(linked_authoring.get("supported")),
-                        "is_imported": bool(linked_authoring.get("is_imported")),
-                        "message": str(linked_authoring.get("message") or "").strip(),
-                    },
-                    "can_retrain": projected_can_retrain,
-                }
-
-            with measure_character_read_component("readiness"):
-                header_projection = load_cached_character_read_projection(
-                    header_projection_key,
-                    build_character_header_projection,
+                character.setdefault(
+                    "divine_avatar_forms_state",
+                    dict(shell_projection.get("divine_avatar_forms_state") or {}),
                 )
-            level_up_readiness = dict(
-                header_projection.get("level_up_readiness") or {}
+            if notes_draft is not None:
+                character["player_notes_markdown"] = notes_draft
+            if physical_description_draft is not None:
+                character["physical_description_markdown"] = physical_description_draft
+            if background_draft is not None:
+                character["personal_background_markdown"] = background_draft
+            character["portrait"] = build_character_portrait_context(campaign, record.definition)
+            if not dnd5e_spellcasting_tools_supported:
+                character.pop("spellcasting", None)
+            xianxia_read_context = (
+                dict(character.get("xianxia_read") or {})
+                if isinstance(character.get("xianxia_read"), dict)
+                else None
             )
-            linked_feature_authoring = dict(
-                header_projection.get("linked_feature_authoring") or {}
-            )
-            can_retrain = bool(header_projection.get("can_retrain"))
-        can_level_up = bool(
-            can_use_session_mode
-            and level_up_readiness
-            and level_up_readiness.get("status") == "ready"
-        )
-        can_prepare_level_up = bool(
-            can_manage_character
-            and level_up_readiness
-            and level_up_readiness.get("status") == "repairable"
-        )
-        can_use_xianxia_cultivation = bool(
-            can_manage_character
-            and advancement_lane == CHARACTER_ADVANCEMENT_LANE_XIANXIA_CULTIVATION
-            and is_xianxia_system(getattr(record.definition, "system", ""))
-        )
-        # Session mode for the legacy read-path is now a compatibility-only URL hint.
-        # Keep full-character reads in the read shell while preserving the requested page.
-        is_session_mode = False
-        character_read_mode_param = "session" if (requested_session_mode and can_use_session_mode) else None
-
-        confirm_rest = (
-            request.values.get("confirm_rest", "").strip().lower()
-            if requested_session_mode and can_use_session_mode
-            else ""
-        )
-        rest_preview = None
-        if confirm_rest in {"short", "long"}:
-            try:
-                rest_preview = get_character_state_service().preview_rest(record, confirm_rest)
-            except ValueError as exc:
-                flash(str(exc), "warning")
-
-        def present_selected_character():
-            nonlocal campaign_page_records
-            if source_phase_features_read and character_subpage == "features":
-                from copy import deepcopy
-                from .character_source_reads import native_character_source_context
-                proposed = None
-                if not get_db().in_transaction and active():
-                    with native_character_source_context(
-                        record, systems_service=get_systems_service(), campaign=campaign,
-                        purpose="character-section-read",
-                    ) as (phase, reader, _pages, _owner):
-                        if phase is not None:
-                            phase_campaign = phase.campaign()
-                            phase_pages = materialize_feature_phase_pages(
-                                phase, phase_campaign, section=character_subpage,
-                            )
-                            proposed = deepcopy(present_dnd_character_section(
-                                phase_campaign, record, section=character_subpage,
-                                include_player_notes_section=not is_session_mode,
-                                systems_service=reader, campaign_page_records=phase_pages,
-                            ))
-                if proposed is not None:
-                    return proposed
-                # A pre-dispatch decline retains the original unphased recipe.
-                with measure_character_read_component("page-records"):
-                    fallback_shell_pages = shell_campaign_page_records
-                    if fallback_shell_pages is None:
-                        fallback_shell_pages = materialize_dnd_character_read_page_records(
-                            get_campaign_page_store(), campaign_slug, visible_campaign_page_manifest,
-                            record.definition, record.state_record.state or {},
-                            section="shell", campaign=campaign,
-                        )
-                    campaign_page_records = materialize_dnd_character_read_page_records(
-                        get_campaign_page_store(), campaign_slug,
-                        fallback_shell_pages or visible_campaign_page_manifest,
-                        record.definition, record.state_record.state or {},
-                        section=character_subpage, campaign=campaign,
-                    )
-            return (
-                present_dnd_character_section(
-                    campaign,
-                    record,
-                    section=character_subpage,
-                    include_player_notes_section=not is_session_mode,
-                    systems_service=get_systems_service(),
-                    campaign_page_records=campaign_page_records,
+            if not scoped_dnd_read:
+                has_feature_spell_manager = any(
+                    dict(feature or {}).get("spell_manager")
+                    for feature in list(record.definition.features or [])
                 )
-                if scoped_dnd_read
-                else present_character_detail(
-                    campaign,
-                    record,
-                    include_player_notes_section=not is_session_mode,
-                    systems_service=get_systems_service(),
-                    campaign_page_records=campaign_page_records,
+                include_spellcasting_subpage = bool(
+                    dnd5e_spellcasting_tools_supported
+                    and (character.get("spellcasting") or has_feature_spell_manager)
                 )
-            )
-        with measure_character_read_component("presentation"):
-            character = present_selected_character()
-        if scoped_dnd_read:
-            character.setdefault(
-                "death_save_summary",
-                shell_projection.get("death_save_summary"),
-            )
-            character.setdefault(
-                "divine_avatar_forms_state",
-                dict(shell_projection.get("divine_avatar_forms_state") or {}),
-            )
-        if notes_draft is not None:
-            character["player_notes_markdown"] = notes_draft
-        if physical_description_draft is not None:
-            character["physical_description_markdown"] = physical_description_draft
-        if background_draft is not None:
-            character["personal_background_markdown"] = background_draft
-        character["portrait"] = build_character_portrait_context(campaign, record.definition)
-        if not dnd5e_spellcasting_tools_supported:
-            character.pop("spellcasting", None)
-        xianxia_read_context = (
-            dict(character.get("xianxia_read") or {})
-            if isinstance(character.get("xianxia_read"), dict)
-            else None
-        )
-        if not scoped_dnd_read:
-            has_feature_spell_manager = any(
-                dict(feature or {}).get("spell_manager")
-                for feature in list(record.definition.features or [])
-            )
-            include_spellcasting_subpage = bool(
-                dnd5e_spellcasting_tools_supported
-                and (character.get("spellcasting") or has_feature_spell_manager)
-            )
-            available_character_subpages = get_character_read_subpage_labels(
-                include_spellcasting=include_spellcasting_subpage,
-                include_controls=include_controls_subpage,
-                xianxia_read=xianxia_read_context,
-            )
-            character_subpage = normalize_character_read_subpage(
-                requested_character_subpage,
-                include_spellcasting=include_spellcasting_subpage,
-                include_controls=include_controls_subpage,
-                xianxia_read=xianxia_read_context,
-            )
-        spell_manager = None
-        if dnd5e_spellcasting_tools_supported and character_subpage == "spellcasting":
-            spell_catalog = get_read_spell_catalog()
-            with measure_character_read_component("managers"):
-                spell_manager = build_character_spell_manager_context(
-                    campaign_slug,
-                    campaign,
-                    record,
-                    spell_catalog=spell_catalog,
-                )
-            if not character.get("spellcasting") and spell_manager is not None:
-                spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
-                if spellcasting_placeholder is not None:
-                    character["spellcasting"] = spellcasting_placeholder
-
-        character_controls = None
-        if include_controls_subpage and character_subpage == "controls":
-            with measure_character_read_component("managers"):
-                character_controls = build_character_controls_context(
-                    campaign_slug,
-                    character_slug,
-                )
-            from .committed_publication import active
-            if character_controls["can_delete_character"] and active():
-                character_controls["delete_committed_revision"] = record.committed_revision
-                character_controls["delete_state_revision"] = record.state_record.revision
-        item_catalog = (
-            get_read_item_catalog()
-            if not xianxia_read_context
-            and character_subpage in {"inventory", "equipment"}
-            else None
-        )
-        inventory_manager = None
-        if (
-            can_use_session_mode
-            and not xianxia_read_context
-            and character_subpage == "inventory"
-        ):
-            with measure_character_read_component("managers"):
-                inventory_manager = build_character_inventory_manager_context(
-                    campaign_slug,
-                    campaign,
-                    record,
-                    campaign_page_records=campaign_page_records,
-                    item_catalog=item_catalog,
-                )
-        equipment_state_manager = None
-        if not xianxia_read_context and character_subpage == "equipment":
-            with measure_character_read_component("managers"):
-                equipment_state_manager = build_character_equipment_state_context(
-                    campaign_slug,
-                    campaign,
-                    record,
-                    item_catalog=item_catalog,
-                    campaign_page_records=campaign_page_records,
-                )
-        character_subpages = [
-            {
-                "slug": slug,
-                "label": label,
-                "href": url_for(
-                    "character_read_view",
-                    campaign_slug=campaign.slug,
-                    character_slug=character["slug"],
-                    mode=character_read_mode_param,
-                    page=slug,
-                ),
-                "is_active": slug == character_subpage,
-            }
-            for slug, label in available_character_subpages.items()
-        ]
-        character_session_surface_href = ""
-        if (
-            is_session_mode
-            and get_campaign_session_service().get_active_session(campaign_slug) is not None
-            and can_access_session_character_surface(campaign_slug, character_slug)
-        ):
-            session_character_page = (
-                normalize_session_character_subpage(
-                    character_subpage,
+                available_character_subpages = get_character_read_subpage_labels(
+                    include_spellcasting=include_spellcasting_subpage,
+                    include_controls=include_controls_subpage,
                     xianxia_read=xianxia_read_context,
                 )
-                if xianxia_read_context
-                else CHARACTER_READ_TO_SESSION_CHARACTER_PAGE_MAP.get(
-                    character_subpage,
-                    "overview",
+                character_subpage = normalize_character_read_subpage(
+                    requested_character_subpage,
+                    include_spellcasting=include_spellcasting_subpage,
+                    include_controls=include_controls_subpage,
+                    xianxia_read=xianxia_read_context,
                 )
-            )
-            character_session_surface_href = url_for(
-                "campaign_session_character_view",
-                campaign_slug=campaign.slug,
-                character=character_slug,
-                page=session_character_page,
-            )
-        character_combat_surface_href = ""
-        character_combat_surface_action_label = ""
-        if is_session_mode and can_access_campaign_scope(campaign_slug, "combat"):
-            tracked_combatant = find_tracked_player_combatant_for_character(
-                campaign_slug,
-                character_slug,
-                campaign=campaign,
-            )
-            if tracked_combatant is not None:
-                if can_manage_campaign_combat(campaign_slug):
-                    character_combat_surface_action_label = "Open encounter status"
-                    character_combat_surface_href = url_for(
-                        "campaign_combat_dm_view",
-                        campaign_slug=campaign.slug,
-                        combatant=tracked_combatant.id,
+            spell_manager = None
+            if dnd5e_spellcasting_tools_supported and character_subpage == "spellcasting":
+                spell_catalog = get_read_spell_catalog()
+                with measure_character_read_component("managers"):
+                    spell_manager = build_character_spell_manager_context(
+                        campaign_slug,
+                        campaign,
+                        record,
+                        spell_catalog=spell_catalog,
                     )
-                elif character_slug in get_owned_character_slugs(campaign_slug):
-                    character_combat_surface_action_label = "Open Combat"
-                    character_combat_surface_href = url_for(
-                        "campaign_combat_view",
-                        campaign_slug=campaign.slug,
-                        combatant=tracked_combatant.id,
-                    )
+                if not character.get("spellcasting") and spell_manager is not None:
+                    spellcasting_placeholder = build_character_spellcasting_placeholder(spell_manager)
+                    if spellcasting_placeholder is not None:
+                        character["spellcasting"] = spellcasting_placeholder
 
-        with measure_character_read_component("template"):
-            rendered_character_page = render_template(
-                "character_read.html",
-                campaign=campaign,
-                character=character,
-                character_subpage=character_subpage,
-                character_subpages=character_subpages,
-                active_nav="characters",
-                can_use_session_mode=can_use_session_mode,
-                native_character_tools_supported=native_character_tools_supported,
-                can_preview_character_update=bool(
-                    can_manage_character and scoped_dnd_read
-                ),
-                can_repair_equipment_activation=bool(
-                    scoped_dnd_read and can_manage_campaign_content(campaign_slug)
-                ),
-                can_level_up=can_level_up,
-                can_prepare_level_up=can_prepare_level_up,
-                can_use_xianxia_cultivation=can_use_xianxia_cultivation,
-                can_retrain=can_retrain,
-                level_up_readiness=level_up_readiness,
-                linked_feature_authoring_message=(
-                    str(linked_feature_authoring.get("message") or "").strip()
-                    if can_use_session_mode and not bool(linked_feature_authoring.get("supported"))
-                    else ""
-                ),
-                is_session_mode=is_session_mode,
-                character_session_surface_href=character_session_surface_href,
-                character_combat_surface_href=character_combat_surface_href,
-                character_combat_surface_action_label=character_combat_surface_action_label,
-                rest_preview=rest_preview,
-                character_controls=character_controls,
-                inventory_manager=inventory_manager,
-                equipment_state_manager=equipment_state_manager,
-                spell_manager=spell_manager,
+            character_controls = None
+            if include_controls_subpage and character_subpage == "controls":
+                with measure_character_read_component("managers"):
+                    character_controls = build_character_controls_context(
+                        campaign_slug,
+                        character_slug,
+                    )
+                from .committed_publication import active
+                if character_controls["can_delete_character"] and active():
+                    character_controls["delete_committed_revision"] = record.committed_revision
+                    character_controls["delete_state_revision"] = record.state_record.revision
+            item_catalog = (
+                get_read_item_catalog()
+                if not xianxia_read_context
+                and character_subpage in {"inventory", "equipment"}
+                else None
             )
-        return rendered_character_page, status_code
+            inventory_manager = None
+            if (
+                can_use_session_mode
+                and not xianxia_read_context
+                and character_subpage == "inventory"
+            ):
+                with measure_character_read_component("managers"):
+                    inventory_manager = build_character_inventory_manager_context(
+                        campaign_slug,
+                        campaign,
+                        record,
+                        campaign_page_records=campaign_page_records,
+                        item_catalog=item_catalog,
+                    )
+            equipment_state_manager = None
+            if not xianxia_read_context and character_subpage == "equipment":
+                with measure_character_read_component("managers"):
+                    equipment_state_manager = build_character_equipment_state_context(
+                        campaign_slug,
+                        campaign,
+                        record,
+                        item_catalog=item_catalog,
+                        campaign_page_records=campaign_page_records,
+                    )
+            character_subpages = [
+                {
+                    "slug": slug,
+                    "label": label,
+                    "href": url_for(
+                        "character_read_view",
+                        campaign_slug=campaign.slug,
+                        character_slug=character["slug"],
+                        mode=character_read_mode_param,
+                        page=slug,
+                    ),
+                    "is_active": slug == character_subpage,
+                }
+                for slug, label in available_character_subpages.items()
+            ]
+            character_session_surface_href = ""
+            if (
+                is_session_mode
+                and get_campaign_session_service().get_active_session(campaign_slug) is not None
+                and can_access_session_character_surface(campaign_slug, character_slug)
+            ):
+                session_character_page = (
+                    normalize_session_character_subpage(
+                        character_subpage,
+                        xianxia_read=xianxia_read_context,
+                    )
+                    if xianxia_read_context
+                    else CHARACTER_READ_TO_SESSION_CHARACTER_PAGE_MAP.get(
+                        character_subpage,
+                        "overview",
+                    )
+                )
+                character_session_surface_href = url_for(
+                    "campaign_session_character_view",
+                    campaign_slug=campaign.slug,
+                    character=character_slug,
+                    page=session_character_page,
+                )
+            character_combat_surface_href = ""
+            character_combat_surface_action_label = ""
+            if is_session_mode and can_access_campaign_scope(campaign_slug, "combat"):
+                tracked_combatant = find_tracked_player_combatant_for_character(
+                    campaign_slug,
+                    character_slug,
+                    campaign=campaign,
+                )
+                if tracked_combatant is not None:
+                    if can_manage_campaign_combat(campaign_slug):
+                        character_combat_surface_action_label = "Open encounter status"
+                        character_combat_surface_href = url_for(
+                            "campaign_combat_dm_view",
+                            campaign_slug=campaign.slug,
+                            combatant=tracked_combatant.id,
+                        )
+                    elif character_slug in get_owned_character_slugs(campaign_slug):
+                        character_combat_surface_action_label = "Open Combat"
+                        character_combat_surface_href = url_for(
+                            "campaign_combat_view",
+                            campaign_slug=campaign.slug,
+                            combatant=tracked_combatant.id,
+                        )
+
+            with measure_character_read_component("template"):
+                rendered_character_page = render_template(
+                    "character_read.html",
+                    campaign=campaign,
+                    character=character,
+                    character_subpage=character_subpage,
+                    character_subpages=character_subpages,
+                    active_nav="characters",
+                    can_use_session_mode=can_use_session_mode,
+                    native_character_tools_supported=native_character_tools_supported,
+                    can_preview_character_update=bool(
+                        can_manage_character and scoped_dnd_read
+                    ),
+                    can_repair_equipment_activation=bool(
+                        scoped_dnd_read and can_manage_campaign_content(campaign_slug)
+                    ),
+                    can_level_up=can_level_up,
+                    can_prepare_level_up=can_prepare_level_up,
+                    can_use_xianxia_cultivation=can_use_xianxia_cultivation,
+                    can_retrain=can_retrain,
+                    level_up_readiness=level_up_readiness,
+                    linked_feature_authoring_message=(
+                        str(linked_feature_authoring.get("message") or "").strip()
+                        if can_use_session_mode and not bool(linked_feature_authoring.get("supported"))
+                        else ""
+                    ),
+                    is_session_mode=is_session_mode,
+                    character_session_surface_href=character_session_surface_href,
+                    character_combat_surface_href=character_combat_surface_href,
+                    character_combat_surface_action_label=character_combat_surface_action_label,
+                    rest_preview=rest_preview,
+                    character_controls=character_controls,
+                    inventory_manager=inventory_manager,
+                    equipment_state_manager=equipment_state_manager,
+                    spell_manager=spell_manager,
+                )
+            return rendered_character_page, status_code
 
     def run_character_definition_mutation(
         campaign_slug: str,
@@ -6905,279 +6915,194 @@ def create_app() -> Flask:
 
         if selected_character_slug:
             record = accessible_records_by_slug[selected_character_slug]
-            session_character_item_catalog: dict[str, object] | None = None
+            with selected_character_read_context(
+                record, campaign=campaign, systems_service=character_systems_service,
+                page_store=get_campaign_page_store(),
+                enabled=(is_dnd_5e_system(getattr(campaign, "system", ""))
+                    and is_dnd_5e_system(getattr(record.definition, "system", ""))
+                    and request.method in {"GET", "HEAD"} and notes_draft is None
+                    and physical_description_draft is None and background_draft is None
+                    and str(requested_confirm_rest if requested_confirm_rest is not None
+                            else request.args.get("confirm_rest", "")).strip().lower()
+                        not in {"short", "long"}),
+            ) as (character_systems_service, character_page_store):
+                session_character_item_catalog: dict[str, object] | None = None
 
-            def get_session_character_item_catalog() -> dict[str, object]:
-                nonlocal session_character_item_catalog
-                if session_character_item_catalog is None:
-                    session_character_item_catalog = _build_targeted_item_support_catalog(
-                        list(record.definition.equipment_catalog or []),
-                        campaign_slug=campaign_slug,
-                        systems_service=character_systems_service,
-                        campaign_page_records=character_campaign_page_manifest,
-                        include_inactive=True,
-                    )
-                return session_character_item_catalog
-
-            session_character_editing_enabled = bool(
-                active_session_record is not None
-                and (
-                    can_manage_session
-                    or (
-                        campaign_role == "player"
-                        and selected_character_slug in owned_character_slugs
-                    )
-                )
-            )
-            scoped_dnd_session_character = bool(
-                is_dnd_5e_system(getattr(campaign, "system", ""))
-                and is_dnd_5e_system(getattr(record.definition, "system", ""))
-            )
-            character_projection_identity: object = ()
-            xianxia_read_context: dict[str, object] | None = None
-
-            if scoped_dnd_session_character:
-                character_read_effective_visibility = {
-                    scope: get_effective_campaign_visibility(campaign_slug, scope)
-                    for scope in ("campaign", "characters", "wiki", "systems")
-                }
-                with measure_character_read_component("page-records"):
-                    character_campaign_page_manifest = list_visible_character_page_records_for_store(
-                        get_campaign_page_store(), campaign_slug, campaign,
-                        include_body=False, excluded_sections={"Sessions"},
-                    )
-                character_projection_key = build_character_read_projection_cache_key(
-                    "dnd-session-character-shell",
-                    campaign_slug=campaign_slug,
-                    record=record,
-                    systems_service=character_systems_service,
-                    campaign_page_records=character_campaign_page_manifest,
-                    campaign_current_session=campaign.current_session,
-                    effective_visibility=character_read_effective_visibility,
-                )
-
-                def build_session_character_shell_projection() -> dict[str, object]:
-                    shell_projection = build_dnd_character_read_shell_projection(
-                        campaign,
-                        record,
-                        systems_service=character_systems_service,
-                        campaign_page_records=character_campaign_page_manifest,
-                    )
-                    section_counts = present_dnd_character_section_counts(
-                        campaign,
-                        record,
-                        systems_service=character_systems_service,
-                        campaign_page_records=character_campaign_page_manifest,
-                    )
-                    equipment_support_catalog = get_session_character_item_catalog()
-                    _, lightweight_equipment_support = build_record_equipment_support_lookup(
-                        record,
-                        item_catalog=equipment_support_catalog,
-                        systems_service=character_systems_service,
-                        campaign_page_records=character_campaign_page_manifest,
-                    )
-                    return {
-                        **shell_projection,
-                        "section_counts": section_counts,
-                        "equipment_state_row_count": sum(
-                            1
-                            for support in lightweight_equipment_support.values()
-                            if bool(dict(support or {}).get("supports_equipped_state"))
-                        ),
-                    }
-
-                with measure_character_read_component("presentation"):
-                    session_shell_projection = load_cached_character_read_projection(
-                        character_projection_key,
-                        build_session_character_shell_projection,
-                    )
-                include_spellcasting_subpage = bool(
-                    dnd5e_spellcasting_tools_supported
-                    and session_shell_projection.get("include_spellcasting")
-                )
-                character_subpage = normalize_session_character_subpage(
-                    requested_subpage
-                    if requested_subpage is not None
-                    else request.args.get("page", ""),
-                    include_spellcasting=include_spellcasting_subpage,
-                )
-                with measure_character_read_component("page-records"):
-                    character_campaign_page_records = materialize_dnd_character_read_page_records(
-                        get_campaign_page_store(),
-                        campaign_slug,
-                        character_campaign_page_manifest,
-                        record.definition,
-                        record.state_record.state or {},
-                        section=character_subpage,
-                        campaign=campaign,
-                    )
-                if (
-                    character_subpage != "notes"
-                    or session_character_item_catalog is not None
-                ):
-                    targeted_item_catalog = get_session_character_item_catalog()
-                    character_systems_service.set_enabled_entry_subset_for_request(
-                        campaign_slug,
-                        entry_type="item",
-                        entries=list(targeted_item_catalog.get("entries") or []),
-                        source_generation=targeted_item_catalog.get("systems_source_generation"),
-                    )
-                with measure_character_read_component("presentation"):
-                    character = present_dnd_character_section(
-                        campaign,
-                        record,
-                        section=character_subpage,
-                        include_player_notes_section=True,
-                        systems_service=character_systems_service,
-                        campaign_page_records=character_campaign_page_records,
-                    )
-                character.setdefault(
-                    "death_save_summary",
-                    session_shell_projection.get("death_save_summary"),
-                )
-                character.setdefault(
-                    "divine_avatar_forms_state",
-                    dict(session_shell_projection.get("divine_avatar_forms_state") or {}),
-                )
-
-                character_item_catalog: dict[str, object] | None = None
-                if character_subpage == "equipment":
-                    with measure_character_read_component("catalogs"):
-                        character_item_catalog = build_session_character_equipment_manager_catalog(
-                            campaign_slug,
-                            record,
+                def get_session_character_item_catalog() -> dict[str, object]:
+                    nonlocal session_character_item_catalog
+                    if session_character_item_catalog is None:
+                        session_character_item_catalog = _build_targeted_item_support_catalog(
+                            list(record.definition.equipment_catalog or []),
+                            campaign_slug=campaign_slug,
+                            systems_service=character_systems_service,
                             campaign_page_records=character_campaign_page_manifest,
-                            item_catalog=get_session_character_item_catalog(),
+                            include_inactive=True,
                         )
-                if character_subpage == "spells" and dnd5e_spellcasting_tools_supported:
-                    with measure_character_read_component("catalogs"):
-                        character_spell_catalog = build_session_character_spell_manager_catalog(
-                            campaign_slug,
-                            record,
-                            campaign=campaign,
-                            systems_service=character_systems_service,
-                        )
-                    with measure_character_read_component("managers"):
-                        spell_manager = build_character_spell_manager_context(
-                            campaign_slug,
-                            campaign,
-                            record,
-                            spell_catalog=character_spell_catalog,
-                            systems_service=character_systems_service,
-                        )
-                    if not character.get("spellcasting") and spell_manager is not None:
-                        spellcasting_placeholder = build_character_spellcasting_placeholder(
-                            spell_manager
-                        )
-                        if spellcasting_placeholder is not None:
-                            character["spellcasting"] = spellcasting_placeholder
-                if character_subpage == "equipment":
-                    with measure_character_read_component("managers"):
-                        equipment_state_manager = build_character_equipment_state_context(
-                            campaign_slug,
-                            campaign,
-                            record,
-                            item_catalog=character_item_catalog,
-                            campaign_page_records=character_campaign_page_records,
-                            systems_service=character_systems_service,
-                        )
+                    return session_character_item_catalog
 
-                character_subpages = [
-                    {
-                        "slug": str(section.get("slug") or ""),
-                        "label": str(section.get("label") or ""),
-                        "count": int(section.get("count") or 0),
-                        "href": url_for(
-                            "campaign_session_character_view",
-                            campaign_slug=campaign.slug,
-                            character=selected_character_slug,
-                            page=section.get("slug"),
-                        ),
-                        "is_active": str(section.get("slug") or "") == character_subpage,
-                    }
-                    for section in build_dnd_session_section_navigation(
-                        dict(session_shell_projection.get("section_counts") or {}),
-                        equipment_state_row_count=int(
-                            session_shell_projection.get("equipment_state_row_count") or 0
-                        ),
-                        include_spellcasting=include_spellcasting_subpage,
-                        session_character_subpage_labels=get_session_character_subpage_labels(
-                            include_spellcasting=include_spellcasting_subpage,
-                        ),
-                        portrait=build_character_portrait_context(
-                            campaign,
-                            record.definition,
-                        ),
-                    )
-                ]
-                character_projection_identity = character_projection_key or (
-                    selected_character_slug,
-                    int(record.state_record.revision or 0),
-                    int(campaign.current_session or 0),
-                    tuple(
-                        (
-                            str(getattr(page_record, "page_ref", "") or ""),
-                            str(getattr(page_record, "updated_at", "") or ""),
+                session_character_editing_enabled = bool(
+                    active_session_record is not None
+                    and (
+                        can_manage_session
+                        or (
+                            campaign_role == "player"
+                            and selected_character_slug in owned_character_slugs
                         )
-                        for page_record in character_campaign_page_manifest
-                    ),
+                    )
                 )
-            else:
-                with measure_character_read_component("page-records"):
-                    character_campaign_page_records = list_visible_character_page_records(
-                        campaign_slug,
-                        campaign,
-                    )
-                with measure_character_read_component("catalogs"):
-                    character_spell_catalog = (
-                        _build_spell_catalog(
-                            _list_campaign_enabled_entries(
-                                app.extensions["systems_service"],
-                                campaign_slug,
-                                "spell",
-                            )
+                scoped_dnd_session_character = bool(
+                    is_dnd_5e_system(getattr(campaign, "system", ""))
+                    and is_dnd_5e_system(getattr(record.definition, "system", ""))
+                )
+                character_projection_identity: object = ()
+                xianxia_read_context: dict[str, object] | None = None
+
+                if scoped_dnd_session_character:
+                    character_read_effective_visibility = {
+                        scope: get_effective_campaign_visibility(campaign_slug, scope)
+                        for scope in ("campaign", "characters", "wiki", "systems")
+                    }
+                    with measure_character_read_component("page-records"):
+                        character_campaign_page_manifest = list_visible_character_page_records_for_store(
+                            character_page_store, campaign_slug, campaign,
+                            include_body=False, excluded_sections={"Sessions"},
                         )
-                        if dnd5e_spellcasting_tools_supported
-                        else {}
-                    )
-                with measure_character_read_component("presentation"):
-                    character = present_character_detail(
-                        campaign,
-                        record,
-                        include_player_notes_section=True,
+                    character_projection_key = build_character_read_projection_cache_key(
+                        "dnd-session-character-shell",
+                        campaign_slug=campaign_slug,
+                        record=record,
                         systems_service=character_systems_service,
-                        campaign_page_records=character_campaign_page_records,
+                        campaign_page_records=character_campaign_page_manifest,
+                        campaign_current_session=campaign.current_session,
+                        effective_visibility=character_read_effective_visibility,
                     )
-                if dnd5e_spellcasting_tools_supported:
-                    with measure_character_read_component("managers"):
-                        spell_manager = build_character_spell_manager_context(
-                            campaign_slug,
+
+                    def build_session_character_shell_projection() -> dict[str, object]:
+                        shell_projection = build_dnd_character_read_shell_projection(
                             campaign,
                             record,
-                            spell_catalog=character_spell_catalog,
+                            systems_service=character_systems_service,
+                            campaign_page_records=character_campaign_page_manifest,
                         )
-                    if not character.get("spellcasting") and spell_manager is not None:
-                        spellcasting_placeholder = build_character_spellcasting_placeholder(
-                            spell_manager
+                        section_counts = present_dnd_character_section_counts(
+                            campaign,
+                            record,
+                            systems_service=character_systems_service,
+                            campaign_page_records=character_campaign_page_manifest,
                         )
-                        if spellcasting_placeholder is not None:
-                            character["spellcasting"] = spellcasting_placeholder
-                else:
-                    character.pop("spellcasting", None)
-                include_spellcasting_subpage = bool(character.get("spellcasting"))
-                xianxia_read_context = (
-                    dict(character.get("xianxia_read") or {})
-                    if isinstance(character.get("xianxia_read"), dict)
-                    else None
-                )
-                character_subpage = normalize_session_character_subpage(
-                    requested_subpage
-                    if requested_subpage is not None
-                    else request.args.get("page", ""),
-                    include_spellcasting=include_spellcasting_subpage,
-                    xianxia_read=xianxia_read_context,
-                )
-                with measure_character_read_component("managers"):
+                        equipment_support_catalog = get_session_character_item_catalog()
+                        _, lightweight_equipment_support = build_record_equipment_support_lookup(
+                            record,
+                            item_catalog=equipment_support_catalog,
+                            systems_service=character_systems_service,
+                            campaign_page_records=character_campaign_page_manifest,
+                        )
+                        return {
+                            **shell_projection,
+                            "section_counts": section_counts,
+                            "equipment_state_row_count": sum(
+                                1
+                                for support in lightweight_equipment_support.values()
+                                if bool(dict(support or {}).get("supports_equipped_state"))
+                            ),
+                        }
+
+                    with measure_character_read_component("presentation"):
+                        session_shell_projection = load_cached_character_read_projection(
+                            character_projection_key,
+                            build_session_character_shell_projection,
+                        )
+                    include_spellcasting_subpage = bool(
+                        dnd5e_spellcasting_tools_supported
+                        and session_shell_projection.get("include_spellcasting")
+                    )
+                    character_subpage = normalize_session_character_subpage(
+                        requested_subpage
+                        if requested_subpage is not None
+                        else request.args.get("page", ""),
+                        include_spellcasting=include_spellcasting_subpage,
+                    )
+                    with measure_character_read_component("page-records"):
+                        character_campaign_page_records = materialize_dnd_character_read_page_records(
+                            character_page_store,
+                            campaign_slug,
+                            character_campaign_page_manifest,
+                            record.definition,
+                            record.state_record.state or {},
+                            section=character_subpage,
+                            campaign=campaign,
+                        )
+                    if (
+                        character_subpage != "notes"
+                        or session_character_item_catalog is not None
+                    ):
+                        targeted_item_catalog = get_session_character_item_catalog()
+                        character_systems_service.set_enabled_entry_subset_for_request(
+                            campaign_slug,
+                            entry_type="item",
+                            entries=list(targeted_item_catalog.get("entries") or []),
+                            source_generation=targeted_item_catalog.get("systems_source_generation"),
+                        )
+                    with measure_character_read_component("presentation"):
+                        character = present_dnd_character_section(
+                            campaign,
+                            record,
+                            section=character_subpage,
+                            include_player_notes_section=True,
+                            systems_service=character_systems_service,
+                            campaign_page_records=character_campaign_page_records,
+                        )
+                    character.setdefault(
+                        "death_save_summary",
+                        session_shell_projection.get("death_save_summary"),
+                    )
+                    character.setdefault(
+                        "divine_avatar_forms_state",
+                        dict(session_shell_projection.get("divine_avatar_forms_state") or {}),
+                    )
+
+                    character_item_catalog: dict[str, object] | None = None
+                    if character_subpage == "equipment":
+                        with measure_character_read_component("catalogs"):
+                            character_item_catalog = build_session_character_equipment_manager_catalog(
+                                campaign_slug,
+                                record,
+                                campaign_page_records=character_campaign_page_manifest,
+                                item_catalog=get_session_character_item_catalog(),
+                            )
+                    if character_subpage == "spells" and dnd5e_spellcasting_tools_supported:
+                        with measure_character_read_component("catalogs"):
+                            character_spell_catalog = build_session_character_spell_manager_catalog(
+                                campaign_slug,
+                                record,
+                                campaign=campaign,
+                                systems_service=character_systems_service,
+                            )
+                        with measure_character_read_component("managers"):
+                            spell_manager = build_character_spell_manager_context(
+                                campaign_slug,
+                                campaign,
+                                record,
+                                spell_catalog=character_spell_catalog,
+                                systems_service=character_systems_service,
+                            )
+                        if not character.get("spellcasting") and spell_manager is not None:
+                            spellcasting_placeholder = build_character_spellcasting_placeholder(
+                                spell_manager
+                            )
+                            if spellcasting_placeholder is not None:
+                                character["spellcasting"] = spellcasting_placeholder
+                    if character_subpage == "equipment":
+                        with measure_character_read_component("managers"):
+                            equipment_state_manager = build_character_equipment_state_context(
+                                campaign_slug,
+                                campaign,
+                                record,
+                                item_catalog=character_item_catalog,
+                                campaign_page_records=character_campaign_page_records,
+                                systems_service=character_systems_service,
+                            )
+
                     character_subpages = [
                         {
                             "slug": str(section.get("slug") or ""),
@@ -7189,135 +7114,232 @@ def create_app() -> Flask:
                                 character=selected_character_slug,
                                 page=section.get("slug"),
                             ),
-                            "is_active": str(section.get("slug") or "")
-                            == character_subpage,
+                            "is_active": str(section.get("slug") or "") == character_subpage,
                         }
-                        for section in build_session_character_sections(
-                            character,
-                            equipment_state_manager=equipment_state_manager,
+                        for section in build_dnd_session_section_navigation(
+                            dict(session_shell_projection.get("section_counts") or {}),
+                            equipment_state_row_count=int(
+                                session_shell_projection.get("equipment_state_row_count") or 0
+                            ),
                             include_spellcasting=include_spellcasting_subpage,
                             session_character_subpage_labels=get_session_character_subpage_labels(
                                 include_spellcasting=include_spellcasting_subpage,
-                                xianxia_read=xianxia_read_context,
+                            ),
+                            portrait=build_character_portrait_context(
+                                campaign,
+                                record.definition,
                             ),
                         )
                     ]
-                character_projection_identity = (
-                    selected_character_slug,
-                    int(record.state_record.revision or 0),
-                    int(campaign.current_session or 0),
-                    tuple(
-                        (
-                            str(getattr(page_record, "page_ref", "") or ""),
-                            str(getattr(page_record, "updated_at", "") or ""),
-                        )
-                        for page_record in character_campaign_page_records
-                    ),
-                )
-
-            if notes_draft is not None:
-                character["player_notes_markdown"] = notes_draft
-            if physical_description_draft is not None:
-                character["physical_description_markdown"] = physical_description_draft
-            if background_draft is not None:
-                character["personal_background_markdown"] = background_draft
-            character["portrait"] = build_character_portrait_context(campaign, record.definition)
-            confirm_rest = (
-                str(requested_confirm_rest).strip().lower()
-                if requested_confirm_rest is not None
-                else request.args.get("confirm_rest", "").strip().lower()
-            )
-            if session_character_editing_enabled and confirm_rest in {"short", "long"}:
-                try:
-                    rest_preview = get_character_state_service().preview_rest(record, confirm_rest)
-                except ValueError as exc:
-                    flash(str(exc), "warning")
-            can_view_full_character_sheet = bool(
-                selected_character_slug and (
-                    can_access_campaign_scope(campaign_slug, "characters")
-                    or can_access_own_character(campaign_slug, selected_character_slug)
-                )
-            )
-            full_character_sheet_url = (
-                build_session_character_read_view_url(
-                    campaign.slug,
-                    selected_character_slug,
-                    character_subpage,
-                    xianxia_read=xianxia_read_context,
-                )
-                if can_view_full_character_sheet
-                else ""
-            )
-            session_surface_return_url = url_for(
-                "campaign_session_character_view",
-                campaign_slug=campaign.slug,
-                character=selected_character_slug,
-                page=character_subpage,
-            )
-            session_surface_short_rest_url = url_for(
-                "campaign_session_character_view",
-                campaign_slug=campaign.slug,
-                character=selected_character_slug,
-                page=character_subpage,
-                confirm_rest="short",
-            )
-            session_surface_long_rest_url = url_for(
-                "campaign_session_character_view",
-                campaign_slug=campaign.slug,
-                character=selected_character_slug,
-                page=character_subpage,
-                confirm_rest="long",
-            )
-            if session_character_editing_enabled:
-                if native_character_tools_supported:
-                    session_personal_edit_block_message = (
-                        SESSION_CHARACTER_ADVANCED_PERSONAL_EDIT_BLOCK_MESSAGE
+                    character_projection_identity = character_projection_key or (
+                        selected_character_slug,
+                        int(record.state_record.revision or 0),
+                        int(campaign.current_session or 0),
+                        tuple(
+                            (
+                                str(getattr(page_record, "page_ref", "") or ""),
+                                str(getattr(page_record, "updated_at", "") or ""),
+                            )
+                            for page_record in character_campaign_page_manifest
+                        ),
                     )
-                    session_personal_edit_block_href = url_for(
-                        "character_edit_view",
-                        campaign_slug=campaign.slug,
-                        character_slug=selected_character_slug,
-                    )
-                    session_personal_edit_block_action_label = "Open Advanced Editor"
                 else:
-                    session_personal_edit_block_message = SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE
-                    session_personal_edit_block_href = (
-                        build_session_character_read_view_url(
-                            campaign.slug,
-                            selected_character_slug,
-                            "personal",
-                            xianxia_read=xianxia_read_context,
+                    with measure_character_read_component("page-records"):
+                        character_campaign_page_records = list_visible_character_page_records(
+                            campaign_slug,
+                            campaign,
                         )
-                        if can_view_full_character_sheet
-                        else ""
+                    with measure_character_read_component("catalogs"):
+                        character_spell_catalog = (
+                            _build_spell_catalog(
+                                _list_campaign_enabled_entries(
+                                    app.extensions["systems_service"],
+                                    campaign_slug,
+                                    "spell",
+                                )
+                            )
+                            if dnd5e_spellcasting_tools_supported
+                            else {}
+                        )
+                    with measure_character_read_component("presentation"):
+                        character = present_character_detail(
+                            campaign,
+                            record,
+                            include_player_notes_section=True,
+                            systems_service=character_systems_service,
+                            campaign_page_records=character_campaign_page_records,
+                        )
+                    if dnd5e_spellcasting_tools_supported:
+                        with measure_character_read_component("managers"):
+                            spell_manager = build_character_spell_manager_context(
+                                campaign_slug,
+                                campaign,
+                                record,
+                                spell_catalog=character_spell_catalog,
+                            )
+                        if not character.get("spellcasting") and spell_manager is not None:
+                            spellcasting_placeholder = build_character_spellcasting_placeholder(
+                                spell_manager
+                            )
+                            if spellcasting_placeholder is not None:
+                                character["spellcasting"] = spellcasting_placeholder
+                    else:
+                        character.pop("spellcasting", None)
+                    include_spellcasting_subpage = bool(character.get("spellcasting"))
+                    xianxia_read_context = (
+                        dict(character.get("xianxia_read") or {})
+                        if isinstance(character.get("xianxia_read"), dict)
+                        else None
                     )
-                    session_personal_edit_block_action_label = "Open full character page"
+                    character_subpage = normalize_session_character_subpage(
+                        requested_subpage
+                        if requested_subpage is not None
+                        else request.args.get("page", ""),
+                        include_spellcasting=include_spellcasting_subpage,
+                        xianxia_read=xianxia_read_context,
+                    )
+                    with measure_character_read_component("managers"):
+                        character_subpages = [
+                            {
+                                "slug": str(section.get("slug") or ""),
+                                "label": str(section.get("label") or ""),
+                                "count": int(section.get("count") or 0),
+                                "href": url_for(
+                                    "campaign_session_character_view",
+                                    campaign_slug=campaign.slug,
+                                    character=selected_character_slug,
+                                    page=section.get("slug"),
+                                ),
+                                "is_active": str(section.get("slug") or "")
+                                == character_subpage,
+                            }
+                            for section in build_session_character_sections(
+                                character,
+                                equipment_state_manager=equipment_state_manager,
+                                include_spellcasting=include_spellcasting_subpage,
+                                session_character_subpage_labels=get_session_character_subpage_labels(
+                                    include_spellcasting=include_spellcasting_subpage,
+                                    xianxia_read=xianxia_read_context,
+                                ),
+                            )
+                        ]
+                    character_projection_identity = (
+                        selected_character_slug,
+                        int(record.state_record.revision or 0),
+                        int(campaign.current_session or 0),
+                        tuple(
+                            (
+                                str(getattr(page_record, "page_ref", "") or ""),
+                                str(getattr(page_record, "updated_at", "") or ""),
+                            )
+                            for page_record in character_campaign_page_records
+                        ),
+                    )
 
-            authenticated_user = getattr(g, "authenticated_user", None)
-            effective_user = get_current_user()
-            access_identity_payload = (
-                int(getattr(authenticated_user, "id", 0) or 0),
-                int(getattr(effective_user, "id", 0) or 0),
-                str(getattr(g, "current_auth_source", "") or ""),
-                str(campaign_role or ""),
-                bool(can_manage_session),
-                bool(session_character_editing_enabled),
-                tuple(sorted(accessible_records_by_slug)),
-            )
-            session_character_response_identity = {
-                "character": selected_character_slug,
-                "page": character_subpage,
-                "state_revision": int(record.state_record.revision or 0),
-                "active_session_id": (
-                    int(active_session_record.id) if active_session_record is not None else 0
-                ),
-                "projection": hashlib.sha256(
-                    repr(character_projection_identity).encode("utf-8")
-                ).hexdigest(),
-                "access": hashlib.sha256(
-                    repr(access_identity_payload).encode("utf-8")
-                ).hexdigest(),
-            }
+                if notes_draft is not None:
+                    character["player_notes_markdown"] = notes_draft
+                if physical_description_draft is not None:
+                    character["physical_description_markdown"] = physical_description_draft
+                if background_draft is not None:
+                    character["personal_background_markdown"] = background_draft
+                character["portrait"] = build_character_portrait_context(campaign, record.definition)
+                confirm_rest = (
+                    str(requested_confirm_rest).strip().lower()
+                    if requested_confirm_rest is not None
+                    else request.args.get("confirm_rest", "").strip().lower()
+                )
+                if session_character_editing_enabled and confirm_rest in {"short", "long"}:
+                    try:
+                        rest_preview = get_character_state_service().preview_rest(record, confirm_rest)
+                    except ValueError as exc:
+                        flash(str(exc), "warning")
+                can_view_full_character_sheet = bool(
+                    selected_character_slug and (
+                        can_access_campaign_scope(campaign_slug, "characters")
+                        or can_access_own_character(campaign_slug, selected_character_slug)
+                    )
+                )
+                full_character_sheet_url = (
+                    build_session_character_read_view_url(
+                        campaign.slug,
+                        selected_character_slug,
+                        character_subpage,
+                        xianxia_read=xianxia_read_context,
+                    )
+                    if can_view_full_character_sheet
+                    else ""
+                )
+                session_surface_return_url = url_for(
+                    "campaign_session_character_view",
+                    campaign_slug=campaign.slug,
+                    character=selected_character_slug,
+                    page=character_subpage,
+                )
+                session_surface_short_rest_url = url_for(
+                    "campaign_session_character_view",
+                    campaign_slug=campaign.slug,
+                    character=selected_character_slug,
+                    page=character_subpage,
+                    confirm_rest="short",
+                )
+                session_surface_long_rest_url = url_for(
+                    "campaign_session_character_view",
+                    campaign_slug=campaign.slug,
+                    character=selected_character_slug,
+                    page=character_subpage,
+                    confirm_rest="long",
+                )
+                if session_character_editing_enabled:
+                    if native_character_tools_supported:
+                        session_personal_edit_block_message = (
+                            SESSION_CHARACTER_ADVANCED_PERSONAL_EDIT_BLOCK_MESSAGE
+                        )
+                        session_personal_edit_block_href = url_for(
+                            "character_edit_view",
+                            campaign_slug=campaign.slug,
+                            character_slug=selected_character_slug,
+                        )
+                        session_personal_edit_block_action_label = "Open Advanced Editor"
+                    else:
+                        session_personal_edit_block_message = SESSION_CHARACTER_PERSONAL_EDIT_BLOCK_MESSAGE
+                        session_personal_edit_block_href = (
+                            build_session_character_read_view_url(
+                                campaign.slug,
+                                selected_character_slug,
+                                "personal",
+                                xianxia_read=xianxia_read_context,
+                            )
+                            if can_view_full_character_sheet
+                            else ""
+                        )
+                        session_personal_edit_block_action_label = "Open full character page"
+
+                authenticated_user = getattr(g, "authenticated_user", None)
+                effective_user = get_current_user()
+                access_identity_payload = (
+                    int(getattr(authenticated_user, "id", 0) or 0),
+                    int(getattr(effective_user, "id", 0) or 0),
+                    str(getattr(g, "current_auth_source", "") or ""),
+                    str(campaign_role or ""),
+                    bool(can_manage_session),
+                    bool(session_character_editing_enabled),
+                    tuple(sorted(accessible_records_by_slug)),
+                )
+                session_character_response_identity = {
+                    "character": selected_character_slug,
+                    "page": character_subpage,
+                    "state_revision": int(record.state_record.revision or 0),
+                    "active_session_id": (
+                        int(active_session_record.id) if active_session_record is not None else 0
+                    ),
+                    "projection": hashlib.sha256(
+                        repr(character_projection_identity).encode("utf-8")
+                    ).hexdigest(),
+                    "access": hashlib.sha256(
+                        repr(access_identity_payload).encode("utf-8")
+                    ).hexdigest(),
+                }
+
         else:
             (
                 session_character_empty_state_title,

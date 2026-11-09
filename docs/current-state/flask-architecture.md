@@ -1068,6 +1068,25 @@ Phase Systems views reuse detached normalized captured policy and its base
 cache context within that phase only. Dynamic selected-entry subset identities
 are recomputed on each call; the full fresh basis/readset guard remains.
 
+Ordinary successful activated DND Quick GET/HEAD construction shares one
+selected-character source phase through completed HTML rendering. Selected
+Session Character GET/HEAD construction starts its phase after the independent
+roster-card phases and closes before returning template context. Both pass
+local Systems/page-store readers; no application extension or Flask global is
+rebound. Rest previews, writes, error responses, other systems, custom providers
+and ambient transactions retain their existing paths.
+
+`character_request_context.py` owns a separate phase-local common qualification
+memo. Exact raw/effective definition, state/revision, complete normalized page
+records, actor/provider and dynamic subset context bind each reuse. Stock
+freeze/thaw detaches base authority; opaque or unsupported inputs/results decline
+memoization without replaying entered producers. Each presenter retains its own
+catalog, normalization, transient and final numeric-binding recipe. Closure
+clears the memo and checks fresh source/state/audit/Systems facts plus every row
+and column of the selected character's committed generation history; history
+is needed because numeric witnesses read historical generations outside the
+Systems readset. No phase handle or authority enters returned Session context.
+
 ### Private item and spell read inputs
 
 Default owned roster, character shell, selected-section and assignment read

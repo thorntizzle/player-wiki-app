@@ -346,7 +346,7 @@ def read_catalog_source(service, campaign_slug, page_records=None):
     phase.require_open()
     if (phase.systems_view() is not view or phase.owner.campaign_slug != campaign_slug
             or phase.owner._reserved or phase.purpose not in {
-                "roster-card-read", "character-shell-read", "character-section-read", "assignment-read"}
+                "roster-card-read", "character-shell-read", "character-section-read", "selected-character-read", "assignment-read"}
             or not view._ordinary_feature_source or not view.store._supports_feature_facts()):
         return None
     if not _ordinary_provider_policy():

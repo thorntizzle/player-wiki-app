@@ -204,7 +204,7 @@ def current_input_compilation(*, definition, state, state_revision, statuses,
         return None
     phase = systems_service.source_read_phase
     if (type(phase) is not SourceReadPhase or phase.owner._reserved or type(phase.purpose) is not str
-            or phase.purpose not in {"assignment-read", "character-shell-read", "character-section-read"}
+            or phase.purpose not in {"assignment-read", "character-shell-read", "character-section-read", "selected-character-read"}
             or not _ordinary_recipes()
             or _actor() is None):
         return None
