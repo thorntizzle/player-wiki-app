@@ -738,6 +738,13 @@ class NativeRequalification:
                 _fail()
             from .character_spell_reconstruction import validate_saved_spell_checkpoint
             validate_saved_spell_checkpoint(record.definition, self.candidate, plan["current_checkpoint"])
+            from .character_spell_reconstruction import superseded_preparation_authorizations
+            superseded = superseded_preparation_authorizations(
+                record.definition, self.candidate, plan["current_checkpoint"])
+            expected = _replay_numeric_authorizations(record.definition.to_dict(), self.authorizations,
+                                                     superseded=superseded)
+            if expected["source"].get("source_authorizations", []) != self.candidate.source.get("source_authorizations", []):
+                _fail()
         if self.provenance.get("schema_version") == 7:
             from .character_atomic_source_adoption import PendingAtomicItemSpellAdoption, validate_saved_adoption
             if type(self.atomic_item_adoption) is not PendingAtomicItemSpellAdoption:
@@ -2031,7 +2038,11 @@ def _prepare_native_requalification(*, record: Any, systems_service: Any,
     if spell_checkpoint is not None and not (checkpoint_choice_keys
             | _confirmed_spell_metric_keys(definition, state, numeric)) <= set(keys):
         _fail()
-    payload = deepcopy(candidate.to_dict())
+    from .character_spell_reconstruction import superseded_preparation_authorizations
+    superseded = superseded_preparation_authorizations(definition, candidate,
+        spell_checkpoint.checkpoint if spell_checkpoint is not None else None)
+    _require_preparation_retirement_custody(superseded, numeric)
+    payload = _replay_numeric_authorizations(deepcopy(candidate.to_dict()), (), superseded=superseded)
     batch = []
     source_bases = {}
     for kind, path, metric in keys:
@@ -2117,12 +2128,34 @@ def _prepare_native_requalification(*, record: Any, systems_service: Any,
     return result
 
 
-def _replay_numeric_authorizations(payload, batch, *, copy_first=False):
+def _require_preparation_retirement_custody(superseded, witnesses):
+    """Only earlier independently admitted witnesses can lose current custody."""
+    for marker in superseded:
+        if not any(type(witness) is dict and witness.get("authorization", witness) == marker
+                   for witness in witnesses):
+            _fail("A superseded preparation witness has no authenticated earlier origin.")
+
+
+def _replay_numeric_authorizations(payload, batch, *, copy_first=False, superseded=()):
     """Rebuild only private expected source content, never an authority result."""
     from .character_source_authority import _plain_preparation_data
     from .character_source_repair import add_numeric_authorization
-    if type(batch) in (list, tuple) and not batch:
+    if type(batch) in (list, tuple) and not batch and not superseded:
         return payload
+    if superseded:
+        # This pure replay grants no authority. Callers derive this exact set
+        # from validated CP3 history and authenticate its earlier origins.
+        if copy_first:
+            payload = deepcopy(payload)
+            copy_first = False
+        source = dict(payload.get("source") or {})
+        existing = source.get("source_authorizations", [])
+        if type(existing) is not list or any(type(row) is not dict for row in existing):
+            _fail()
+        if any(existing.count(marker) != 1 for marker in superseded):
+            _fail()
+        source["source_authorizations"] = [row for row in existing if row not in superseded]
+        payload["source"] = source
     if not _plain_preparation_data((payload, batch)):
         for marker in batch:
             payload = add_numeric_authorization(payload, marker)
@@ -2439,7 +2472,12 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
                 return ()
             renewed = deepcopy(prior_payload)
             renewed["source"]["native_acquisitions"] = deepcopy(corrected.source["native_acquisitions"])
-            renewed = _replay_numeric_authorizations(renewed, batch)
+            superseded = ()
+            if proof["schema_version"] in {5, 6, 7}:
+                from .character_spell_reconstruction import superseded_preparation_authorizations
+                superseded = superseded_preparation_authorizations(prior_definition, definition, checkpoint)
+                _require_preparation_retirement_custody(superseded, earlier_witnesses)
+            renewed = _replay_numeric_authorizations(renewed, batch, superseded=superseded)
             if (_digest(renewed.get("source")) != _digest(payload.get("source"))
                     or proof["schema_version"] == 4 and source_identity(connection, campaign, character) != origin_identity):
                 return ()

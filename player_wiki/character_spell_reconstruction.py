@@ -339,6 +339,46 @@ def validate_saved_spell_checkpoint(prior, candidate, checkpoint):
     return True
 
 
+def superseded_preparation_authorizations(prior, candidate, checkpoint):
+    """Derive obsolete current markers, never authenticate an audit or a grant.
+
+    Producers/readers must additionally prove each returned marker from their
+    independently verified earlier numeric witnesses. Pending transitions use
+    only the genuine issuer-bound, freshly regenerated complete native result.
+    """
+    if checkpoint is None or checkpoint.get("schema_version") != 3:
+        return ()
+    validate_saved_spell_checkpoint(prior, candidate, checkpoint)
+    before, after = _rows(prior), _rows(candidate)
+    changed = {entry["spell_id"] for entry in checkpoint["entries"]
+               if entry["role"] == "available"
+               and _marks(before[entry["spell_id"]])[1] is True
+               and before[entry["spell_id"]] != after[entry["spell_id"]]}
+    if not changed:
+        return ()
+    from .character_source_repair import _valid_numeric_witness_marker
+    markers = prior.source.get("source_authorizations", [])
+    if type(markers) is not list or any(type(marker) is not dict for marker in markers):
+        _fail("The superseded preparation witnesses are malformed.")
+    retired = []
+    for identity in sorted(changed):
+        matching = [marker for marker in markers if (
+            marker.get("target_kind"), marker.get("target_id"), marker.get("metric"))
+            == ("spell_choice", f"spell_choice:{identity}", "selection")]
+        if not matching:
+            continue
+        if len(matching) != 1:
+            _fail("A superseded preparation has conflicting witnesses.")
+        marker = matching[0]
+        provenance = marker.get("provenance")
+        if (provenance not in {"native_reconstruction", "native_requalification"}
+                or not _valid_numeric_witness_marker(marker, prior.character_slug, provenance)
+                or marker["value_digest"] != _digest(before[identity])):
+            _fail("A superseded preparation needs its exact prior native witness.")
+        retired.append(marker)
+    return tuple(marker for marker in markers if marker in retired)
+
+
 @dataclass(frozen=True, slots=True)
 class PendingSpellCheckpoint:
     """Immutable issuer-bound prospective role facts, never durable witnesses."""
