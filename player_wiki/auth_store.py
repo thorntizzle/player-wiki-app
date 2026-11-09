@@ -12,6 +12,25 @@ from .db import get_db
 from .runtime_security import sanitize_audit_metadata
 from .themes import DEFAULT_THEME_KEY, normalize_theme_key
 
+
+def serialize_audit_metadata(metadata: dict[str, Any], *, event_type: str) -> str:
+    """Choose native audit whitespace only; callers retain all admission checks."""
+    proof = metadata.get("native_requalification") if type(metadata) is dict else None
+    native = (
+        event_type == "character_update_applied"
+        and type(metadata) is dict
+        and metadata.get("source") == "character_source_repair"
+        and metadata.get("manager_action") == "native_requalify"
+        and metadata.get("review_action") == "native_requalify"
+        and type(proof) is dict
+        and type(proof.get("schema_version")) is int
+        and proof["schema_version"] in {1, 2, 3, 4, 5, 6, 7, 8}
+    )
+    if native:
+        return json.dumps(metadata, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    # Other audit readers include spacing-sensitive queries. Preserve their bytes.
+    return json.dumps(metadata, sort_keys=True)
+
 SESSION_CHAT_ORDER_NEWEST_FIRST = "newest_first"
 SESSION_CHAT_ORDER_OLDEST_FIRST = "oldest_first"
 DEFAULT_SESSION_CHAT_ORDER = SESSION_CHAT_ORDER_NEWEST_FIRST
@@ -1462,7 +1481,7 @@ class AuthStore:
                 campaign_slug,
                 character_slug,
                 event_type,
-                json.dumps(sanitized_metadata, sort_keys=True),
+                serialize_audit_metadata(sanitized_metadata, event_type=event_type),
                 isoformat(utcnow()),
             ),
         )

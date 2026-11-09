@@ -285,6 +285,76 @@ def attained_reconstruction_feature_owners(definition, systems_service, *, armor
     return {key: frozenset(owners) for key, owners in result.items()}
 
 
+def retained_reconstruction_source_links(definition, witnesses, *, connection=None):
+    """Keep current links strict; authenticate history before classifying it.
+
+    The ordinary loader has already admitted the witnesses. Its existing native
+    aggregate headers bind the audit, actor, metadata and exact generation; an
+    audit/generation join alone is not permission to retain a foreign frame.
+    The forward audit reader supplies its chronological prior witnesses here,
+    so this check never reloads that reader or creates another receipt.
+    """
+    try:
+        return reconstruction_source_links(definition)
+    except SourceRepairError as original_error:
+        strict_error = original_error
+
+    from .character_source_repair import NativeAggregateWitness, _sha256_hex
+    from .character_native_requalification import _confirmed_history
+    from .character_language_electives import historical_choices_equal
+    from .db import get_db
+
+    origin = definition.source.get("native_reconstruction")
+    if (not isinstance(origin, dict)
+            or (origin.get("campaign_slug"), origin.get("character_slug")) != (
+                definition.campaign_slug, definition.character_slug)
+            or type(origin.get("prior_generation")) is not int or origin["prior_generation"] < 1
+            or type(origin.get("actor_user_id")) is not int or origin["actor_user_id"] < 1
+            or not _sha256_hex(origin.get("action_id")) or not _sha256_hex(origin.get("input_digest"))):
+        raise strict_error
+    headers = {}
+    for witness in witnesses:
+        if type(witness) is not NativeAggregateWitness:
+            continue
+        stamp = getattr(witness, "origin", None)
+        if (type(stamp) is not tuple or len(stamp) != 7
+                or stamp[0] not in {"native_reconstruct", "native_requalify"}
+                or any(type(value) is not int or value < 1 for value in stamp[1:3])
+                or any(not _sha256_hex(stamp[index]) for index in (3, 5, 6))
+                or type(stamp[4]) is not tuple or not 1 <= len(stamp[4]) <= 512
+                or any(type(alias) is not tuple or len(alias) != 2
+                    or type(alias[0]) is not int or alias[0] < 1
+                    or not _sha256_hex(alias[1]) for alias in stamp[4])):
+            continue
+        headers.setdefault((stamp[0], stamp[1], stamp[2], stamp[3], stamp[5]), set()).update(stamp[4])
+        if len(headers) > 512:
+            raise SourceRepairError("Retained reconstruction history exceeds its bounded native context.")
+
+    admitted = []
+    for entry in _confirmed_history(connection if connection is not None else get_db(),
+                                    definition.campaign_slug, definition.character_slug):
+        generation = entry["generation"]
+        key = (entry["metadata"].get("manager_action"), entry["audit_id"], entry["actor_user_id"],
+               entry["metadata_sha256"], generation["definition_digest"])
+        if (entry["event_type"] != "character_update_applied"
+                or (generation["revision"], generation["primary_sha256"]) not in headers.get(key, ())):
+            continue
+        historical = CharacterDefinition.from_dict(entry["definition"])
+        if digest(historical.source.get("native_reconstruction")) == digest(origin):
+            admitted.append((entry, historical))
+
+    originals = [(entry, historical) for entry, historical in admitted
+        if entry["metadata"].get("manager_action") == "native_reconstruct"
+        and digest(entry["metadata"].get("native_reconstruction")) == digest(origin)
+        and entry["actor_user_id"] == origin.get("actor_user_id")
+        and entry["generation"]["revision"] == origin.get("prior_generation", -2) + 1]
+    if (len(originals) != 1
+            or not any(historical_choices_equal(historical, definition, exact=True)
+                       for _entry, historical in admitted)):
+        raise SourceRepairError("The retained reconstruction frame has no matching admitted origin and history.")
+    return reconstruction_source_links(definition, retained=True)
+
+
 def attained_reconstruction_features(definition, systems_service):
     """Exact deterministic class/subclass ownership at the retained level."""
     return frozenset(attained_reconstruction_feature_owners(definition, systems_service))

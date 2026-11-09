@@ -73,7 +73,7 @@ def action_witness_comparison(witnesses):
     from .character_spell_grants import NativeGrantCustody
     from .character_spell_reconstruction import NativeSpellReconstructionFact
     from .character_language_electives import NativeElectiveDecision, PendingElectiveOutcome
-    from .character_external_proficiencies import ExternalProficiencyCustody
+    from .character_external_proficiencies import ExternalProficiencyCustody, PendingExternalProficiency
 
     if type(witnesses) is not tuple:
         raise SourceReadConflict("Action witness sequence has an unsupported type.")
@@ -82,7 +82,7 @@ def action_witness_comparison(witnesses):
         kind = type(witness)
         if kind is dict:
             compared.append(("plain", freeze(witness)))
-        elif kind in (NativeAggregateWitness, NativeSpellChoiceDecision, NativeGrantCustody, NativeSpellReconstructionFact, NativeElectiveDecision, PendingElectiveOutcome, ExternalProficiencyCustody):
+        elif kind in (NativeAggregateWitness, NativeSpellChoiceDecision, NativeGrantCustody, NativeSpellReconstructionFact, NativeElectiveDecision, PendingElectiveOutcome, ExternalProficiencyCustody, PendingExternalProficiency):
             if set(vars(witness)) != {"origin"}:
                 raise SourceReadConflict("Action witness provenance envelope is unavailable.")
             compared.append(("trusted", kind, freeze(dict.copy(witness)), freeze(witness.origin)))
@@ -1172,7 +1172,7 @@ def load_verified_numeric_actions(campaign_slug: str, character_slug: str, *,
                         row, metadata, tuple(witnesses)))
                 continue
             requalification = metadata.get("native_requalification")
-            if isinstance(requalification, dict) and requalification.get("schema_version") in {5, 6, 7}:
+            if isinstance(requalification, dict) and requalification.get("schema_version") in {5, 6, 7, 8}:
                 if type(raw_metadata) is not str or len(raw_metadata.encode("utf-8")) > 65536:
                     continue
                 metadata = _strict_grant_audit_json(raw_metadata)

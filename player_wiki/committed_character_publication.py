@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import yaml
 
+from .auth_store import serialize_audit_metadata
 from .character_importer import render_character_yaml
 from .character_models import CharacterDefinition, CharacterImportMetadata, CharacterRecord
 from .character_path_safety import validate_character_slug
@@ -2359,18 +2360,18 @@ def prepare_native_requalification_audit(coordinator, prior_record, definition, 
         raise CharacterStateConflictError("Native audit publication inputs changed before review or apply.")
     payload = dict(metadata)
     proof = payload.get("native_requalification")
-    if (not isinstance(proof, dict) or proof.get("schema_version") not in {1, 2, 3, 4, 5, 6, 7}
+    if (not isinstance(proof, dict) or proof.get("schema_version") not in {1, 2, 3, 4, 5, 6, 7, 8}
             or proof.get("prior_generation") != source["revision"]
             or proof.get("prior_definition_digest") != canonical_digest(prior_record.definition.to_dict())
             or proof.get("prior_state_revision") != row["revision"]
             or proof.get("prior_state_digest") != canonical_digest(prior_record.state_record.state)
             or payload.get("candidate_digest") != canonical_digest(definition.to_dict())
-            or proof["schema_version"] in {3, 4, 5, 6, 7}
+            or proof["schema_version"] in {3, 4, 5, 6, 7, 8}
                 and canonical_digest(desired_state) != canonical_digest(prior_record.state_record.state)):
         raise CharacterStateConflictError("Native audit prior, candidate or exact state changed.")
     final = {"published_definition_digest": canonical_digest(definition.to_dict()),
              "published_revision": int(source["revision"]) + 1,
-             "published_state_revision": (row["revision"] if proof["schema_version"] in {3, 4, 5, 6, 7} else
+             "published_state_revision": (row["revision"] if proof["schema_version"] in {3, 4, 5, 6, 7, 8} else
                  row["revision"] + int(canonical_digest(desired_state) != canonical_digest(prior_record.state_record.state)))}
     if any(key in payload and payload[key] != value for key, value in final.items()):
         raise CharacterStateConflictError("Native audit publication revisions changed.")
@@ -2379,9 +2380,43 @@ def prepare_native_requalification_audit(coordinator, prior_record, definition, 
         operation_kind="character_update_apply", audit_event_type="character_update_applied",
         audit_actor_user_id=actor_id, audit_target_user_id=None, audit_metadata=payload)
     if (coordinator.auth_store.sanitize_audit_metadata(payload) != payload
-            or json.dumps(payload, sort_keys=True) != prepared[3]):
+            or serialize_audit_metadata(payload, event_type="character_update_applied") != prepared[3]):
         raise CharacterStateConflictError("Native audit evidence cannot be redacted or truncated.")
     return prepared
+
+
+def _language_confirmation_audit(
+    coordinator, prior_record, definition, state, clean_audit, reviewed_source_proof,
+    actor_id, generation, *, confirmed=False,
+):
+    """Bound the full language event, without manufacturing published custody."""
+    from .character_language_electives import prospective_metadata, confirmed_metadata
+    if (type(clean_audit) is not tuple or len(clean_audit) != 4
+            or clean_audit[0] != "character_update_applied" or clean_audit[1] != actor_id
+            or type(clean_audit[3]) is not str or reviewed_source_proof is None
+            or reviewed_source_proof.native_elective_decision is None):
+        raise CharacterStateConflictError("Language decision needs its complete reviewed audit.")
+    payload = json.loads(clean_audit[3])
+    if type(payload) is not dict:
+        raise CharacterStateConflictError("Language decision audit metadata is malformed.")
+    builder = confirmed_metadata if confirmed else prospective_metadata
+    payload.update(builder(
+        reviewed_source_proof.native_elective_decision, definition=definition,
+        prior_record=prior_record, state=state, actor_id=actor_id, generation=generation,
+        review_digest=payload.get("review_digest"), plan_digest=payload.get("plan_digest"),
+        source_digest=reviewed_source_proof.reviewed_source_digest,
+        policy_digest=reviewed_source_proof.reviewed_policy_digest,
+        review_basis=payload.get("language_review_basis")))
+    sanitized = coordinator.auth_store.sanitize_audit_metadata(payload)
+    try:
+        # Same JSON storage spelling/escaping and size bound as audit insertion;
+        # nonfinite values are refused rather than becoming an audit extension.
+        encoded = json.dumps(sanitized, sort_keys=True, allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise CharacterStateConflictError("Language decision audit cannot be serialized.") from exc
+    if sanitized != payload or len(encoded) > 65536:
+        raise CharacterStateConflictError("Language decision confirmation exceeds the bounded audit contract.")
+    return payload
 
 
 def _prepare_native_choice_audit(coordinator, prior_record, definition, state, authority, *,
@@ -2781,7 +2816,7 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
     external_acquisition = validate_external_proficiency(prior_record, definition, desired_state,
         actor_id=updated_by_user_id, metadata=audit_metadata, audit_event_type=audit_event_type,
         operation_kind=operation_kind, prior_authority=load_prior_authority, import_metadata=import_metadata,
-        systems_service_provider=get_systems_service)
+        systems_service_provider=get_systems_service, language_proof=elective)
     from .character_reference_notes import validate_transition as validate_reference_notes
     reference_note_edit = validate_reference_notes(prior_record, definition, desired_state,
         actor_id=updated_by_user_id, metadata=audit_metadata, audit_event_type=audit_event_type,
@@ -3012,6 +3047,11 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         clean_audit = prepare_native_requalification_audit(
             coordinator, prior_record, definition, desired_state, audit_metadata, audit_actor_user_id,
             connection=connection)
+    prospective_elective_audit = None
+    if elective is not None:
+        prospective_elective_audit = _language_confirmation_audit(
+            coordinator, prior_record, definition, desired_state, clean_audit,
+            reviewed_source_proof, audit_actor_user_id, prior_record.committed_revision + 1)
     assignment = get_db().execute(
         "SELECT id,user_id FROM character_assignments WHERE campaign_slug=? AND character_slug=?",
         (definition.campaign_slug, definition.character_slug),
@@ -3107,7 +3147,7 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         locked_external = validate_external_proficiency(prior_record, definition, desired_state,
             actor_id=updated_by_user_id, metadata=audit_metadata, audit_event_type=audit_event_type,
             operation_kind=operation_kind, prior_authority=load_locked_prior_authority, import_metadata=import_metadata,
-            systems_service_provider=get_systems_service)
+            systems_service_provider=get_systems_service, language_proof=elective)
         if locked_external != external_acquisition:
             raise CharacterStateConflictError("The proficiency acquisition changed under reservation.")
         locked_reference_notes = validate_reference_notes(prior_record, definition, desired_state,
@@ -3352,6 +3392,12 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
                 callback=choice_audit_callback, leveled=pending_numeric_authority is not None,
                 ) != prospective_choice_audit:
             raise CharacterStateConflictError("Native choice audit changed under publication reservation.")
+        if elective is not None:
+            locked_elective_audit = _language_confirmation_audit(
+                coordinator, prior_record, definition, desired_state, clean_audit,
+                reviewed_source_proof, audit_actor_user_id, source["revision"] + 1)
+            if locked_elective_audit != prospective_elective_audit:
+                raise CharacterStateConflictError("Language audit changed under publication reservation.")
         if source_read_owner is not None:
             source_read_owner.checkpoint()
             source_read_owner.before_publication_write()
@@ -3373,17 +3419,11 @@ def publish_update(coordinator, prior_record, definition, import_metadata, desir
         if clean_audit[0] is not None:
             audit_payload = json.loads(clean_audit[3])
             if elective is not None:
-                from .character_language_electives import confirmed_metadata as elective_confirmation
-                audit_payload.update(elective_confirmation(elective, definition=definition,
-                    prior_record=prior_record, state=desired_state, actor_id=audit_actor_user_id,
-                    generation=number, review_digest=audit_payload.get("review_digest"),
-                    plan_digest=audit_payload.get("plan_digest"),
-                    source_digest=reviewed_source_proof.reviewed_source_digest,
-                    policy_digest=reviewed_source_proof.reviewed_policy_digest,
-                    review_basis=audit_payload.get("language_review_basis")))
-                sanitized = coordinator.auth_store.sanitize_audit_metadata(audit_payload)
-                if sanitized != audit_payload or len(json.dumps(sanitized, sort_keys=True).encode("utf-8")) > 65536:
-                    raise CharacterStateConflictError("Language decision confirmation exceeds the bounded audit contract.")
+                audit_payload = _language_confirmation_audit(
+                    coordinator, prior_record, definition, desired_state, clean_audit,
+                    reviewed_source_proof, audit_actor_user_id, number, confirmed=True)
+                if audit_payload != prospective_elective_audit:
+                    raise CharacterStateConflictError("Published language audit differs from its full preflight.")
             if reconstruction is not None:
                 from .character_reconstruction_authority import confirmed_metadata
                 audit_payload.update(confirmed_metadata(

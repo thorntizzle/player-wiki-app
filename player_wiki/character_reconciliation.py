@@ -14,7 +14,7 @@ from typing import Any, Callable
 from flask import has_app_context
 import yaml
 
-from .auth_store import AuthStore, isoformat, utcnow
+from .auth_store import AuthStore, isoformat, serialize_audit_metadata, utcnow
 from .character_importer import render_character_yaml
 from .character_assets import (
     CHARACTER_PORTRAIT_ASSET_EXTENSIONS,
@@ -734,7 +734,7 @@ class PendingReviewedSourceProof:
                         from .character_spell_reconstruction import PendingSpellCheckpoint, validate_saved_spell_checkpoint
                         result = self.native_result
                         if (type(result) is not NativeRequalification
-                                or result.provenance.get("schema_version") not in {5, 6, 7}
+                                or result.provenance.get("schema_version") not in {5, 6, 7, 8}
                                 or result.provenance.get("spell_origin_plan") != self.native_spell_origin_plan
                                 or result.candidate.to_dict() != definition.to_dict()
                                 or tuple(result.authorizations) != self.native_requalification_markers
@@ -1054,7 +1054,7 @@ def validate_native_grant_transition(prior_record, definition, state, *,
             from .character_native_requalification import NativeRequalification, _admission_feature_rows
             if type(result) is not NativeRequalification:
                 raise CharacterStateConflictError("Replacement owner custody has an unsupported native proof.")
-            if result.provenance.get("schema_version") in {6, 7}:
+            if result.provenance.get("schema_version") in {6, 7, 8}:
                 reviewed_source_proof._require_native_complete_binding(prior_record, actor_id)
                 result._validate_candidate_binding(prior_record, actor_id, reviewed_source_proof.native_action_id)
                 if (result.candidate.to_dict() != definition.to_dict() or state != prior_record.state_record.state
@@ -1122,7 +1122,7 @@ def validate_native_grant_transition(prior_record, definition, state, *,
             if plan.get("schema_version") in {3, 4, 5}:
                 from .character_native_requalification import NativeRequalification
                 result = reviewed_source_proof.native_result
-                if (type(result) is not NativeRequalification or result.provenance.get("schema_version") not in {5, 6, 7}
+                if (type(result) is not NativeRequalification or result.provenance.get("schema_version") not in {5, 6, 7, 8}
                         or result.provenance.get("spell_origin_plan") != plan):
                     raise CharacterStateConflictError("Current spell adoption needs its exact reviewed native result.")
                 checkpoint_result = result
@@ -1538,7 +1538,8 @@ class CharacterPublicationCoordinator:
             actor_id=updated_by_user_id, metadata=audit_metadata,
             audit_event_type=audit_event_type, operation_kind=operation_kind,
             prior_authority=load_prior_authority, import_metadata=import_metadata,
-            systems_service_provider=get_systems_service)
+            systems_service_provider=get_systems_service,
+            language_proof=(reviewed_source_proof.native_elective_decision if reviewed_source_proof is not None else None))
         validate_native_grant_transition(prior_record, definition, desired_state,
             reviewed_source_proof=reviewed_source_proof, pending_numeric_authority=pending_numeric_authority,
             actor_id=updated_by_user_id, operation_kind=operation_kind,
@@ -2856,7 +2857,7 @@ class CharacterPublicationCoordinator:
                 "Character update apply audit metadata is invalid."
             )
         sanitized = self.auth_store.sanitize_audit_metadata(dict(audit_metadata))
-        metadata_json = json.dumps(sanitized, sort_keys=True)
+        metadata_json = serialize_audit_metadata(sanitized, event_type=audit_event_type)
         if not metadata_json or len(metadata_json.encode("utf-8")) > 65536:
             raise CharacterPublicationError(
                 "Character update apply audit metadata is too large."

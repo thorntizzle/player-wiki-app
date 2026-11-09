@@ -150,6 +150,22 @@ def _physical_rows(authority: Any) -> list[Any]:
     return [json.loads(row) for row in authority.equipment_hand_rows or ()]
 
 
+def _qualified_capability_physical_row(physical: list[Any], identity: str) -> dict[str, Any] | None:
+    """The existing exact physical contract; activation clauses stay separate."""
+    matches = [row for row in physical if type(row) is dict
+               and (row.get("catalog_ref") or row.get("id")) == identity]
+    if len(matches) != 1:
+        return None
+    row = matches[0]
+    physical_id = row.get("id")
+    if (not _text(physical_id) or sum(type(other) is dict and other.get("id") == physical_id
+                                    for other in physical) != 1
+            or row.get("activation_current") is not True
+            or type(row.get("quantity")) is not int or row["quantity"] != 1):
+        return None
+    return row
+
+
 def qualified_item_capabilities(authority: Any, definition: Any) -> list[dict[str, Any]]:
     """Detached exact source/physical facts, with activation kept separate."""
     if authority is None:
@@ -178,17 +194,10 @@ def qualified_item_capabilities(authority: Any, definition: Any) -> list[dict[st
         if (type(ref) is not dict or not _text(ref.get("entry_key"))
                 or sources != {("systems", ref["entry_key"])}):
             continue
-        matches = [row for row in physical if type(row) is dict
-                   and (row.get("catalog_ref") or row.get("id")) == identity]
-        if len(matches) != 1:
+        row = _qualified_capability_physical_row(physical, identity)
+        if row is None:
             continue
-        row = matches[0]
-        physical_id = row.get("id")
-        if (not _text(physical_id) or sum(type(other) is dict and other.get("id") == physical_id
-                                        for other in physical) != 1
-                or row.get("activation_current") is not True
-                or type(row.get("quantity")) is not int or row["quantity"] != 1):
-            continue
+        physical_id = row["id"]
         result.append({"catalog_id": identity, "physical_id": physical_id,
             "name": str(item.get("name") or "Item"), "source_ref": deepcopy(ref),
             "capability": capability, "physical": deepcopy(row),
@@ -249,6 +258,89 @@ def qualified_sleep_ward_rules(authority: Any, definition: Any) -> list[dict[str
             "effects": [{"kind": "immunity", "label": "Magical sleep ward",
                 "summary": "You cannot be put to sleep by magical means" + exception + ". Table managed."}]})
     return rules
+
+
+def _current_defensive_features(features: Any) -> list[dict[str, Any]]:
+    """Give slug and structured-effect producers the same current input frame."""
+    return [row for row in features or []
+            if isinstance(row, dict) and not row.get("mechanics_suppressed")]
+
+
+def _source_retires_legacy_sleep_ward(rule: dict[str, Any], capability: Any) -> bool:
+    """Negative source declaration only; never qualifies or grants a benefit."""
+    if type(capability) is not dict or not _text(capability.get("effect_id")):
+        return False
+    passive = capability.get("passive")
+    return (type(passive) is dict and passive.get("magical_sleep_ward") is True
+            and rule.get("id") == f"item:{capability['effect_id']}:sleep-ward")
+
+
+def compose_defensive_rules(authority: Any, definition: Any, rules: list[Any], *,
+                            current_definition: Any, item_catalog: Any) -> list[dict[str, Any]]:
+    """Compose current producers, never infer ownership from copied display IDs.
+
+    Original DND defensive-state rows are retained history, not grant inputs.
+    Reuse the existing producer with the caller's already-current projection and
+    catalogue, including its conditional feat and infusion behavior. Non-DND
+    readers keep their existing defensive-state presentation boundary.
+    """
+    if definition.system != "DND-5E":
+        return [deepcopy(row) for row in rules if isinstance(row, dict)]
+    if authority is None:
+        return []
+    from .character_builder_equipment import _derive_defensive_state_from_character_inputs
+    from .character_source_authority import _source_identity
+    produced = _derive_defensive_state_from_character_inputs(
+        equipment_catalog=list(current_definition.equipment_catalog or []),
+        features=_current_defensive_features(current_definition.features), item_catalog=item_catalog,
+    )["rules"]
+    items = [row for row in current_definition.equipment_catalog or [] if type(row) is dict]
+    original_items = [row for row in definition.equipment_catalog or [] if type(row) is dict]
+    owners = set()
+    declarations = {}
+    for item in items:
+        identity = item.get("id")
+        if (not _text(identity) or sum(row.get("id") == identity for row in items) != 1
+                or item.get("mechanics_suppressed")
+                or authority.status_for("item", identity) != "VERIFIED"
+                or identity not in authority.active_item_ids):
+            continue
+        originals = [row for row in original_items if row.get("id") == identity]
+        source = _source_identity(item)
+        if (len(originals) != 1 or not all(source)
+                or _source_identity(originals[0]) != source):
+            continue
+        sources = {(grant.source_kind, grant.source_key) for grant in authority.grants
+                   if grant.kind == "item" and grant.instance_id == identity
+                   and "defensive_rules" in json.loads(grant.payload_json)}
+        if sources == {source}:
+            owners.add(identity)
+            capability_sources = {(grant.source_kind, grant.source_key) for grant in authority.grants
+                                  if grant.kind == "item" and grant.instance_id == identity
+                                  and FIELD in json.loads(grant.payload_json)}
+            if capability_sources == {source}:
+                declarations[identity] = authority.approved_payload("item", identity).get(FIELD)
+    result = []
+    for rule in produced:
+        if "source_item_id" not in rule:
+            # Feature IDs may have any spelling or collide with item IDs. The
+            # fresh producer's origin, not that spelling, keeps them distinct.
+            result.append(rule)
+            continue
+        identity = rule["source_item_id"]
+        if identity not in owners:
+            continue
+        if _source_retires_legacy_sleep_ward(rule, declarations.get(identity)):
+            # Retire the same source's old rule even if its native benefit
+            # cannot qualify physically. Only the passive producer below can
+            # grant the current ward, with its full qualification and activation.
+            continue
+        # This DTO already came from full current metadata in the ordinary
+        # producer. An effect-only AuthorityGrant is not full metadata and must
+        # not be sent through a second capability/source validator here.
+        result.append(rule)
+    result.extend(qualified_sleep_ward_rules(authority, definition))
+    return result
 
 
 def item_casting_presentation(authority: Any, definition: Any, spell: dict[str, Any]) -> dict[str, Any] | None:

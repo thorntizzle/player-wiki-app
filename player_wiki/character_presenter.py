@@ -23,6 +23,7 @@ from .character_builder import (
     _spellcasting_mode_for_class,
 )
 from .character_feature_values import is_current_family_member
+from .character_feature_capacities import assignment_kind
 from .character_mechanics_projection import (
     build_armorer_combat_availability,
     build_character_inventory_item_ref,
@@ -574,6 +575,7 @@ def _present_character_roster_card(record, *, activated, campaign=None,
     source_warnings: list[dict[str, str]] = []
     projected_definition = definition
     projected_state = state
+    retired_tracker_ids = set()
     needs_authority = activated and is_dnd_5e_system(definition.system)
     if (needs_authority and allow_projection and campaign is not None and systems_service is not None
             and campaign_page_records is not None
@@ -584,6 +586,7 @@ def _present_character_roster_card(record, *, activated, campaign=None,
                 state_revision=record.state_record.revision,
                 systems_service=systems_service,
                 campaign_page_records=campaign_page_records,
+                include_assignment_observations=False,
             )
             if not any(
                 row.get("code") in {"read_time_projection_failed", "transient_mechanics_projection_failed"}
@@ -594,6 +597,7 @@ def _present_character_roster_card(record, *, activated, campaign=None,
                     authority = candidate
                     projected_definition = projection["definition"]
                     projected_state = projection["state"]
+                    retired_tracker_ids = set(projection.get("capacity_resource_roles", {}).get("retired_tracker_ids", []))
                     source_warnings = [
                         dict(row) for row in projection.get("projection_warnings") or []
                         if isinstance(row, dict)
@@ -628,7 +632,8 @@ def _present_character_roster_card(record, *, activated, campaign=None,
             )
 
     resources = sorted(
-        list(record.state_record.state.get("resources") or []),
+        [row for row in record.state_record.state.get("resources") or []
+         if row.get("id") not in retired_tracker_ids],
         key=lambda item: (int(item.get("display_order") or 0), str(item.get("label") or "").lower()),
     )
     projected_resources = {
@@ -777,6 +782,7 @@ def present_dnd_character_section_counts(
         state_revision=record.state_record.revision,
         systems_service=systems_service,
         campaign_page_records=campaign_page_records,
+        include_assignment_observations=False,
         components=frozenset(
             {
                 "arcane_armor",
@@ -823,7 +829,8 @@ def present_dnd_character_section_counts(
             systems_service=systems_service,
             source_authority_active=mechanics_projection.get("source_authority") is not None,
         ),
-        "resources": len(list(state.get("resources") or [])),
+        "resources": sum(row.get("id") not in mechanics_projection.get("capacity_resource_roles", {}).get("retired_tracker_ids", [])
+                         for row in state.get("resources") or []),
         "features": _count_presented_dnd_features(
             campaign,
             definition,
@@ -1295,6 +1302,7 @@ def present_dnd_feature_groups(
     campaign, definition, state, *, systems_service=None, campaign_page_records=None,
     source_authority=None, feature_values=None, parent_facets=None,
     background_features=None, recipe_view=None, arcane_armor_state=None,
+    assignment_view=None, capacity_resource_roles=None,
 ):
     """Present already-projected feature facts; never load or replace authority.
 
@@ -1310,6 +1318,8 @@ def present_dnd_feature_groups(
     parent_facets = parent_facets or {}
     recipe_view = recipe_view or {}
     arcane_armor_state = arcane_armor_state or {}
+    assignment_view = assignment_view or {}
+    capacity_resource_roles = capacity_resource_roles or {}
     has_hit_point_details = int(stats.get("max_hp") or 0) > 0
     has_language_details = any(
         group["title"] == "Languages" and group["values_list"]
@@ -1349,12 +1359,23 @@ def present_dnd_feature_groups(
             humanize_value(feature.get("category")) or "Features",
         )
         feature_groups_ordered.setdefault(group_title, [])
-        tracker_ref = "" if suppressed or historical_only else str(feature.get("tracker_ref") or "").strip()
+        tracker_ref = ("" if suppressed or historical_only or current_value.get("capacity_only")
+                       else str(feature.get("tracker_ref") or "").strip())
         linked_resource = resource_lookup.get(tracker_ref) if tracker_ref else None
         metadata = ([suppression_label] if suppressed else [
             humanize_value(feature.get("activation_type")),
             summarize_linked_resource(linked_resource),
         ])
+        assignment = {}
+        if current_value.get("capacity_only") and not historical_only:
+            assignment = assignment_view.get(assignment_kind(feature), {})
+            if (assignment.get("available") and assignment.get("status") == "confirmed"
+                    and assignment.get("feature_id") == feature.get("id")):
+                metadata.append(f"Current assignments: {assignment['count']} / {assignment['maximum']}")
+            elif assignment.get("available") and assignment.get("status") == "unknown":
+                metadata.append(f"Current assignments: UNKNOWN (maximum {assignment['maximum']})")
+            else:
+                metadata.append("Current assignments unavailable")
         feature_systems_ref = {} if suppressed else dict(feature.get("systems_ref") or {})
         if parent_facet and parent_facet.get("systems_ref") and (
                 not suppressed or historical_only and parent_facet.get("available")):
@@ -1413,6 +1434,14 @@ def present_dnd_feature_groups(
                 if not current_value.get("available"):
                     value_text += f". {current_value['reason']}"
                 description_html = f"<p>{escape(value_text)}</p>" + description_html
+            if current_value.get("capacity_only"):
+                assignment_note = assignment.get("reason") or (
+                    "Assignment effects remain table managed." if assignment.get("available") else
+                    "Qualified current assignment observations are unavailable.")
+                tracker_warning = capacity_resource_roles.get("warnings", {}).get(feature.get("id"))
+                description_html = f"<p>{escape(assignment_note)}</p>" + description_html
+                if tracker_warning:
+                    description_html = f"<p>{escape(tracker_warning)}</p>" + description_html
         feature_groups_ordered[group_title].append(
             {
                 "id": str(feature.get("id") or "").strip(),
@@ -1441,10 +1470,7 @@ def present_dnd_feature_groups(
                 "description_html": description_html,
                 "derived_feature_value": current_value,
                 "assignment_character_slug": definition.character_slug,
-                "assignment_kind": ({
-                    "dnd-5e|classfeature|tce|magicaltinkering-artificer-tce-1": "tinkering",
-                    "dnd-5e|classfeature|tce|infuseitem-artificer-tce-2": "infusions",
-                }.get((feature.get("systems_ref") or {}).get("entry_key"))
+                "assignment_kind": (assignment_kind(feature)
                     if current_value.get("capacity_only") and current_value.get("available") else None),
                 "typed_recipe_mode": bool(recipe_view.get("typed")),
                 "typed_recipe_result_ref": recipe_results.get(feature.get("id")),
@@ -1479,6 +1505,8 @@ def _present_character_detail(
         "state_revision": record.state_record.revision,
         "systems_service": systems_service,
         "campaign_page_records": campaign_page_records,
+        "include_assignment_observations": (
+            scope_dependency is None or "feature_groups" in scope_dependency.output_fields),
     }
     if scope_dependency is not None:
         projection_kwargs.update(
@@ -1523,6 +1551,8 @@ def _present_character_detail(
     stats = dict(definition.stats or {})
     raw_stats = dict(record.definition.stats or {})
     source_authority = mechanics_projection.get("source_authority")
+    capacity_resource_roles = mechanics_projection.get("capacity_resource_roles", {})
+    retired_tracker_ids = set(capacity_resource_roles.get("retired_tracker_ids", []))
 
     def numeric_status(path: str, *, resource: bool = False) -> dict[str, Any]:
         if source_authority is None:
@@ -1552,6 +1582,8 @@ def _present_character_detail(
     }
     historical_numeric_rows = []
     for path, status in sorted(numeric_statuses.items()):
+        if path.startswith("resource:") and path.split(":", 1)[1] in retired_tracker_ids:
+            continue
         if not status["needs_repair"]:
             continue
         raw = status["raw"]
@@ -1814,6 +1846,8 @@ def _present_character_detail(
                           str(item.get("label") or "").lower()),
     ) if build_resources else []):
         resource_id = str(resource.get("id") or "")
+        if resource_id in retired_tracker_ids:
+            continue
         status = numeric_status(f"resource:{resource_id}", resource=True)
         raw_max = resource.get("max")
         can_edit = not status["needs_repair"]
@@ -2569,6 +2603,8 @@ def _present_character_detail(
         background_features=mechanics_projection.get("background_feature_projections", []),
         recipe_view=recipe_view,
         arcane_armor_state=arcane_armor_state,
+        assignment_view=mechanics_projection.get("artificer_assignment_view", {}),
+        capacity_resource_roles=capacity_resource_roles,
     ) if build_features else [])
 
     attacks = []

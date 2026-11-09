@@ -812,6 +812,7 @@ def build_character_mechanics_projection(
     components: frozenset[str] | None = None,
     catalog_components: frozenset[str] | None = None,
     derivation_components: frozenset[str] | None = None,
+    include_assignment_observations: bool = False,
     _failure_diagnostics: _CharacterProjectionDiagnostics | None = None,
 ) -> dict[str, Any]:
     from .committed_publication import active
@@ -886,6 +887,17 @@ def build_character_mechanics_projection(
         from .character_feature_history import presentation as history_presentation
         parent_facet_presentations.update(history_presentation(
             effective_values["source_authority_definition"], state, source_authority, systems_service))
+    from .character_feature_capacities import resource_roles
+    capacity_resource_roles = resource_roles(
+        effective_values["source_authority_definition"], state, feature_value_presentations)
+    artificer_assignments = {}
+    if (include_assignment_observations and source_authority is not None
+            and any(row.get("capacity_only") and row.get("available")
+                    for row in feature_value_presentations.values())):
+        from .character_artificer_assignments import presentation as assignment_presentation
+        artificer_assignments = assignment_presentation(
+            effective_values["source_authority_definition"], state, source_authority, systems_service,
+            capacities=feature_value_presentations, recipe_view=artificer_recipes)
     if (
         not is_xianxia_system(projected_definition.system)
         and selected_derivation_components & {"spellcasting", "spellcasting_math"}
@@ -997,15 +1009,13 @@ def build_character_mechanics_projection(
         if "attack_reminders" in selected_components
         else []
     )
-    defensive_rules = (
-        project_defensive_rules(dict(getattr(projected_definition, "stats", {}) or {}))
-        if "defensive_rules" in selected_components
-        else []
-    )
-    if "defensive_rules" in selected_components and source_authority is not None:
-        from .character_item_capabilities import qualified_sleep_ward_rules
-        defensive_rules.extend(project_defensive_rules({"defensive_state": {
-            "rules": qualified_sleep_ward_rules(source_authority, definition)}}))
+    defensive_rules = []
+    if "defensive_rules" in selected_components:
+        from .character_item_capabilities import compose_defensive_rules
+        raw_rules = dict(getattr(projected_definition, "stats", {}) or {}).get("defensive_state") or {}
+        defensive_rules = project_defensive_rules({"defensive_state": {"rules": compose_defensive_rules(
+            source_authority, definition, list(raw_rules.get("rules") or []),
+            current_definition=projected_definition, item_catalog=effective_values["item_catalog"])}})
     from .character_spell_slots import (spell_slot_contributions, spell_slot_totals,
         spell_slot_options_from_contributions)
     slot_contributions = spell_slot_contributions(projected_definition.spellcasting, projected_state, source_authority)
@@ -1064,6 +1074,8 @@ def build_character_mechanics_projection(
         "spell_metric_presentations": spell_metric_presentations,
         "feature_value_presentations": feature_value_presentations,
         "artificer_recipe_view": artificer_recipes,
+        "artificer_assignment_view": artificer_assignments,
+        "capacity_resource_roles": capacity_resource_roles,
         "parent_facet_presentations": parent_facet_presentations,
         "background_feature_projections": background_feature_projections,
         "source_authority_identity": source_authority.identity if source_authority is not None else "",

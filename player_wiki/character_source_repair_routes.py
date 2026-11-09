@@ -1196,7 +1196,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                 checkpoint = result.spell_checkpoint
                 if checkpoint is not None and (type(checkpoint) is not PendingSpellCheckpoint
                         or not checkpoint.matches_definition(result.candidate)
-                        or result.provenance.get("schema_version") not in {5, 6, 7}
+                        or result.provenance.get("schema_version") not in {5, 6, 7, 8}
                         or result.provenance.get("spell_origin_plan", {}).get("current_checkpoint") != checkpoint.checkpoint):
                     raise SourceRepairError("The current spell confirmation changed before projection.")
                 bases = result.provenance.get("renewed_source_bases", {})
@@ -1650,7 +1650,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             saved_witnesses = load_verified_numeric_actions(
                                 campaign_slug, character_slug, strict=True,
                             )
-                            if native_result.provenance.get("schema_version") in {4, 5, 6, 7}:
+                            if native_result.provenance.get("schema_version") in {4, 5, 6, 7, 8}:
                                 from .character_spell_grants import grant_model_digest, qualify_native_grants
                                 saved_view = qualify_native_grants(result.definition,
                                     _character_source_service(dependencies, campaign_slug, campaign),
@@ -1660,7 +1660,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                     == native_result.provenance["spell_origin_plan"]["grant_model_digest"]
                                     and {row["id"] for row in saved_view.occurrences if row.get("status") == "VERIFIED"}
                                     == set(native_result.provenance["spell_origin_plan"]["supported_grant_ids"]))
-                            if native_result.provenance.get("schema_version") in {5, 6, 7}:
+                            if native_result.provenance.get("schema_version") in {5, 6, 7, 8}:
                                 from .character_spell_reconstruction import NativeSpellReconstructionFact, validate_saved_spell_checkpoint
                                 checkpoint = native_result.provenance["spell_origin_plan"]["current_checkpoint"]
                                 validate_saved_spell_checkpoint(record.definition, result.definition, checkpoint)
@@ -1695,7 +1695,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                      readback_authority.field_status(marker["target_id"]).is_effective)
                                 for marker in authorization_batch
                             )
-                            if native_result.provenance.get("schema_version") in {5, 6, 7}:
+                            if native_result.provenance.get("schema_version") in {5, 6, 7, 8}:
                                 pools = [pool for pool in readback_authority.spell_choice_ledger["pools"]
                                          if pool["class_row_id"] == checkpoint["class_row"]["row_id"]]
                                 confirmed_candidate = confirmed_candidate and bool(pools) and all(
@@ -1800,7 +1800,7 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                             if native_result.atomic_item_adoption is not None:
                                 extra["atomic_item_request"] = native_result.atomic_item_adoption.request()
                             summary = ("Confirm current spell roles, migrate feature grants, and preserve play state"
-                                       if native_result.provenance.get("schema_version") in {5, 6, 7} else
+                                       if native_result.provenance.get("schema_version") in {5, 6, 7, 8} else
                                        "Migrate source-feature spell grants, preserve historical observations, and revalidate native values"
                                        if "spell_origin_plan" in native_result.provenance else
                                        "Revalidate retained native choices against current sources and derive current values")
@@ -1932,15 +1932,15 @@ def register_character_source_repair_route(app: Any, *, dependencies: Any) -> No
                                                     for template in native_result.candidate.resource_templates
                                                     for row in state.get("resources", []) if row.get("id") == template["id"]
                                                 ]}
-                            if native_result.provenance.get("schema_version") in {6, 7}:
+                            if native_result.provenance.get("schema_version") in {6, 7, 8}:
                                 review["native"]["current_resource_inputs"] = deepcopy(native_result.provenance["current_resource_inputs"])
                             if native_result.provenance.get("schema_version") == 7:
                                 review["native"]["atomic_item_adoption"] = deepcopy(native_result.provenance["atomic_item_adoption"])
                             if "spell_origin_plan" in native_result.provenance:
                                 review["native"]["spell_origins"] = native_result.provenance["spell_origin_plan"]
-                                if native_result.provenance["schema_version"] in {4, 5, 6, 7}:
+                                if native_result.provenance["schema_version"] in {4, 5, 6, 7, 8}:
                                     review["native"]["feature_grants"] = native_grant_review_guarded(native_result)
-                                if native_result.provenance["schema_version"] in {5, 6, 7}:
+                                if native_result.provenance["schema_version"] in {5, 6, 7, 8}:
                                     checkpoint = native_result.provenance["spell_origin_plan"]["current_checkpoint"]
                                     review["native"]["current_spell_mode"] = checkpoint["mode"]
                                     from .character_spell_reconstruction import _marks as checkpoint_marks

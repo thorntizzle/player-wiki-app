@@ -899,8 +899,18 @@ class CharacterUpdateApplyEngine:
             if not any(type(witness) is NativeElectiveDecision
                     and witness.get("outcomes") == list(proof.outcomes) for witness in actions):
                 return False
+            if proof.external_adoption is not None:
+                from .character_external_proficiencies import ExternalProficiencyCustody, target
+                external = proof.external_adoption
+                if (not any(type(witness) is ExternalProficiencyCustody
+                            and witness.get("acquisition") == external["acquisition"] for witness in actions)
+                        or not any(type(witness) is dict and witness.get("authorization") == external["authorization"]
+                            and witness.get("source_basis_digest") == external["basis_digest"] for witness in actions)):
+                    return False
             authority = self.coordinator.numeric_authority_provider(result_record, result_record.definition)
             if authority is None or any(not authority.field_status(path).is_effective for path in proof.bases):
+                return False
+            if proof.external_adoption is not None and not authority.field_status(target(external["acquisition"])).is_effective:
                 return False
         if recompute.pending_native_reconstruction is not None:
             from .character_reconstruction_authority import reconstruction_mirrors_match

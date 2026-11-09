@@ -354,6 +354,7 @@ Recording a completed advancement retains its original typed import fields, warn
 - Native Source Repair compares fresh manual and numeric audit witnesses with detached request-local equality baselines. Plain mappings remain distinct from the exact trusted aggregate, class-choice and grant-custody types; comparison includes the complete mapping and provenance, including generation aliases and migration receipts. Unknown subclasses and unsupported nested values refuse. Comparison data grants no custody and never reconstructs trusted objects: authority consumers retain the original independently verified witnesses. Fresh source-phase, reserved-publication and durable-readback checks remain separate. This compatibility contract does not establish successful Review, save, reopen or latency qualification.
 - Per-entry Systems access checks ask only for campaign presence. Ordinary services retain their virtual campaign lookup and absence/error behavior; an open source-phase service proves the exact campaign from captured valid settings without rebuilding the page/link graph. Closed or cross-campaign phases still refuse before actor shortcuts. Actor, entry visibility, enabled-source, override, clamp, floor, role and fresh closing checks remain required; full graph hydration remains available to actual page consumers. This removes redundant projection work without sharing mutable Campaign objects or establishing a latency guarantee.
 - Ordinary item Source Repair batches immutable Systems/page facts inside each normalization and review-refresh source phase. Numeric authority and character models are rebuilt; audit witnesses retain their independent verification. Existing item-action audit fields select this read optimization without granting permission or proof. The publisher owns separate preflight and reserved readers; an open phase is explicitly passed to its numeric consumers and never reused across reservation or durable readback. Complete source readsets, including absent/empty results, retain fresh closing checks. Exact normalized candidate, item baseline, policy, actor, target/state/config, proof/CAS and durable outcome checks remain required; shared normalization retains conservative numeric error ownership. This source contract does not establish exercised runtime or measured latency improvement.
+- Native Source Repair requalification uses one lossless compact JSON encoding for its complete audit through preflight, reserved/final comparisons and sanitized storage. This applies only to the supported native-requalification event and proof families; unrelated audit formatting stays unchanged. Every field, the sanitizer and the 65,536-byte publication bound remain intact. Successful publication still requires the full actual final payload to fit; formatting supplies no authority. Existing raw audit rows and their witness identities are never rewritten.
 - Audit history readers isolate each row's parsed metadata, witnesses, origin envelopes and mutable validation memo. Every connected reader, including native requalification's history producer, admits mappings before event-field access and skips malformed individual envelopes. A decision-bearing event requires complete numeric batch/target/basis admission and successful typed and origin finalization; a rejected batch cannot release occupancy through a retirement witness. Malformed or refused current evidence cannot borrow another row's metadata, erase prior valid history or publish a partial decision event. A valid empty decision list is distinct from a refused empty numeric batch. Independently valid legacy numeric evidence retains its existing behavior when separate grant custody is unavailable. Strict initial query failures still refuse; non-strict query failures return no witnesses. Individual malformed rows remain withheld without weakening actor, generation, marker or source checks.
 - Guarded native editing retires copied manager numeric claims when their exact target, value or owner changes. It retains unaffected claims, raw choices and audit history; retired claims supply no current automation until an explicit supported Source Repair review qualifies them again. An ordinary edit does not mint replacement manager proof.
 - An authorized managed resource's historical template and current capacity are distinct. Shared projection and resource-service authority derive current capacity from its unique qualified managed owner, required formula inputs and current qualified item activation. Equipment or attunement changes do not restore spent uses. Missing or conflicting managed-owner or formula qualification withholds capacity instead of exposing an old maximum. Unqualified item bonuses supply no benefit; an independently qualified base capacity can remain available. Unsupported manual resources retain their existing contract.
@@ -462,6 +463,12 @@ Recognized literal learned-cantrip/count-exemption clauses contribute only their
 
 - The first structured Linden Pass item records cover Consecrated Huran Blade, Censer of Last Light, Hourglass Pendant, Staff of the Crescent Moon, Psionic Circlet, and Innovator's Bolt. Supported fields can automate after approval; item spell support, item defensive rules, Hourglass Pendant, Psionic Circlet, Innovator's Bolt base weapon mechanics, and Innovator's Bolt enchanted bullet spell-slot expenditure now work from approved item metadata rather than title-specific character fallbacks. The approved Innovator's Bolt action exposes Incendiary, Booming, and Smoke choices and spends spell slots; the damage scaling, saves, nearby-creature damage, prone/deafened, and blinded riders are displayed as table-managed reference text and are not applied automatically. Bespoke effects such as extra damage riders, incense healing, initiative shifting, custom Sleep target resolution, and Innovator's Bolt area/condition resolution remain tabletop/reference-level unless a narrower structured hook covers them.
 
+Current item defensive presentation resolves source-owned ward precedence before
+dropping rule identities. A qualified declaration supersedes only its proven
+legacy rule, independently of current attunement, so an inactive passive cannot
+revive an old copied ward. Current activation and explicit exceptions determine
+the displayed benefit; unrelated defenses and historical data are preserved.
+
 ## Noncasting Item Uses
 
 Approved `item_capabilities` v3 supports a noncasting attack-d20 substitution:
@@ -551,6 +558,41 @@ unchanged.
 - `scripts/export_dnd_character_sheet.py`
 
 ### Authenticated optional language outcomes
+
+The existing language Review can also confirm one full **already observed external
+language** together with explicit declines of unused unresolved optional slots.
+The manager selects the retained label, confirms its external meaning and records
+evidence, keeping unrecorded historical origin/time as null. This never assigns
+the language to a species/background slot or changes the ordered observations.
+The combined producer proves complete source-slot accounting and exactly one
+unowned surplus against the actual original. A private prospective acquisition
+carrier binds the complete proposed candidate and its exact equipment-activation
+projection from the same authenticated state. It accepts neither unrelated
+equipment edits nor projection warnings, and it is not confirmed custody. The
+temporary projection binding is not persisted as a restriction on later equipment
+changes; saved acquisition custody retains its ordinary durable contract.
+
+The one signed Review/Apply preserves the exact import bytes and entire play-state
+tuple, canonical spell/grant/checkpoint data and all unrelated inputs. The external
+language retains its external-proficiency marker; the other retained languages
+receive the normal elective markers. Their disjoint union covers the complete
+current language vector. Initial and reserved checks regenerate the same combined
+proposal. Strict combined language receipt3 replay authenticates the real
+prior/published generations and one audit before issuing both external and
+elective custody. Its closed numeric-marker encoding preserves credential
+redaction; the complete language audit is checked before reservation and again
+under lock before writes, then matched to actual post-append confirmation.
+Earlier language receipts1/2 and standalone external acquisition receipts1/2
+retain their independent contracts. No full reconstruction save, new language, historical
+learning event or database migration is implied.
+
+Post-reconstruction language decisions keep current source links strict. When
+an unchanged historical owner reference predates a supported correction, the
+issuer can retain that frame only after matching its existing target-local
+admitted reconstruction origin and generation. Current ability inputs and
+language slots remain separately qualified. Reserved refresh repeats the check;
+the saved reader uses already admitted chronological witnesses. Historical
+references neither restore old mechanics nor authorize a copied frame.
 
 Reconstructed native characters may retain their original choice observations
 while a current campaign DM/admin explicitly declines an unresolved optional
@@ -960,6 +1002,26 @@ Infused Items table at that class's level. These are maximum simultaneous-object
 values, not spendable uses. Missing or changed source data remains unavailable.
 No counter is initialized, clamped, refilled or authorized by this projection;
 historical resource rows and their unresolved current-count semantics persist.
+
+An unambiguous qualified capacity-only feature supersedes its old counter's
+active resource/control and linked-badge roles across shared character views.
+Those historical counters remain stored, but are not assignment counts or active
+repair requirements. Qualified assignment presentation distinguishes confirmed
+empty from unknown or unavailable ownership; only its admitted ledger supplies
+current occupancy. Other resources, including manual resources, retain their
+normal behavior. Lightweight counts do not load unrelated assignment managers.
+
+Current preparation adoption also separates positively qualified historical
+capacity counters from active resource inputs. The reviewed publication preserves
+their complete templates and observations without issuing reset or remaining-use
+authority. A closed source-bound historical role record supports saved replay;
+earlier proof formats retain their existing complete resource requirements.
+Unknown or ambiguous roles do not receive this exclusion. Genuine managed pools,
+spell slots and Hit Dice retain their ordinary admission and preservation checks.
+Current resource requalification retains authenticated model and physical-tracker
+ownership through pool, template and basis derivation. This does not promote raw
+selection or alias observations into custody, and historical replay keeps its
+separate sealed-input contract.
 
 Reconstruction offers explicit typed adoption of the complete existing
 source-linked Artificer recipe set. It preserves every original feature row and

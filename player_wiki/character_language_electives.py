@@ -82,7 +82,8 @@ def _decision_languages(prior, submitted, contracts):
 
 
 def operation(value):
-    if (not _keys(value, 2) or set(value) != {"kind", "decisions"}
+    combined = type(value) is dict and "external_acquisition" in value
+    if (not _keys(value, 3) or set(value) != {"kind", "decisions"} | ({"external_acquisition"} if combined else set())
             or type(value["kind"]) is not str or value["kind"] != OPERATION or type(value["decisions"]) is not list
             or not 1 <= len(value["decisions"]) <= MAX_OUTCOMES):
         raise SourceRepairError("Language decisions need exact current optional slots.")
@@ -102,7 +103,13 @@ def operation(value):
             raise SourceRepairError("A language decision has a duplicate or unsupported slot.")
         seen.add(row["slot_id"])
         rows.append(deepcopy(row))
-    return {"kind": OPERATION, "decisions": rows}
+    result = {"kind": OPERATION, "decisions": rows}
+    if combined:
+        from .character_external_proficiencies import language_declaration
+        if any(row["outcome"] != "declined" for row in rows):
+            raise SourceRepairError("An external language confirmation may accompany only unused-slot declines.")
+        result["external_acquisition"] = language_declaration(value["external_acquisition"])
+    return result
 
 
 def source_slots(definition, service, *, owners=None, slots=None):
@@ -309,6 +316,25 @@ def decision_fields(definition, service):
 def form_operation(values, fields):
     if type(values) is not dict or len(values) > MAX_OUTCOMES:
         raise SourceRepairError("Language decision inputs exceed their bounded form.")
+    values = dict(values)
+    declaration = None
+    external_names = {"external_proficiency_" + key for key in (
+        "name", "kind", "origin_status", "origin", "occurred_at", "evidence", "confirmed")}
+    if "confirm_external_language" in values:
+        confirmation = values.pop("confirm_external_language")
+        if confirmation != "yes":
+            raise SourceRepairError("Confirm the full existing external language explicitly.")
+        from .character_external_proficiencies import acquisition_row, ADOPT_EXISTING
+        raw = {key: values.pop(key) for key in external_names if key in values}
+        raw["external_proficiency_category"] = "languages"
+        raw.setdefault("external_proficiency_confirmed", "yes")
+        row = acquisition_row(raw)
+        declaration = {"operation": ADOPT_EXISTING, **{key: value for key, value in row.items() if key != "schema_version"}}
+    elif external_names & set(values):
+        raw = {key: values.pop(key) for key in external_names if key in values}
+        if any(value not in ("", "external_grant" if key.endswith("_kind") else "unrecorded"
+                             if key.endswith("_origin_status") else "") for key, value in raw.items()):
+            raise SourceRepairError("External language fields require their explicit confirmation.")
     by_name = {"language_slot_" + row["slot_id"]: row for row in fields}
     decisions = []
     for key, value in values.items():
@@ -328,7 +354,8 @@ def form_operation(values, fields):
                 "selected_value": label, "permission": permission})
         else:
             raise SourceRepairError("The selected language decision is unavailable for this slot.")
-    return operation({"kind": OPERATION, "decisions": decisions})
+    return operation({"kind": OPERATION, "decisions": decisions,
+                      **({"external_acquisition": declaration} if declaration is not None else {})})
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,6 +372,7 @@ class PendingElectiveDecision:
     authority: Any
     source_snapshot_digest: str
     refresh: Callable[[], Any] = field(repr=False, compare=False)
+    external_adoption: dict[str, Any] | None = field(default=None, repr=False)
     _lineage: Any = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
@@ -406,9 +434,18 @@ class PendingElectiveDecision:
                 or fresh.slot_contracts != self.slot_contracts
                 or fresh.decision_id != self.decision_id or fresh.markers != self.markers
                 or fresh.bases != self.bases or fresh.authority.identity != self.authority.identity
+                or fresh.external_adoption != self.external_adoption
                 or fresh.source_snapshot_digest != self.source_snapshot_digest):
             raise SourceRepairError("The language decision, source or access changed.")
         return fresh.authority
+
+    def validate_external_delta(self, prior_record, definition):
+        if self.external_adoption is None:
+            raise SourceRepairError("The language Review contains no acquisition.")
+        expected = _combined_replay(prior_record.definition, self.operation, self.outcomes,
+                                    self.markers, self.external_adoption)
+        if expected.to_dict() != definition.to_dict():
+            raise SourceRepairError("The combined language Review changed unrelated original fields.")
 
 
 def _record_identity(record, actor_id, *, historical=False):
@@ -462,17 +499,41 @@ def _language_values(definition, service, witnesses):
         raise SourceRepairError("Every retained language needs its current source and slot decision.")
 
 
+def _language_projection(prior, submitted, outcomes):
+    payload = deepcopy(prior.to_dict())
+    payload["source"]["native_reconstruction_choices"][FRAME_KEY] = deepcopy(list(outcomes))
+    # Combined operations contain only declines, so observations stay ordered.
+    if "external_acquisition" in submitted:
+        payload["proficiencies"]["languages"] = list(prior.proficiencies.get("languages", []))
+    return CharacterDefinition.from_dict(payload)
+
+
+def _combined_replay(prior, submitted, outcomes, markers, external):
+    """Exact proposed/saved value replay, never prior custody or issuance."""
+    from .character_external_proficiencies import _candidate, ADOPT_EXISTING
+    from .character_source_repair import add_numeric_authorization
+    if type(external) is not dict or set(external) != {"operation", "acquisition", "authorization", "basis_digest"}:
+        raise SourceRepairError("The combined acquisition descriptor is malformed.")
+    candidate = _language_projection(prior, submitted, outcomes)
+    candidate = _candidate(candidate, external["acquisition"], external["authorization"], operation=ADOPT_EXISTING)
+    payload = candidate.to_dict()
+    frame = payload["source"]["native_reconstruction_choices"]
+    frame["unresolved_proficiencies"] = [name for name in frame.get("unresolved_proficiencies", []) if name != "languages"]
+    for marker in markers:
+        payload = add_numeric_authorization(payload, marker)
+    return CharacterDefinition.from_dict(payload)
+
+
 def issue_decision(*, record, submitted, actor_id, systems_service, campaign_page_records, refresh):
     from .committed_publication import active
     from .character_source_repair import (load_verified_numeric_actions, load_verified_manual_actions,
         numeric_authorization_record, add_numeric_authorization)
     from .character_source_authority import build_reconciled_source_authority, numeric_target_values
-    from .character_reconstruction_authority import reconstruction_source_links
+    from .character_reconstruction_authority import retained_reconstruction_source_links
     if (not active() or record.definition.system != "DND-5E" or type(actor_id) is not int
             or actor_id < 1 or type(record.committed_revision) is not int or record.committed_revision < 1
             or not callable(refresh)):
         raise SourceRepairError("A language decision requires an admitted committed Character.")
-    reconstruction_source_links(record.definition)
     submitted = operation(submitted)
     definition = record.definition
     numeric = load_verified_numeric_actions(definition.campaign_slug, definition.character_slug, strict=True)
@@ -482,10 +543,19 @@ def issue_decision(*, record, submitted, actor_id, systems_service, campaign_pag
         state=record.state_record.state, state_revision=record.state_record.revision,
         systems_service=systems_service, campaign_page_records=campaign_page_records,
         verified_numeric_actions=numeric, verified_manual_actions=manual)
+    declaration = submitted.get("external_acquisition")
+    if declaration is not None:
+        from .character_read_foundation import read_item_catalog_for_definition
+        prior_authority = prior_authority.bind_current_numbers(definition, record.state_record.state,
+            systems_service=systems_service, campaign_page_records=campaign_page_records,
+            item_catalog=read_item_catalog_for_definition(definition, systems_service=systems_service,
+                                                        campaign_page_records=campaign_page_records))
+        prior_authority.require_authoring_inputs()
     if any(prior_authority.field_status(f"stats.ability_scores.{ability}.score").status != "VERIFIED"
            or not _hex(prior_authority.numeric_basis_digest(f"stats.ability_scores.{ability}.score"))
            for ability in ("str", "dex", "con", "int", "wis", "cha")):
         raise SourceRepairError("Original reconstructed input custody is unavailable.")
+    retained_reconstruction_source_links(definition, numeric)
     admitted = resolve_outcomes(definition, systems_service, numeric)
     slots = {slot["slot_id"]: slot for slot in source_slots(definition, systems_service)}
     prior = _record_identity(record, actor_id)
@@ -498,6 +568,8 @@ def issue_decision(*, record, submitted, actor_id, systems_service, campaign_pag
             raise SourceRepairError("Only an exact unresolved optional language slot may be decided.")
         key = slot["owner_id"], slot["position"]
         previous = admitted.get(key)
+        if declaration is not None and previous is not None:
+            raise SourceRepairError("A combined confirmation requires previously undecided unused slots.")
         if intent["outcome"] == "selected":
             if previous is None or previous["outcome"] != "declined" or intent["selected_value"] not in slot["options"]:
                 raise SourceRepairError("A later language selection must explicitly supersede its valid decline.")
@@ -511,6 +583,8 @@ def issue_decision(*, record, submitted, actor_id, systems_service, campaign_pag
         result[key] = _row(slot, intent, decision_id)
         changed.append(key)
     if not changed:
+        if declaration is not None:
+            raise SourceRepairError("A combined confirmation requires an actual unused-slot decision.")
         _language_values(definition, systems_service, numeric)
         return None
     rows = [deepcopy(result[key]) for key in sorted(result)]
@@ -523,6 +597,22 @@ def issue_decision(*, record, submitted, actor_id, systems_service, campaign_pag
         definition.campaign_slug, definition.character_slug, decision_id, actor_id,
         record.committed_revision + 1, digest(rows)), _issuer=_ISSUER)
     actions = tuple(numeric) + (pending_witness,)
+    external = None
+    external_target = None
+    if declaration is not None:
+        from .character_external_proficiencies import (
+            language_adoption_descriptor, _require_observation_attribution, _candidate, ADOPT_EXISTING,
+            pending_language_adoption, resolve as external_acquisitions, target as external_target_for)
+        external_acquisitions(definition, numeric)
+        external = language_adoption_descriptor(definition, declaration, actor_id,
+            record.committed_revision, record.state_record.revision, digest(record.state_record.state), check_future=True)
+        _require_observation_attribution(candidate, external["acquisition"], prior_authority, systems_service, actions)
+        candidate = _candidate(candidate, external["acquisition"], external["authorization"], operation=ADOPT_EXISTING)
+        external_target = external_target_for(external["acquisition"])
+        pending_acquisition = pending_language_adoption(candidate, external, actor_id=actor_id,
+            state=record.state_record.state, decision_id=decision_id, prior_identity=prior)
+        actions += (pending_acquisition, {"authorization": external["authorization"],
+                                        "source_basis_digest": external["basis_digest"]})
     _language_values(candidate, systems_service, actions)
     frame = candidate.source["native_reconstruction_choices"]
     frame["unresolved_proficiencies"] = [name for name in frame.get("unresolved_proficiencies", []) if name != "languages"]
@@ -537,6 +627,8 @@ def issue_decision(*, record, submitted, actor_id, systems_service, campaign_pag
     for (kind, path, metric), value in values.items():
         if kind != "proficiency" or not path.startswith("proficiencies.languages."):
             continue
+        if path == external_target:
+            continue  # Keep the independently owned external marker, never lend a source slot.
         basis = authority.numeric_basis_digest(path)
         if not _hex(basis):
             raise SourceRepairError("A current language has no closed native source basis.")
@@ -547,14 +639,18 @@ def issue_decision(*, record, submitted, actor_id, systems_service, campaign_pag
         candidate = CharacterDefinition.from_dict(payload)
         markers.append(marker)
         bases[path] = basis
-    if not markers or len(markers) > MAX_OUTCOMES:
+    if (not markers and external is None) or len(markers) > MAX_OUTCOMES:
         raise SourceRepairError("The current retained language set has no bounded native witnesses.")
     actions += tuple({"authorization": marker, "source_basis_digest": bases[marker["target_id"]]} for marker in markers)
     authority = authority_for(candidate, actions)
-    return PendingElectiveDecision(candidate, prior, submitted, tuple(rows), tuple(changed),
+    proof = PendingElectiveDecision(candidate, prior, submitted, tuple(rows), tuple(changed),
         tuple(deepcopy(slots[row["slot_id"]]) for row in submitted["decisions"]),
         decision_id, tuple(markers), bases, authority, authority.source_snapshot_digest, refresh,
+        external_adoption=external,
         _lineage={"issuer": _ISSUER, "owner": None})
+    if external is not None:
+        proof.validate_external_delta(record, candidate)
+    return proof
 
 
 def validate_transition(prior, candidate, proof=None, *, actor_id=None, state=None):
@@ -564,6 +660,9 @@ def validate_transition(prior, candidate, proof=None, *, actor_id=None, state=No
     if type(proof) is not PendingElectiveDecision:
         raise SourceRepairError("Language outcome changes require the exact reviewed manager decision.")
     proof.validate_binding(prior, candidate, state, actor_id)
+    if proof.external_adoption is not None:
+        proof.validate_external_delta(prior, candidate)
+        return
     if candidate.proficiencies.get("languages", []) != _decision_languages(
             prior.definition, proof.operation, proof.slot_contracts):
         raise SourceRepairError("The reviewed language observation order or declared grant changed.")
@@ -582,16 +681,16 @@ def validate_transition(prior, candidate, proof=None, *, actor_id=None, state=No
         raise SourceRepairError("A language decision changed an unrelated original input or observation.")
 
 
-def historical_choices_equal(prior, candidate):
+def historical_choices_equal(prior, candidate, *, exact=False):
     """Retained historical links cannot become new claims with this additive field."""
     left = deepcopy(prior.source.get("native_reconstruction_choices"))
     right = deepcopy(candidate.source.get("native_reconstruction_choices"))
     if type(left) is not dict or type(right) is not dict:
-        return left == right
+        return digest(left) == digest(right) if exact else left == right
     for frame in (left, right):
         frame.pop(FRAME_KEY, None)
         frame["unresolved_proficiencies"] = [name for name in frame.get("unresolved_proficiencies", []) if name != "languages"]
-    return left == right
+    return digest(left) == digest(right) if exact else left == right
 
 
 def prepare_decision_state(prior_record, definition, state, proof, actor_id, *, exact_state_json=None):
@@ -605,12 +704,64 @@ def prepare_decision_state(prior_record, definition, state, proof, actor_id, *, 
     return PreparedCharacterState(deepcopy(state), raw)
 
 
-def confirmed_metadata(proof, *, definition, prior_record, state, actor_id, generation,
-                       review_digest, plan_digest, source_digest, policy_digest, review_basis):
-    proof.validate_binding(prior_record, definition, state, actor_id, published_generation=generation)
+def _decode_external_receipt(value, *, version, character_slug):
+    """Decode only the closed numeric fragment, never credential-shaped data.
+
+    Receipt2 retains its original spelling and digest. Receipt3 uses an explicit
+    numeric marker field; the in-memory producer descriptor remains unchanged.
+    Decoding supplies values for replay, never acquisition custody.
+    """
+    from .character_external_proficiencies import (
+        ADOPT_EXISTING, FIELDS, PROVENANCE as external_provenance,
+        language_declaration, target, basis)
+    from .character_source_repair import _valid_numeric_witness_marker
+    from .character_source_authority import numeric_value_digest
+    marker_key = "authorization" if version == 2 else "numeric_marker"
+    if (type(version) is not int or version not in {2, 3}
+            or not _keys(value, 4) or set(value) != {"operation", "acquisition", marker_key, "basis_digest"}
+            or type(value["operation"]) is not str or value["operation"] != ADOPT_EXISTING):
+        raise SourceRepairError("The combined language receipt fragment is malformed.")
+    row, marker = value["acquisition"], value[marker_key]
+    if (not _keys(row, len(FIELDS)) or set(row) != FIELDS
+            or type(row["schema_version"]) is not int or row["schema_version"] != 1
+            or not _hex(row["id"]) or row["category"] != "languages"):
+        raise SourceRepairError("The combined language acquisition is malformed.")
+    declaration = language_declaration({"operation": ADOPT_EXISTING,
+        **{key: row[key] for key in ("category", "name", "kind", "origin", "occurred_at", "evidence")}})
+    if row != {"schema_version": 1, "id": row["id"],
+               **{key: child for key, child in declaration.items() if key != "operation"}}:
+        raise SourceRepairError("The combined language acquisition is not canonical.")
+    if (not _keys(marker, 8) or set(marker) != {"schema_version", "character_slug", "target_kind",
+            "target_id", "metric", "value_digest", "action_id", "provenance"}
+            or any(type(marker[key]) is not str for key in marker if key != "schema_version")
+            or not _valid_numeric_witness_marker(marker, character_slug, external_provenance)
+            or marker["target_kind"] != "proficiency" or marker["metric"] != "grant"
+            or marker["target_id"] != target(row) or marker["action_id"] != row["id"]
+            or marker["value_digest"] != numeric_value_digest(row["name"])
+            or not _hex(value["basis_digest"]) or value["basis_digest"] != basis(row)):
+        raise SourceRepairError("The combined language numeric marker or basis changed.")
+    return {"operation": ADOPT_EXISTING, "acquisition": deepcopy(row),
+            "authorization": deepcopy(marker), "basis_digest": value["basis_digest"]}
+
+
+def _encode_external_receipt(value, *, character_slug):
+    """Persist only a validated numeric marker under its unambiguous name."""
+    admitted = _decode_external_receipt(value, version=2, character_slug=character_slug)
+    return {"operation": admitted["operation"], "acquisition": admitted["acquisition"],
+            "numeric_marker": admitted["authorization"], "basis_digest": admitted["basis_digest"]}
+
+
+def _metadata_values(proof, *, definition, prior_record, state, actor_id, generation,
+                     review_digest, plan_digest, source_digest, policy_digest, review_basis):
+    """Deterministic plain values shared by prewrite and actual confirmation."""
+    review_fields = {"actor_user_id", "campaign_slug", "character_slug", "prior_generation",
+        "primary_sha256", "secondary_sha256", "state_revision", "state_digest", "source_digest",
+        "policy_digest", "plan_digest", "native_digest", "semantic_digest"}
     if (any(not _hex(value) for value in (review_digest, plan_digest, source_digest, policy_digest))
             or type(generation) is not int or generation != prior_record.committed_revision + 1
-            or not _keys(review_basis)
+            or not _keys(review_basis) or set(review_basis) != review_fields
+            or any(not _hex(review_basis[key]) for key in ("primary_sha256", "secondary_sha256",
+                "state_digest", "source_digest", "policy_digest", "plan_digest", "native_digest", "semantic_digest"))
             or review_basis.get("actor_user_id") != actor_id
             or type(review_basis.get("actor_user_id")) is not int
             or (review_basis.get("campaign_slug"), review_basis.get("character_slug")) != (
@@ -627,13 +778,18 @@ def confirmed_metadata(proof, *, definition, prior_record, state, actor_id, gene
             or review_basis.get("source_digest") != source_digest
             or review_basis.get("policy_digest") != policy_digest):
         raise SourceRepairError("The signed language review basis changed before confirmation.")
-    receipt = {"schema_version": 1, **deepcopy(proof.prior_identity),
+    if proof.external_adoption is not None:
+        proof.validate_external_delta(prior_record, definition)
+    receipt = {"schema_version": 3 if proof.external_adoption is not None else 1, **deepcopy(proof.prior_identity),
         "decision_id": proof.decision_id, "review_digest": review_digest,
         "plan_digest": plan_digest, "source_digest": source_digest, "policy_digest": policy_digest,
         "published_generation": generation, "definition_digest": digest(definition.to_dict()),
         "outcomes": deepcopy(list(proof.outcomes)), "changed_slots": [list(key) for key in proof.changed_slots],
         "operation": deepcopy(proof.operation), "slot_contracts": deepcopy(list(proof.slot_contracts)),
         "language_authorizations": deepcopy(list(proof.markers)), "language_basis_digests": deepcopy(proof.bases)}
+    if proof.external_adoption is not None:
+        receipt["external_acquisition"] = _encode_external_receipt(
+            proof.external_adoption, character_slug=definition.character_slug)
     return {"manager_action": OPERATION, OPERATION: receipt,
         "numeric_actor_id": actor_id, "action_id": proof.decision_id,
         "source_snapshot_digest": proof.source_snapshot_digest,
@@ -642,6 +798,30 @@ def confirmed_metadata(proof, *, definition, prior_record, state, actor_id, gene
         "preserved_state_digest": digest(state), "preserved_state_raw_digest": proof.prior_identity["prior_state_raw_digest"],
         "preserved_state_tuple_digest": proof.prior_identity["prior_state_tuple_digest"],
         "preserved_assignment_digest": proof.prior_identity["assignment_digest"]}
+
+
+def prospective_metadata(proof, *, definition, prior_record, state, actor_id, generation,
+                         review_digest, plan_digest, source_digest, policy_digest, review_basis):
+    """Preflight values for the expected next generation, never confirmation."""
+    if type(proof) is not PendingElectiveDecision:
+        raise SourceRepairError("A prospective language audit requires its genuine reviewed proof.")
+    proof.validate_binding(prior_record, definition, state, actor_id)
+    return _metadata_values(proof, definition=definition, prior_record=prior_record,
+        state=state, actor_id=actor_id, generation=generation, review_digest=review_digest,
+        plan_digest=plan_digest, source_digest=source_digest, policy_digest=policy_digest,
+        review_basis=review_basis)
+
+
+def confirmed_metadata(proof, *, definition, prior_record, state, actor_id, generation,
+                       review_digest, plan_digest, source_digest, policy_digest, review_basis):
+    """Confirm actual appended generation/import binding before emitting values."""
+    if type(proof) is not PendingElectiveDecision:
+        raise SourceRepairError("A confirmed language audit requires its genuine reviewed proof.")
+    proof.validate_binding(prior_record, definition, state, actor_id, published_generation=generation)
+    return _metadata_values(proof, definition=definition, prior_record=prior_record,
+        state=state, actor_id=actor_id, generation=generation, review_digest=review_digest,
+        plan_digest=plan_digest, source_digest=source_digest, policy_digest=policy_digest,
+        review_basis=review_basis)
 
 
 def _observe_language_admission(kind, *, audit_row=None, refusal=0, error=None,
@@ -695,6 +875,9 @@ def verified_decision_batch(connection, campaign, character, audit_row, metadata
         "prior_state_digest", "prior_state_raw_digest", "prior_state_tuple_digest",
         "assignment_digest", "outcomes", "changed_slots", "operation", "slot_contracts",
         "language_authorizations", "language_basis_digests"}
+    combined = type(receipt) is dict and type(receipt.get("schema_version")) is int and receipt["schema_version"] in {2, 3}
+    if combined:
+        fields.add("external_acquisition")
     refusal, observed_error, succeeded = 0, None, False
     try:
         actor = audit_row["actor_user_id"]
@@ -706,7 +889,7 @@ def verified_decision_batch(connection, campaign, character, audit_row, metadata
                 or type(audit_row["metadata_json"]) is not str or len(audit_row["metadata_json"].encode("utf-8")) > 65536
                 or type(audit_row["id"]) is not int or not _keys(receipt) or set(receipt) != fields
                 or not _keys(reviewed) or set(reviewed) != review_fields
-                or type(receipt["schema_version"]) is not int or receipt["schema_version"] != 1
+                or type(receipt["schema_version"]) is not int or receipt["schema_version"] not in {1, 2, 3}
                 or metadata.get("source") != "character_update_preview" or metadata.get("manager_action") != OPERATION
                 or metadata.get("numeric_actor_id") != actor or type(metadata.get("numeric_actor_id")) is not int
                 or metadata.get("action_id") != receipt["decision_id"]
@@ -752,6 +935,8 @@ def verified_decision_batch(connection, campaign, character, audit_row, metadata
             refusal = 3
             return ()
         submitted = operation(receipt["operation"])
+        if ("external_acquisition" in submitted) != combined:
+            return ()
         contracts = receipt["slot_contracts"]
         if type(contracts) is not list or len(contracts) != len(submitted["decisions"]):
             refusal = 4
@@ -822,6 +1007,20 @@ def verified_decision_batch(connection, campaign, character, audit_row, metadata
         before, _ = _generation(connection, campaign, character,
             receipt["prior_definition_digest"], prior_row["actor_user_id"], receipt["prior_generation"])
         prior = CharacterDefinition.from_dict(before)
+        from .character_reconstruction_authority import retained_reconstruction_source_links
+        retained_reconstruction_source_links(prior, prior_witnesses, connection=connection)
+        external = None
+        external_target = None
+        if combined:
+            from .character_external_proficiencies import (language_adoption_descriptor,
+                resolve as external_acquisitions, target as external_target_for)
+            external_acquisitions(prior, prior_witnesses)
+            external = language_adoption_descriptor(prior, submitted["external_acquisition"], actor,
+                receipt["prior_generation"], receipt["prior_state_revision"], receipt["prior_state_digest"])
+            if _decode_external_receipt(receipt["external_acquisition"],
+                    version=receipt["schema_version"], character_slug=character) != external:
+                return ()
+            external_target = external_target_for(external["acquisition"])
         previous = {(row["owner_id"], row["position"]): row for row in outcome_rows(prior)}
         current = {(row["owner_id"], row["position"]): row for row in receipt["outcomes"]}
         changed = receipt["changed_slots"]
@@ -888,7 +1087,7 @@ def verified_decision_batch(connection, campaign, character, audit_row, metadata
             frame["source"]["source_authorizations"] = [row for row in frame["source"].get("source_authorizations", [])
                 if not (row.get("target_kind") == "proficiency" and type(row.get("target_id")) is str
                     and row["target_id"].startswith("proficiencies.languages."))]
-        if old != new:
+        if not combined and old != new:
             refusal = 18
             return ()
         expected_languages = _decision_languages(prior, submitted, contracts)
@@ -899,7 +1098,11 @@ def verified_decision_batch(connection, campaign, character, audit_row, metadata
         values = numeric_target_values(definition, {})
         targets = {path: (metric, value) for (kind, path, metric), value in values.items()
             if kind == "proficiency" and path.startswith("proficiencies.languages.")}
-        if (type(batch) is not list or not 1 <= len(batch) <= MAX_OUTCOMES or type(bases) is not dict
+        if combined:
+            if external_target not in targets:
+                return ()
+            del targets[external_target]
+        if (type(batch) is not list or not (0 if combined else 1) <= len(batch) <= MAX_OUTCOMES or type(bases) is not dict
                 or len(batch) != len(targets) or set(bases) != set(targets)
                 or any(not _hex(value) for value in bases.values())):
             refusal = 20
@@ -915,10 +1118,32 @@ def verified_decision_batch(connection, campaign, character, audit_row, metadata
                 refusal = 21
                 return ()
             seen.add(marker["target_id"])
+        if combined:
+            expected = _combined_replay(prior, submitted, receipt["outcomes"], batch, external)
+            if (expected.to_dict() != definition.to_dict()
+                    or any((row["owner_id"], row["position"]) in previous for row in contracts)
+                    or not _valid_numeric_witness_marker(external["authorization"], character, "native_external_proficiency")
+                    or external["authorization"]["value_digest"] != numeric_value_digest(
+                        values[("proficiency", external_target, "grant")])
+                    or stored.count(external["authorization"]) != 1):
+                return ()
+            from .character_update_apply import canonical_digest, _semantic_rows_payload
+            from .character_reconstruction_routes import language_elective_semantic_rows
+            if (canonical_digest({"operation": submitted, "definition": definition.to_dict(),
+                    "source": receipt["source_digest"], "policy": receipt["policy_digest"]}) != receipt["plan_digest"]
+                    or canonical_digest({"operation": submitted, "outcomes": receipt["outcomes"]}) != reviewed["native_digest"]
+                    or canonical_digest(_semantic_rows_payload(language_elective_semantic_rows(prior, definition)))
+                        != reviewed["semantic_digest"]):
+                return ()
         witness = NativeElectiveDecision(receipt["outcomes"], origin=("confirmed_language_decision",
             campaign, character, audit_row["id"], actor, generation["revision"], digest(receipt)), _issuer=_ISSUER)
         result = (witness, *( {"authorization": deepcopy(marker), "source_basis_digest": bases[marker["target_id"]]}
                           for marker in batch))
+        if combined:
+            from .character_external_proficiencies import custody
+            result += (custody(definition, external["acquisition"], origin=("confirmed_external_proficiency",
+                audit_row["id"], actor, generation["revision"], receipt["definition_digest"])),
+                {"authorization": deepcopy(external["authorization"]), "source_basis_digest": external["basis_digest"]})
         succeeded = True
         return result
     except (KeyError, TypeError, ValueError) as error:
@@ -932,7 +1157,8 @@ def verified_decision_batch(connection, campaign, character, audit_row, metadata
 def confirmed_batch_for_audit(witnesses, audit_id, metadata):
     """Forward already-admitted custody into renewal; never reload an audit."""
     receipt = metadata.get(OPERATION)
-    if type(receipt) is not dict:
+    if (type(receipt) is not dict or type(receipt.get("schema_version")) is not int
+            or receipt["schema_version"] not in {1, 2, 3}):
         return ()
     matches = [witness for witness in witnesses if type(witness) is NativeElectiveDecision
         and witness.origin[0] == "confirmed_language_decision" and witness.origin[3] == audit_id
@@ -946,7 +1172,26 @@ def confirmed_batch_for_audit(witnesses, audit_id, metadata):
     accepted = tuple(witness for witness in witnesses if type(witness) is dict
         and witness.get("authorization") in markers
         and witness.get("source_basis_digest") == bases.get(witness.get("authorization", {}).get("target_id")))
-    return accepted if len(accepted) == len(markers) else ()
+    if len(accepted) != len(markers):
+        return ()
+    if receipt["schema_version"] in {2, 3}:
+        from .character_external_proficiencies import ExternalProficiencyCustody
+        try:
+            external = _decode_external_receipt(receipt.get("external_acquisition"),
+                version=receipt["schema_version"], character_slug=receipt.get("character_slug"))
+        except (KeyError, TypeError, ValueError):
+            return ()
+        custody = [witness for witness in witnesses if type(witness) is ExternalProficiencyCustody
+            and witness.origin == ("confirmed_external_proficiency", audit_id, receipt.get("actor_user_id"),
+                receipt.get("published_generation"), receipt.get("definition_digest"))
+            and witness.get("acquisition") == external.get("acquisition")]
+        external_markers = [witness for witness in witnesses if type(witness) is dict
+            and witness.get("authorization") == external.get("authorization")
+            and witness.get("source_basis_digest") == external.get("basis_digest")]
+        if len(custody) != 1 or len(external_markers) != 1:
+            return ()
+        accepted += tuple(external_markers)
+    return accepted
 
 
 # Finite ordinary callback surface omitted by invocation-owned current inputs.

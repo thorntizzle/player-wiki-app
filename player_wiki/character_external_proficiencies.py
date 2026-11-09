@@ -123,14 +123,82 @@ def custody(definition, row, *, origin):
         "character_slug": definition.character_slug, "acquisition": deepcopy(row)}, origin=origin)
 
 
+_PENDING_ISSUER = object()
+
+
+def _pending_scope(definition, targets):
+    """Bind every proposed field except the explicitly renewed language frame."""
+    payload = deepcopy(definition.to_dict())
+    source = payload["source"]
+    source["source_authorizations"] = [row for row in source.get("source_authorizations", [])
+        if not (type(row) is dict and row.get("target_kind") == "proficiency"
+                and row.get("metric") == "grant" and row.get("target_id") in targets)]
+    frame = source["native_reconstruction_choices"]
+    frame["unresolved_proficiencies"] = [name for name in frame.get("unresolved_proficiencies", []) if name != "languages"]
+    return digest(payload)
+
+
+class PendingExternalProficiency(dict):
+    """Private prospective input, never a confirmed acquisition or JSON receipt."""
+    def __init__(self, definition, row, *, state, actor_id, decision_id, prior_identity, _issuer=None):
+        from .character_source_repair import _sha256_hex
+        if (_issuer is not _PENDING_ISSUER or type(actor_id) is not int or actor_id < 1
+                or not _sha256_hex(decision_id) or type(prior_identity) is not dict
+                or prior_identity.get("actor_user_id") != actor_id or row["category"] != "languages"
+                or type(definition) is not CharacterDefinition or type(state) is not dict
+                or prior_identity.get("campaign_slug") != definition.campaign_slug
+                or prior_identity.get("character_slug") != definition.character_slug
+                or not _sha256_hex(prior_identity.get("prior_state_digest"))
+                or digest(state) != prior_identity["prior_state_digest"]):
+            raise SourceRepairError("A pending acquisition requires its genuine combined producer.")
+        targets = tuple(sorted(f"proficiencies.languages.{name.casefold()}"
+                               for name in definition.proficiencies.get("languages", [])))
+        if not targets or len(targets) != len(set(targets)):
+            raise SourceRepairError("A pending acquisition needs one complete unique language vector.")
+        from .character_equipment_activation import effective_definition
+        projected, warnings = effective_definition(definition, state)
+        if warnings:
+            raise SourceRepairError("Equipment activation needs repair before confirming an existing language.")
+        super().__init__(campaign_slug=definition.campaign_slug,
+                         character_slug=definition.character_slug, acquisition=deepcopy(row))
+        # Raw validation and ordinary source authority read different views of
+        # the same candidate. Bind both complete views to this exact prior state;
+        # no equipment fields are ignored and neither view becomes saved custody.
+        self.origin = ("pending_external_proficiency", actor_id, decision_id, row["id"], targets,
+                       _pending_scope(definition, targets), _pending_scope(projected, targets),
+                       digest(prior_identity))
+
+    def matches(self, definition, row):
+        from .character_source_repair import _sha256_hex
+        targets = tuple(sorted(f"proficiencies.languages.{name.casefold()}"
+                               for name in definition.proficiencies.get("languages", [])))
+        return (type(self) is PendingExternalProficiency and type(self.origin) is tuple
+            and len(self.origin) == 8 and self.origin[0] == "pending_external_proficiency"
+            and type(self.origin[1]) is int and self.origin[1] > 0
+            and all(_sha256_hex(self.origin[index]) for index in (2, 3, 5, 6, 7))
+            and self.origin[3] == row["id"] and type(self.origin[4]) is tuple and self.origin[4] == targets
+            and _pending_scope(definition, self.origin[4]) in (self.origin[5], self.origin[6])
+            and dict(self) == {"campaign_slug": definition.campaign_slug,
+                "character_slug": definition.character_slug, "acquisition": row})
+
+
 def resolve(definition, witnesses):
+    from .character_language_electives import PendingElectiveOutcome, FRAME_KEY
     rows = stored(definition)
     for row in rows:
         expected = {"campaign_slug": definition.campaign_slug, "character_slug": definition.character_slug,
                     "acquisition": row}
-        matches = [item for item in witnesses if type(item) is ExternalProficiencyCustody
-                   and dict(item) == expected and type(item.origin) is tuple and len(item.origin) == 5
-                   and item.origin[0] == "confirmed_external_proficiency"]
+        matches = [item for item in witnesses if (
+            type(item) is ExternalProficiencyCustody and dict(item) == expected
+            and type(item.origin) is tuple and len(item.origin) == 5
+            and item.origin[0] == "confirmed_external_proficiency") or (
+            type(item) is PendingExternalProficiency and item.matches(definition, row)
+            and any(type(outcome) is PendingElectiveOutcome and type(outcome.origin) is tuple
+                and len(outcome.origin) == 7
+                and outcome.origin[:3] == ("pending_language_decision", definition.campaign_slug, definition.character_slug)
+                and outcome.origin[3:5] == (item.origin[2], item.origin[1])
+                and outcome.get("outcomes") == definition.source["native_reconstruction_choices"].get(FRAME_KEY, [])
+                for outcome in witnesses))]
         if len(matches) != 1:
             raise SourceRepairError("An external proficiency needs its independently confirmed acquisition receipt.")
     return rows
@@ -141,11 +209,74 @@ def source_bases(definition, witnesses):
 
 
 def _identifier(prior, row, actor_id, *, state_digest=None):
-    return digest({"campaign": prior.definition.campaign_slug, "character": prior.definition.character_slug,
-        "actor": actor_id, "generation": prior.committed_revision,
-        "definition": digest(prior.definition.to_dict()), "state_revision": prior.state_record.revision,
-        "state_digest": state_digest if state_digest is not None else digest(prior.state_record.state),
+    return _identifier_values(prior.definition, row, actor_id, prior.committed_revision,
+        prior.state_record.revision, state_digest if state_digest is not None else digest(prior.state_record.state))
+
+
+def _identifier_values(definition, row, actor_id, generation, state_revision, state_digest):
+    return digest({"campaign": definition.campaign_slug, "character": definition.character_slug,
+        "actor": actor_id, "generation": generation,
+        "definition": digest(definition.to_dict()), "state_revision": state_revision,
+        "state_digest": state_digest,
         "acquisition": {key: value for key, value in row.items() if key != "id"}})
+
+
+def acquisition_row(values, *, check_future=True):
+    """The ordinary editor's bounded declaration, without an issued identity."""
+    category, kind = values.get("external_proficiency_category"), values.get("external_proficiency_kind")
+    if (type(category) is not str or category not in {"tools", "languages"}
+            or type(kind) is not str or kind not in {"training", "external_grant"}):
+        raise SourceRepairError("Choose tool or language proficiency and its acquisition kind.")
+    if values.get("external_proficiency_confirmed") != "yes":
+        raise SourceRepairError("Confirm that this is a full current proficiency, not a rumor or temporary translation.")
+    status = values.get("external_proficiency_origin_status")
+    origin = text(values.get("external_proficiency_origin"), "Acquisition origin", optional=True)
+    if type(status) is not str or status not in {"known", "unrecorded"} or (status == "known") != (origin is not None):
+        raise SourceRepairError("Choose a known origin with its evidence, or explicitly retain an unrecorded origin.")
+    row = {"schema_version": 1, "category": category,
+        "name": text(values.get("external_proficiency_name"), "Proficiency name", limit=128),
+        "kind": kind, "origin": origin,
+        "occurred_at": _date(values.get("external_proficiency_occurred_at")),
+        "evidence": text(values.get("external_proficiency_evidence"), "Acquisition evidence")}
+    if kind == "training" and origin is None:
+        raise SourceRepairError("A training acquisition needs its known training origin.")
+    if check_future and row["occurred_at"] is not None and datetime.fromisoformat(row["occurred_at"]) > datetime.now(timezone.utc):
+        raise SourceRepairError("A completed acquisition cannot have a future time.")
+    return row
+
+
+_LANGUAGE_ROW_KEYS = ("category", "name", "kind", "origin", "occurred_at", "evidence")
+LANGUAGE_DECLARATION_FIELDS = frozenset({"operation", *_LANGUAGE_ROW_KEYS})
+
+
+def language_declaration(value):
+    if (type(value) is not dict or set(value) != LANGUAGE_DECLARATION_FIELDS
+            or value.get("operation") != ADOPT_EXISTING or value.get("category") != "languages"):
+        raise SourceRepairError("Combine only one existing language confirmation with unused optional slots.")
+    fields = {"external_proficiency_" + key: value[key] or ""
+              for key in _LANGUAGE_ROW_KEYS}
+    fields.update(external_proficiency_origin_status="known" if value["origin"] is not None else "unrecorded",
+                  external_proficiency_confirmed="yes")
+    row = acquisition_row(fields, check_future=False)
+    expected = {"operation": ADOPT_EXISTING, **{key: row[key] for key in _LANGUAGE_ROW_KEYS}}
+    if value != expected:
+        raise SourceRepairError("The existing language declaration is not canonical.")
+    return deepcopy(expected)
+
+
+def language_adoption_descriptor(prior, declaration, actor_id, generation, state_revision, state_digest, *, check_future=False):
+    declaration = language_declaration(declaration)
+    row = {"schema_version": 1, **{key: declaration[key] for key in _LANGUAGE_ROW_KEYS}}
+    if check_future and row["occurred_at"] is not None and datetime.fromisoformat(row["occurred_at"]) > datetime.now(timezone.utc):
+        raise SourceRepairError("A completed acquisition cannot have a future time.")
+    row["id"] = _identifier_values(prior, row, actor_id, generation, state_revision, state_digest)
+    return {"operation": ADOPT_EXISTING, "acquisition": row,
+            "authorization": _marker(prior, row), "basis_digest": basis(row)}
+
+
+def pending_language_adoption(definition, descriptor, *, state, actor_id, decision_id, prior_identity):
+    return PendingExternalProficiency(definition, descriptor["acquisition"], actor_id=actor_id,
+        state=state, decision_id=decision_id, prior_identity=prior_identity, _issuer=_PENDING_ISSUER)
 
 
 def _candidate(prior_definition, row, marker, *, operation=ADD):
@@ -246,27 +377,12 @@ def prepare(record, values, *, systems_service, item_catalog, campaign_page_reco
             record.definition, record.state_record.state, systems_service=systems_service,
             campaign_page_records=list(campaign_page_records), item_catalog=item_catalog)
     authority.require_authoring_inputs()
-    category, kind = values.get("external_proficiency_category"), values.get("external_proficiency_kind")
-    if (type(category) is not str or category not in {"tools", "languages"}
-            or type(kind) is not str or kind not in {"training", "external_grant"}):
-        raise SourceRepairError("Choose tool or language proficiency and its acquisition kind.")
-    if values.get("external_proficiency_confirmed") != "yes":
-        raise SourceRepairError("Confirm that this is a full current proficiency, not a rumor or temporary translation.")
+    row = acquisition_row(values)
     if operation == ADD:
+        category = row["category"]
         for name in record.definition.proficiencies.get(category, []):
             if not authority.field_status(f"proficiencies.{category}.{name.casefold()}").is_effective:
                 raise SourceRepairError("Resolve existing proficiency ownership before adding another acquisition.")
-    status = values.get("external_proficiency_origin_status")
-    origin = text(values.get("external_proficiency_origin"), "Acquisition origin", optional=True)
-    if type(status) is not str or status not in {"known", "unrecorded"} or (status == "known") != (origin is not None):
-        raise SourceRepairError("Choose a known origin with its evidence, or explicitly retain an unrecorded origin.")
-    row = {"schema_version": 1, "category": category,
-        "name": text(values.get("external_proficiency_name"), "Proficiency name", limit=128),
-        "kind": kind, "origin": origin,
-        "occurred_at": _date(values.get("external_proficiency_occurred_at")),
-        "evidence": text(values.get("external_proficiency_evidence"), "Acquisition evidence")}
-    if row["occurred_at"] is not None and datetime.fromisoformat(row["occurred_at"]) > datetime.now(timezone.utc):
-        raise SourceRepairError("A completed acquisition cannot have a future time.")
     if operation == ADOPT_EXISTING:
         _require_observation_attribution(record.definition, row, authority, systems_service, old_witnesses)
     row["id"] = _identifier(record, row, actor)
@@ -335,7 +451,7 @@ def validate_metadata(metadata, actor_id):
 
 def validate_transition(prior_record, definition, state, *, actor_id, metadata=None,
                         audit_event_type=None, operation_kind=None, prior_authority=None, witnesses=None,
-                        import_metadata=None, systems_service_provider=None):
+                        import_metadata=None, systems_service_provider=None, language_proof=None):
     from .character_recorded_advancement import manager_allowed
     from .character_source_repair import load_verified_numeric_actions
     from .character_store import CharacterStateConflictError
@@ -348,6 +464,16 @@ def validate_transition(prior_record, definition, state, *, actor_id, metadata=N
             raise CharacterStateConflictError("An acquisition confirmation must publish its one new acquisition receipt.")
         return False
     from .committed_publication import active
+    if language_proof is not None and getattr(language_proof, "external_adoption", None) is not None:
+        from .character_language_electives import PendingElectiveDecision
+        if (type(language_proof) is not PendingElectiveDecision or not active()
+                or operation_kind != "character_update_apply" or audit_event_type != "character_update_applied"
+                or not manager_allowed(definition.campaign_slug)
+                or import_metadata is not None and import_metadata.to_dict() != prior_record.import_metadata.to_dict()):
+            raise CharacterStateConflictError("A combined acquisition needs its manager-owned language Review.")
+        language_proof.recheck(prior_record, definition, state, actor_id)
+        language_proof.validate_external_delta(prior_record, definition)
+        return True
     if (not active() or operation_kind != "interactive_update" or audit_event_type != "character_native_edited"
             or not manager_allowed(definition.campaign_slug)):
         raise CharacterStateConflictError("An acquired proficiency needs its manager-owned native editor confirmation.")

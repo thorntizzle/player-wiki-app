@@ -107,21 +107,21 @@ def _exact_authority(definition, state, authority):
         raise ValueError("Assignments require current exact character and state authority.")
 
 
-def _source_context(definition, state, authority, service, kind):
+def _source_context(definition, state, authority, service, kind, *, capacities=None, recipe_view=None):
     from .character_feature_capacities import presentations
     from .character_infusion_recipes import view, _entry
     _exact_authority(definition, state, authority)
     target = INFUSE if kind == "infusions" else TINKERING
     ids = [r.get("id") for r in definition.features if type(r) is dict
            and type(r.get("systems_ref")) is dict and r["systems_ref"].get("entry_key") == target]
-    caps = presentations(definition, state, authority, service)
+    caps = presentations(definition, state, authority, service) if capacities is None else capacities
     capacity = caps.get(ids[0]) if len(ids) == 1 else None
     if not capacity or not capacity.get("available"):
         raise ValueError("The current source, class owner and simultaneous capacity are not qualified.")
     options, known, unsupported = [], [], []
     basis = {"capacity": capacity["source_basis_digest"], "owner": capacity["class_row_id"], "feature": ids[0]}
     if kind == "infusions":
-        knowledge = view(definition, state, authority, service)
+        knowledge = view(definition, state, authority, service) if recipe_view is None else recipe_view
         if not knowledge.get("typed") or not knowledge.get("available"):
             raise ValueError("Assignments require currently qualified typed recipe knowledge.")
         known = knowledge["known"]
@@ -328,7 +328,7 @@ def _qualified_member(definition, state, authority, service, kind, context, fram
     return member
 
 
-def presentation(definition, state, authority, service):
+def presentation(definition, state, authority, service, *, capacities=None, recipe_view=None):
     result = {"manual_effects": True, "manual_note": MANUAL_NOTE}
     for kind in _KINDS:
         view = {"available": False, "status": "unavailable", "maximum": None, "count": None,
@@ -341,8 +341,10 @@ def presentation(definition, state, authority, service):
                 view["can_deactivate"] = policy is not None
                 if policy is not None:
                     view["deactivation_policy"] = {"revision": policy[0], "sha256": policy[1]}
-            context = _source_context(definition, state, authority, service, kind)
-            view.update({k: deepcopy(context[k]) for k in ("maximum", "options", "known", "unsupported")})
+            context = _source_context(definition, state, authority, service, kind,
+                                      capacities=capacities, recipe_view=recipe_view)
+            view.update({k: deepcopy(context[k]) for k in (
+                "maximum", "options", "known", "unsupported", "feature_id", "class_row_id", "source_basis_digest")})
             frame = _ledger(state, definition)
             if frame is not None and not _checkpoint(definition, state, authority):
                 raise ValueError("Assignment audit custody is unavailable; observations remain unchanged.")

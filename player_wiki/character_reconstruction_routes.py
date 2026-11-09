@@ -425,6 +425,17 @@ def language_elective_semantic_rows(before, after):
     rows.append(SemanticDiffRow(SemanticCategory.BUILD, "qualified_languages", "Current source-qualified languages",
         ChangeKind.UPDATED, ", ".join(before.proficiencies.get("languages", [])),
         ", ".join(after.proficiencies.get("languages", []))))
+    from .character_external_proficiencies import stored
+    prior_external = stored(before)
+    for acquisition in stored(after):
+        if acquisition in prior_external:
+            continue
+        rows.append(SemanticDiffRow(SemanticCategory.BUILD, "external_language:" + acquisition["id"],
+            "Existing external language: " + acquisition["name"], ChangeKind.UPDATED,
+            "Retained observation; not a starting language choice",
+            "Full current proficiency; origin: " + (acquisition["origin"] or "unrecorded")
+            + "; occurred: " + (acquisition["occurred_at"] or "unrecorded")
+            + "; evidence: " + acquisition["evidence"]))
     rows.append(SemanticDiffRow(SemanticCategory.PLAY_STATE, "exact_state", "Complete current play state",
         ChangeKind.UPDATED, "Current observations", "Exactly preserved; no initialization or refill"))
     return tuple(rows)
@@ -488,4 +499,5 @@ def reconstruction_view(dependencies, campaign_slug, character_slug, *, preview_
     return render_template("character_reconstruction.html", campaign=campaign, character=record.definition,
         reconstruction=context, values=values, keys=KEYS, error=error, review=review,
         language_elective_fields=language_fields,
+        external_language_options=list(record.definition.proficiencies.get("languages", [])),
         available=available, preview_only=preview_only, active_nav="characters"), status

@@ -235,7 +235,7 @@ def _confirmed_history(connection: Any, campaign: str, character: str) -> list[d
             event = row["event_type"]
             if (event == "character_update_applied" and metadata.get("manager_action") == "native_requalify"
                     and isinstance(metadata.get("native_requalification"), dict)
-                    and metadata["native_requalification"].get("schema_version") in {5, 6, 7}):
+                    and metadata["native_requalification"].get("schema_version") in {5, 6, 7, 8}):
                 from .character_source_repair import _strict_grant_audit_json
                 if len(row["metadata_json"].encode("utf-8")) > 64 * 1024:
                     continue
@@ -710,7 +710,7 @@ class NativeRequalification:
 
     def _validate_candidate_binding(self, record, actor_id, action_id=None):
         binding = self._binding
-        if (self.provenance.get("schema_version") in {5, 6, 7}) != (self.spell_checkpoint is not None):
+        if (self.provenance.get("schema_version") in {5, 6, 7, 8}) != (self.spell_checkpoint is not None):
             _fail()
         if (type(binding) is not tuple or len(binding) != 14 or binding[0] is not _NATIVE_RESULT_ISSUER
                 or type(actor_id) is not int or actor_id < 1
@@ -723,11 +723,17 @@ class NativeRequalification:
                     _digest(self.authorizations), _digest(self.provenance),
                     self.authority.identity, self.authority.source_snapshot_digest)):
             _fail()
+        if self.provenance.get("schema_version") == 8:
+            excluded = _historical_capacity_keys(record.definition, self.candidate, self.provenance,
+                                                state=record.state_record.state)
+            if any((row.get("target_kind"), row.get("target_id"), row.get("metric")) in excluded
+                   for row in self.authorizations):
+                _fail()
         if self.spell_checkpoint is not None:
             from .character_spell_reconstruction import PendingSpellCheckpoint
             plan = self.provenance.get("spell_origin_plan")
             if (type(self.spell_checkpoint) is not PendingSpellCheckpoint
-                    or self.provenance.get("schema_version") not in {5, 6, 7}
+                    or self.provenance.get("schema_version") not in {5, 6, 7, 8}
                     or not isinstance(plan, dict) or plan.get("schema_version") not in {3, 4, 5}
                     or self.spell_checkpoint.checkpoint != plan.get("current_checkpoint")
                     or any(plan["current_checkpoint"].get(key) != value for key, value in (
@@ -787,7 +793,7 @@ class NativeRequalification:
         if type(self) is not NativeRequalification or type(identity) is not str or not identity:
             return False
         self._validate_candidate_binding(prior_record, actor_id)
-        if (self.provenance.get("schema_version") not in {6, 7}
+        if (self.provenance.get("schema_version") not in {6, 7, 8}
                 or _digest(definition.to_dict()) != _digest(self.candidate.to_dict())):
             return False
         rows = self.provenance.get("current_resource_inputs")
@@ -860,13 +866,15 @@ def native_requalification_state(record, result, actor_id, *, source_read_phase=
                                     atomic_item_adoption=result.atomic_item_adoption)
     except ActivationPrerequisiteError as exc:
         raise SourceRepairError("Native activation cannot retain this desired state; separate manager repair is required.") from exc
+    if result.provenance.get("schema_version") == 8 and _digest(desired) != _digest(record.state_record.state):
+        _fail()
     return desired
 
 
 def retained_requalification_inputs(proof):
     """Losslessly expand compact headers before any historical validation."""
     retained = proof.get("retained_inputs") if isinstance(proof, dict) else None
-    if not isinstance(proof, dict) or proof.get("schema_version") not in {3, 4, 5, 6, 7}:
+    if not isinstance(proof, dict) or proof.get("schema_version") not in {3, 4, 5, 6, 7, 8}:
         return retained
     headers = proof.get("origin_headers")
     header_keys = {"audit_id", "actor_user_id", "event_type", "metadata_sha256", "generation"}
@@ -922,12 +930,15 @@ def _compact_retained_origins(retained):
 
 def _retained_resource_source_frame(definition, state, retained, *, systems_service, campaign_page_records,
                                     state_revision, prospective_spell_checkpoint=None,
-                                    atomic_item_adoption=None, spell_origin_plan=None):
+                                    atomic_item_adoption=None, spell_origin_plan=None,
+                                    verified_numeric_actions=None, verified_manual_actions=()):
     """Qualify source/formula inputs without issuing any resource witness.
 
     Callers independently authenticate retained origins first. Current permanent
     owners must also qualify; saved totals and the new batch are not evidence.
     Historical capacity frames deliberately supply no usage/equipment history.
+    Omitted witnesses retain the saved proof3/4 path; current preparation must
+    pass its independently recovered witnesses, never its prospective batch.
     """
     from .character_ability_inputs import KEYS, input_records
     from .character_source_authority import (
@@ -937,9 +948,13 @@ def _retained_resource_source_frame(definition, state, retained, *, systems_serv
     checkpoint_kwargs = ({"prospective_spell_checkpoint": prospective_spell_checkpoint}
         if prospective_spell_checkpoint is not None
         and prospective_spell_checkpoint.matches_definition(definition) else {})
+    current_kwargs = ({"verified_numeric_actions": tuple(verified_numeric_actions),
+                       "verified_manual_actions": tuple(verified_manual_actions)}
+                      if verified_numeric_actions is not None else {})
     baseline = build_reconciled_source_authority(
         definition=definition, state=state, state_revision=state_revision,
-        systems_service=systems_service, campaign_page_records=campaign_page_records, **checkpoint_kwargs)
+        systems_service=systems_service, campaign_page_records=campaign_page_records,
+        **checkpoint_kwargs, **current_kwargs)
     if atomic_item_adoption is not None:
         baseline = atomic_item_adoption.bind_authority(baseline, definition, spell_origin_plan,
                                                       prospective_spell_checkpoint, systems_service)
@@ -956,10 +971,18 @@ def _retained_resource_source_frame(definition, state, retained, *, systems_serv
     provisional = replace(baseline, field_statuses=tuple(
         replace(row, status=VERIFIED, effective=None, reason="baseline_authorized") if row.path in paths else row
         for row in baseline.field_statuses))
+    current_resource_kwargs = {}
+    if verified_numeric_actions is not None:
+        from .character_armor_models import selectors
+        current_resource_kwargs = {
+            "tracker_bindings": provisional.tracker_associations,
+            "armor_selectors": selectors(definition, systems_service, current_kwargs["verified_numeric_actions"]),
+        }
     bases = _source_derived_resource_bases(
         definition, systems_service=systems_service, pages=_eligible_page_records(campaign_page_records),
         verified_class_rows=provisional.verified_class_rows, feature_statuses=provisional.statuses,
-        field_statuses=provisional.field_statuses, feature_composition=provisional.feature_composition)
+        field_statuses=provisional.field_statuses, feature_composition=provisional.feature_composition,
+        **current_resource_kwargs)
     return provisional, bases
 
 
@@ -984,10 +1007,45 @@ def _claimed_resource_paths(definition, history):
     return paths
 
 
+def _historical_capacity_keys(prior, candidate, proof, *, state=None, history=None):
+    """Closed proof8 role exclusions, never numeric/reset admission authority."""
+    if proof.get("schema_version") != 8:
+        return set()
+    if type(proof["schema_version"]) is not int:
+        _fail()
+    plan = proof.get("spell_origin_plan")
+    admissions = proof.get("current_resource_inputs")
+    if (type(plan) is not dict or plan.get("schema_version") != 5
+            or "atomic_item_adoption" in proof or type(admissions) is not list
+            or type(proof.get("renewed_source_bases")) is not dict
+            or type(proof.get("targets")) is not list):
+        _fail()
+    from .character_feature_capacities import verify_historical_counter_inputs
+    try:
+        keys = verify_historical_counter_inputs(prior, candidate,
+            proof.get("historical_capacity_inputs"), state=state)
+    except (ValueError, TypeError, KeyError, AttributeError):
+        _fail()
+    excluded = {key[1] for key in keys}
+    admitted = [row.get("target_id") for row in admissions if type(row) is dict]
+    stored = candidate.source.get("source_authorizations", [])
+    if (len(admitted) != len(admissions) or any(type(path) is not str for path in admitted)
+            or admitted != sorted(set(admitted)) or excluded & set(admitted)
+            or excluded & set(proof.get("renewed_source_bases", {}))
+            or any(type(key) is not list or len(key) != 3
+                   or any(type(value) is not str for value in key) or tuple(key) in keys
+                   for key in proof.get("targets", []))
+            or any(type(marker) is dict and (
+                marker.get("target_kind"), marker.get("target_id"), marker.get("metric")) in keys for marker in stored)
+            or history is not None and excluded & _claimed_resource_paths(prior, history)):
+        _fail()
+    return keys
+
+
 def _admission_feature_rows(prior, proof):
     """Exact missing-owner annotations only; grants never inherit other edits."""
     rows = proof.get("current_resource_inputs")
-    if proof.get("schema_version") == 7 and type(rows) is list and not rows:
+    if proof.get("schema_version") in {7, 8} and type(rows) is list and not rows:
         return deepcopy(prior.features)
     if type(rows) is not list or not 1 <= len(rows) <= 16:
         _fail()
@@ -1128,10 +1186,12 @@ def _historical_admission_pool(prior, row):
 
 def _prepare_current_resource_admissions(original, working, state, missing, retained, *,
         systems_service, campaign_page_records, state_revision, prospective_spell_checkpoint=None,
-        atomic_item_adoption=None, spell_origin_plan=None):
+        atomic_item_adoption=None, spell_origin_plan=None,
+        verified_numeric_actions, verified_manual_actions):
     """Admit genuinely current source inputs, never fabricate a historical origin."""
     from .character_source_authority import _current_managed_pool_owners, _eligible_page_records, _qualified_current_managed_templates
     from .character_equipment_activation import effective_definition
+    from .character_armor_models import selectors
     if not missing:
         return working, []
     if type(missing) is not set or not 1 <= len(missing) <= 16 or any(
@@ -1141,10 +1201,13 @@ def _prepare_current_resource_admissions(original, working, state, missing, reta
     provisional, _ = _retained_resource_source_frame(working, state, retained,
         systems_service=systems_service, campaign_page_records=campaign_page_records,
         state_revision=state_revision, prospective_spell_checkpoint=prospective_spell_checkpoint,
-        atomic_item_adoption=atomic_item_adoption, spell_origin_plan=spell_origin_plan)
+        atomic_item_adoption=atomic_item_adoption, spell_origin_plan=spell_origin_plan,
+        verified_numeric_actions=verified_numeric_actions, verified_manual_actions=verified_manual_actions)
     pools = _current_managed_pool_owners(working, systems_service=systems_service,
         pages=_eligible_page_records(campaign_page_records), verified_class_rows=provisional.verified_class_rows,
-        feature_statuses=provisional.statuses, infer_missing=True, feature_composition=provisional.feature_composition)
+        feature_statuses=provisional.statuses, infer_missing=True, feature_composition=provisional.feature_composition,
+        tracker_bindings=provisional.tracker_associations,
+        armor_selectors=selectors(working, systems_service, verified_numeric_actions))
     payload = deepcopy(working.to_dict())
     observations = state.get("resources")
     if type(observations) is not list:
@@ -1185,12 +1248,14 @@ def _prepare_current_resource_admissions(original, working, state, missing, reta
     provisional, bases = _retained_resource_source_frame(candidate, state, retained,
         systems_service=systems_service, campaign_page_records=campaign_page_records,
         state_revision=state_revision, prospective_spell_checkpoint=prospective_spell_checkpoint,
-        atomic_item_adoption=atomic_item_adoption, spell_origin_plan=spell_origin_plan)
+        atomic_item_adoption=atomic_item_adoption, spell_origin_plan=spell_origin_plan,
+        verified_numeric_actions=verified_numeric_actions, verified_manual_actions=verified_manual_actions)
     bound = provisional.bind_current_numbers(candidate, state, systems_service=systems_service,
         campaign_page_records=campaign_page_records)
     activated, _ = effective_definition(candidate, state)
     expected = _qualified_current_managed_templates(bound, activated,
-        systems_service=systems_service, campaign_page_records=campaign_page_records)
+        systems_service=systems_service, campaign_page_records=campaign_page_records,
+        armor_selectors=selectors(candidate, systems_service, verified_numeric_actions))
     for record in records:
         path = record["target_id"]; tracker_id = path.removeprefix("resource:")
         template = next(row for row in candidate.resource_templates if row["id"] == tracker_id)
@@ -1212,7 +1277,7 @@ def _verify_current_resource_admissions(prior, candidate, proof, retained, *, hi
     They never set a future current or replace an initial_current observation.
     """
     rows = proof.get("current_resource_inputs")
-    if proof.get("schema_version") == 7 and type(rows) is list and not rows:
+    if proof.get("schema_version") in {7, 8} and type(rows) is list and not rows:
         if _digest(prior.features) != _digest(candidate.features):
             _fail()
         return set()
@@ -1893,8 +1958,34 @@ def _prepare_native_requalification(*, record: Any, systems_service: Any,
         background_tools, elective_witnesses=numeric)
     missing_resources = set()
     claimed_resources = _claimed_resource_paths(definition, history)
+    historical_capacity_inputs, historical_capacity_keys = [], set()
+    if reconstructed and spell_checkpoint is not None and spell_origin_plan.get("schema_version") == 5:
+        from .character_feature_capacities import (
+            historical_counter_candidates, prepare_historical_counter_inputs, verify_historical_counter_inputs,
+        )
+        if historical_counter_candidates(working_definition):
+            # Authenticated ability bases are inputs, not current effective
+            # scores. Use the ordinary source/state-bound numeric derivation
+            # for capacity qualification, keeping initial for transitions.
+            capacity_authority = initial.bind_current_numbers(
+                working_definition, state, systems_service=systems_service,
+                campaign_page_records=campaign_page_records)
+            historical_capacity_inputs = prepare_historical_counter_inputs(
+                working_definition, state, capacity_authority, systems_service)
+        if historical_capacity_inputs:
+            if atomic_item_adoption is not None:
+                _fail()  # Proof8 must never be overwritten/downgraded to atomic proof7.
+            try:
+                historical_capacity_keys = verify_historical_counter_inputs(
+                    definition, working_definition, historical_capacity_inputs, state=state)
+            except (ValueError, TypeError, KeyError, AttributeError):
+                _fail()
+            if {key[1] for key in historical_capacity_keys} & claimed_resources:
+                _fail()  # An admitted old resource is not an exclusion fallback.
     for (kind, path, metric), raw in numeric_target_values(definition, state).items():
         if kind == "resource":
+            if (kind, path, metric) in historical_capacity_keys:
+                continue
             if path.startswith("spell_slot:") and not reconstructed:
                 _fail()
             if (reconstructed and spell_checkpoint is not None and path.startswith("resource:")
@@ -1906,7 +1997,8 @@ def _prepare_native_requalification(*, record: Any, systems_service: Any,
         definition, working_definition, state, missing_resources, retained,
         systems_service=systems_service, campaign_page_records=campaign_page_records,
         state_revision=record.state_record.revision, prospective_spell_checkpoint=spell_checkpoint,
-        atomic_item_adoption=atomic_item_adoption, spell_origin_plan=spell_origin_plan)
+        atomic_item_adoption=atomic_item_adoption, spell_origin_plan=spell_origin_plan,
+        verified_numeric_actions=numeric, verified_manual_actions=manual)
     # The prior authority remains the original input for transition validation.
     # Source-qualified missing-owner annotations belong to the desired frame.
     desired_initial = authority_for(working_definition) if current_resource_inputs else initial
@@ -1981,20 +2073,26 @@ def _prepare_native_requalification(*, record: Any, systems_service: Any,
             or (not set(state_ids) <= set(prior_ids) if reconstructed else set(prior_ids) != set(state_ids))):
         _fail()
     from .character_source_authority import _qualified_current_managed_templates
+    from .character_armor_models import selectors
     provisional, resource_bases = _retained_resource_source_frame(
         candidate, state, retained, systems_service=systems_service,
         campaign_page_records=campaign_page_records, state_revision=record.state_record.revision,
         prospective_spell_checkpoint=spell_checkpoint,
-        atomic_item_adoption=atomic_item_adoption, spell_origin_plan=spell_origin_plan)
+        atomic_item_adoption=atomic_item_adoption, spell_origin_plan=spell_origin_plan,
+        verified_numeric_actions=numeric, verified_manual_actions=manual)
     bound = provisional.bind_current_numbers(candidate, state, systems_service=systems_service,
         campaign_page_records=campaign_page_records)
     current_candidate, _ = activation_definition(candidate, state)
     expected_templates = _qualified_current_managed_templates(
-        bound, current_candidate, systems_service=systems_service, campaign_page_records=campaign_page_records)
-    if (len(candidate_ids) != len(set(candidate_ids)) or set(candidate_ids) != set(expected_templates)
+        bound, current_candidate, systems_service=systems_service, campaign_page_records=campaign_page_records,
+        armor_selectors=selectors(candidate, systems_service, numeric))
+    historical_ids = {key[1].removeprefix("resource:") for key in historical_capacity_keys}
+    if (len(candidate_ids) != len(set(candidate_ids)) or set(candidate_ids) - historical_ids != set(expected_templates)
             or any(value is None for value in expected_templates.values())):
         _fail()
     for template in candidate.resource_templates:
+        if template["id"] in historical_ids:
+            continue
         expected = expected_templates[template["id"]]
         # Historical bootstrap current is not a rule maximum or a refill.
         retained_template = next(row for row in definition.resource_templates if row["id"] == template["id"])
@@ -2016,6 +2114,14 @@ def _prepare_native_requalification(*, record: Any, systems_service: Any,
         if "initial_current" in retained_template:
             template["initial_current"] = expected["initial_current"]
     fresh_values = numeric_target_values(candidate, state)
+    if historical_capacity_keys:
+        try:
+            if verify_historical_counter_inputs(definition, candidate, historical_capacity_inputs,
+                    state=state) != historical_capacity_keys:
+                _fail()
+        except (ValueError, TypeError, KeyError, AttributeError):
+            _fail()
+        fresh_values = {key: value for key, value in fresh_values.items() if key not in historical_capacity_keys}
     _canonical_skill_inputs(candidate)
     _retained_key_closure(fresh_values, retained, background_tools, candidate, current_resource_keys=missing_resources)
     check = authority_for(candidate)
@@ -2108,9 +2214,16 @@ def _prepare_native_requalification(*, record: Any, systems_service: Any,
         if retained_requalification_inputs(provenance) != retained:
             _fail()
     if atomic_item_adoption is not None:
+        if historical_capacity_inputs:
+            _fail()
         provenance["schema_version"] = 7
         provenance["current_resource_inputs"] = current_resource_inputs
         provenance["atomic_item_adoption"] = atomic_item_adoption.descriptor(candidate, final)
+    if historical_capacity_inputs:
+        provenance["schema_version"] = 8
+        provenance["current_resource_inputs"] = current_resource_inputs
+        provenance["historical_capacity_inputs"] = historical_capacity_inputs
+        _historical_capacity_keys(definition, candidate, provenance, state=state, history=history)
     if source_identity(db, campaign, character) != identity:
         _fail()
     result = NativeRequalification(candidate, tuple(batch), provenance, final, spell_checkpoint, atomic_item_adoption)
@@ -2191,19 +2304,21 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
     fields = {"schema_version", "source_identity", "audit_prefix_digest", "prior_generation",
               "prior_definition_digest", "prior_state_revision", "prior_state_digest", "retained_inputs",
               "native_lineage", "background_tools", "source_snapshot_digest", "targets"}
-    if isinstance(proof, dict) and proof.get("schema_version") in {2, 3, 4, 5, 6, 7}:
+    if isinstance(proof, dict) and proof.get("schema_version") in {2, 3, 4, 5, 6, 7, 8}:
         fields.update({"capacity_frame", "renewed_source_bases"})
-    if isinstance(proof, dict) and proof.get("schema_version") in {3, 4, 5, 6, 7}:
+    if isinstance(proof, dict) and proof.get("schema_version") in {3, 4, 5, 6, 7, 8}:
         fields.update({"spell_origin_plan", "origin_headers"})
-    if isinstance(proof, dict) and proof.get("schema_version") in {6, 7}:
+    if isinstance(proof, dict) and proof.get("schema_version") in {6, 7, 8}:
         fields.add("current_resource_inputs")
+    if isinstance(proof, dict) and proof.get("schema_version") == 8:
+        fields.add("historical_capacity_inputs")
     if isinstance(proof, dict) and proof.get("schema_version") == 7:
         fields.add("atomic_item_adoption")
     if (type(actor) is not int or actor < 1 or metadata.get("numeric_actor_id") != actor
             or metadata.get("source") != "character_source_repair"
             or metadata.get("manager_action") != "native_requalify"
             or metadata.get("review_action") != "native_requalify"
-            or not isinstance(proof, dict) or set(proof) != fields or proof.get("schema_version") not in {1, 2, 3, 4, 5, 6, 7}
+            or not isinstance(proof, dict) or set(proof) != fields or proof.get("schema_version") not in {1, 2, 3, 4, 5, 6, 7, 8}
             or any(not _sha256_hex(metadata.get(key)) for key in (
                 "review_digest", "candidate_digest", "published_definition_digest", "review_source_digest"))
             or metadata["candidate_digest"] != metadata["published_definition_digest"]
@@ -2213,11 +2328,13 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
             or metadata["published_state_revision"] not in {
                 proof["prior_state_revision"], proof["prior_state_revision"] + 1}
             or (proof.get("schema_version") == 1 and proof.get("source_identity") != source_identity(connection, campaign, character))
-            or (proof.get("schema_version") in {2, 3, 4, 5, 6, 7} and (not isinstance(proof.get("source_identity"), dict)
+            or (proof.get("schema_version") in {2, 3, 4, 5, 6, 7, 8} and (not isinstance(proof.get("source_identity"), dict)
                 or set(proof["source_identity"]) != {"config", "systems", "pages", "page_current"}))
+            or (proof.get("schema_version") == 8
+                and metadata["published_state_revision"] != proof["prior_state_revision"])
             or proof.get("audit_prefix_digest") != _audit_prefix(connection, campaign, character, audit_row["id"])):
         return ()
-    if proof["schema_version"] in {5, 6, 7} and any(not _sha256_hex(proof.get(key)) for key in (
+    if proof["schema_version"] in {5, 6, 7, 8} and any(not _sha256_hex(proof.get(key)) for key in (
             "prior_definition_digest", "prior_state_digest", "source_snapshot_digest", "audit_prefix_digest")):
         return ()
     try:
@@ -2242,7 +2359,7 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
         checkpoint_keys = set()
         origin_identity = None
         origin_service = None
-        if proof["schema_version"] in {3, 4, 5, 6, 7}:
+        if proof["schema_version"] in {3, 4, 5, 6, 7, 8}:
             from .auth import get_systems_service
             plan = proof.get("spell_origin_plan")
             if (type(proof["schema_version"]) is not int or not isinstance(plan, dict)
@@ -2254,14 +2371,14 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
                 origin_service = get_systems_service()
             # Reconstruct from the authenticated ORIGINAL generation and fresh
             # attained sources. The published candidate supplies no origin.
-            if proof["schema_version"] in {4, 5, 6, 7}:
+            if proof["schema_version"] in {4, 5, 6, 7, 8}:
                 if metadata["published_revision"] != prior_revision + 1 or any(plan.get(key) != value for key, value in (
                         ("prior_generation", prior_revision),
                         ("prior_definition_digest", proof["prior_definition_digest"]),
                         ("prior_state_revision", proof["prior_state_revision"]))):
                     return ()
                 corrected, expected_plan = _saved_spell_origin_correction(prior_definition, definition, plan)
-                if proof["schema_version"] in {5, 6, 7}:
+                if proof["schema_version"] in {5, 6, 7, 8}:
                     checkpoint = plan.get("current_checkpoint")
                     if (plan.get("schema_version") not in {3, 4, 5} or not isinstance(checkpoint, dict)
                             or any(checkpoint.get(key) != value for key, value in (
@@ -2289,12 +2406,12 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
                                     action_id=metadata.get("action_id"))
         else:
             preserved += ("equipment_catalog",)
-        if proof["schema_version"] not in {6, 7}:
+        if proof["schema_version"] not in {6, 7, 8}:
             preserved += ("features",)
-        if proof["schema_version"] not in {3, 4, 5, 6, 7}:
+        if proof["schema_version"] not in {3, 4, 5, 6, 7, 8}:
             preserved += ("spellcasting",)
         for name in preserved:
-            if (_digest(prior_payload.get(name)) != _digest(payload.get(name)) if proof["schema_version"] in {3, 4, 5, 6, 7}
+            if (_digest(prior_payload.get(name)) != _digest(payload.get(name)) if proof["schema_version"] in {3, 4, 5, 6, 7, 8}
                     else prior_payload.get(name) != payload.get(name)):
                 return ()
         if dict(prior_payload.get("source") or {}).get("native_progression") != definition.source.get("native_progression"):
@@ -2321,6 +2438,10 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
         from .character_hit_dice import derive_hit_dice_max_pools
         proof_state = _historical_capacity_state(definition, metadata)
         values = numeric_target_values(definition, proof_state)
+        historical_capacity_keys = _historical_capacity_keys(prior_definition, definition, proof,
+            history=[entry for entry in by_audit.values()])
+        if historical_capacity_keys:
+            values = {key: value for key, value in values.items() if key not in historical_capacity_keys}
         retained_keys = []
         for item in retained:
             old = by_audit.get(item.get("audit_id")) if isinstance(item, dict) else None
@@ -2382,7 +2503,7 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
         if tools != sorted(background_tools):
             return ()
         current_resource_keys = set()
-        if proof["schema_version"] in {6, 7}:
+        if proof["schema_version"] in {6, 7, 8}:
             current_resource_keys = _verify_current_resource_admissions(prior_definition, definition,
                 proof, retained, history=[entry for entry in by_audit.values()])
         _retained_key_closure(values, retained, background_tools, definition,
@@ -2399,6 +2520,8 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
         state.setdefault("resources", [])
         state.setdefault("spell_slots", [])
         raw_values = numeric_target_values(definition, state)
+        if historical_capacity_keys:
+            raw_values = {key: value for key, value in raw_values.items() if key not in historical_capacity_keys}
         current_resource_bases = {}
         if proof["schema_version"] in {3, 4}:
             _, current_resource_bases = _retained_resource_source_frame(
@@ -2413,7 +2536,7 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
             if (key in keys or key not in raw_values
                     or numeric_value_digest(raw_values[key]) != marker["value_digest"]
                     or (not source_bound and numeric_target_owner_digest(definition, state, *key) != marker["owner_digest"])
-                    or (source_bound and (proof.get("schema_version") not in {2, 3, 4, 5, 6, 7}
+                    or (source_bound and (proof.get("schema_version") not in {2, 3, 4, 5, 6, 7, 8}
                         or not _sha256_hex(dict(proof.get("renewed_source_bases") or {}).get(marker["target_id"]))))
                     or (proof["schema_version"] in {3, 4} and key[0] == "resource" and (
                         current_resource_bases.get(key[1]) is None
@@ -2428,7 +2551,7 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
             or key in {("field", "stats.proficiency_bonus", "final"), ("field", "stats.max_hp", "final")}
             or key[0] == "field" and key[2] == "base"
             )}
-        optional_spell_keys = {key for key in raw_values if proof.get("schema_version") in {2, 3, 4, 5, 6, 7}
+        optional_spell_keys = {key for key in raw_values if proof.get("schema_version") in {2, 3, 4, 5, 6, 7, 8}
                                and key[0] in {"spell_metric", "spell_choice"}}
         if not expected_keys <= set(keys) <= expected_keys | optional_spell_keys:
             return ()
@@ -2436,16 +2559,16 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
                 or not checkpoint_keys <= set(keys) or checkpoint_keys & set(retained_keys)
                 or any(key not in retained_keys and key not in automatic_keys and key not in checkpoint_keys
                        for key in set(keys) & optional_spell_keys)
-                or proof["schema_version"] in {5, 6, 7} and any(key[0] == "spell_choice" and key not in checkpoint_keys for key in keys)):
+                or proof["schema_version"] in {5, 6, 7, 8} and any(key[0] == "spell_choice" and key not in checkpoint_keys for key in keys)):
             return ()
-        if proof["schema_version"] in {5, 6, 7}:
+        if proof["schema_version"] in {5, 6, 7, 8}:
             earlier_witnesses = (*dict(history_cache or {}).get("prior_numeric_witnesses", ()),
                 *(w for old_id, old_batch in dict(history_cache or {}).get("accepted_batches", {}).items()
                     if old_id < audit_row["id"] for w in old_batch))
             if not _confirmed_spell_metric_keys(prior_definition,
                     _historical_capacity_state(prior_definition, metadata), earlier_witnesses) <= set(keys):
                 return ()
-        if proof.get("schema_version") in {2, 3, 4, 5, 6, 7} and any(marker.get("provenance") != "native_requalification" for marker in batch):
+        if proof.get("schema_version") in {2, 3, 4, 5, 6, 7, 8} and any(marker.get("provenance") != "native_requalification" for marker in batch):
             return ()
         source_bases = dict(proof.get("renewed_source_bases") or {})
         if set(source_bases) != {marker["target_id"] for marker in batch if marker.get("provenance") == "native_requalification"}:
@@ -2463,7 +2586,7 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
             if (_digest(renewed.get("source")) != _digest(payload.get("source"))
                     or source_identity(connection, campaign, character) != origin_identity):
                 return ()
-        if proof["schema_version"] in {4, 5, 6, 7}:
+        if proof["schema_version"] in {4, 5, 6, 7, 8}:
             from .character_spell_grants import grant_model_digest
             if (grant_model_digest(corrected) != grant_model_digest(definition)
                     or any(marker.get("target_kind") == "spell_choice"
@@ -2473,7 +2596,7 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
             renewed = deepcopy(prior_payload)
             renewed["source"]["native_acquisitions"] = deepcopy(corrected.source["native_acquisitions"])
             superseded = ()
-            if proof["schema_version"] in {5, 6, 7}:
+            if proof["schema_version"] in {5, 6, 7, 8}:
                 from .character_spell_reconstruction import superseded_preparation_authorizations
                 superseded = superseded_preparation_authorizations(prior_definition, definition, checkpoint)
                 _require_preparation_retirement_custody(superseded, earlier_witnesses)
@@ -2483,7 +2606,7 @@ def _verified_requalification_batch(connection: Any, campaign: str, character: s
                 return ()
         result = tuple({"authorization": dict(marker), "source_basis_digest": source_bases[marker["target_id"]]}
                      if marker.get("provenance") == "native_requalification" else dict(marker) for marker in batch)
-        if proof["schema_version"] in {5, 6, 7}:
+        if proof["schema_version"] in {5, 6, 7, 8}:
             from .character_spell_reconstruction import reconstruction_facts
             from .character_source_repair import NativeSpellChoiceDecision
             from .character_spell_grants import native_class_choice_state
@@ -2513,12 +2636,14 @@ def _verified_spell_grant_migration_custody(connection, campaign, character, aud
         "prior_definition_digest", "prior_state_revision", "prior_state_digest", "retained_inputs",
         "native_lineage", "background_tools", "source_snapshot_digest", "targets",
         "capacity_frame", "renewed_source_bases", "spell_origin_plan", "origin_headers"}
-    if isinstance(proof, dict) and proof.get("schema_version") in {6, 7}:
+    if isinstance(proof, dict) and proof.get("schema_version") in {6, 7, 8}:
         fields.add("current_resource_inputs")
+    if isinstance(proof, dict) and proof.get("schema_version") == 8:
+        fields.add("historical_capacity_inputs")
     if isinstance(proof, dict) and proof.get("schema_version") == 7:
         fields.add("atomic_item_adoption")
     if (not isinstance(proof, dict) or type(proof.get("schema_version")) is not int
-            or proof["schema_version"] not in {4, 5, 6, 7} or set(proof) != fields or type(actor) is not int or actor < 1
+            or proof["schema_version"] not in {4, 5, 6, 7, 8} or set(proof) != fields or type(actor) is not int or actor < 1
             or metadata.get("numeric_actor_id") != actor
             or metadata.get("source") != "character_source_repair"
             or metadata.get("manager_action") != "native_requalify"
@@ -2548,6 +2673,11 @@ def _verified_spell_grant_migration_custody(connection, campaign, character, aud
             proof["prior_definition_digest"], prior_actor["actor_user_id"], proof["prior_generation"])
         prior = CharacterDefinition.from_dict(prior_payload)
         candidate = CharacterDefinition.from_dict(payload)
+        historical_capacity_keys = _historical_capacity_keys(prior, candidate, proof)
+        if historical_capacity_keys and any(type(marker) is dict and (
+                marker.get("target_kind"), marker.get("target_id"), marker.get("metric")) in historical_capacity_keys
+                for marker in metadata.get("numeric_authorizations", [])):
+            return ()
         plan = proof["spell_origin_plan"]
         preserved = ("profile", "proficiencies", "reference_notes")
         if proof["schema_version"] == 7:
@@ -2558,10 +2688,10 @@ def _verified_spell_grant_migration_custody(connection, campaign, character, aud
         if (any(plan.get(key) != proof.get(key) for key in (
                 "prior_generation", "prior_definition_digest", "prior_state_revision"))
                 or any(prior_payload.get(name) != payload.get(name) for name in preserved)
-                or _digest(_admission_feature_rows(prior, proof) if proof["schema_version"] in {6, 7} else prior.features)
+                or _digest(_admission_feature_rows(prior, proof) if proof["schema_version"] in {6, 7, 8} else prior.features)
                     != _digest(candidate.features)):
             return ()
-        if proof["schema_version"] in {5, 6, 7}:
+        if proof["schema_version"] in {5, 6, 7, 8}:
             checkpoint = plan.get("current_checkpoint")
             if (plan.get("schema_version") not in {3, 4, 5} or type(checkpoint) is not dict
                     or any(checkpoint.get(key) != value for key, value in (
@@ -2654,7 +2784,7 @@ def verified_requalification_batch(connection: Any, campaign: str, character: st
             decision_renewals = []
             checkpoint_keys = set()
             current_proof = current["metadata"].get("native_requalification")
-            if isinstance(current_proof, dict) and current_proof.get("schema_version") in {5, 6, 7}:
+            if isinstance(current_proof, dict) and current_proof.get("schema_version") in {5, 6, 7, 8}:
                 from .character_spell_reconstruction import checkpoint_choice_ids
                 checkpoint_keys = {f"spell_choice:{identity}" for identity in checkpoint_choice_ids(
                     current_proof["spell_origin_plan"]["current_checkpoint"], current_definition)}

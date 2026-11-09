@@ -340,9 +340,11 @@ def _numeric_witness_identity(witness: dict[str, Any]) -> str:
     from .character_source_repair import NativeAggregateWitness, NativeSpellChoiceDecision
     from .character_spell_reconstruction import NativeSpellReconstructionFact
     from .character_language_electives import NativeElectiveDecision, PendingElectiveOutcome
-    from .character_external_proficiencies import ExternalProficiencyCustody
-    if type(witness) is ExternalProficiencyCustody:
-        return _canonical({"witness": dict(witness), "external_proficiency_origin": witness.origin})
+    from .character_external_proficiencies import ExternalProficiencyCustody, PendingExternalProficiency
+    if type(witness) in (ExternalProficiencyCustody, PendingExternalProficiency):
+        return _canonical({"witness": dict(witness), "external_proficiency_origin": witness.origin,
+                           **({"external_proficiency_type": type(witness).__name__}
+                              if type(witness) is PendingExternalProficiency else {})})
     if type(witness) in (NativeElectiveDecision, PendingElectiveOutcome):
         return _canonical({"witness": dict(witness), "elective_decision_type": type(witness).__name__,
             "elective_decision_origin": witness.origin})
@@ -657,10 +659,10 @@ def _plain_numeric_witness_data(witnesses):
     from .character_spell_grants import NativeGrantCustody
     from .character_spell_reconstruction import NativeSpellReconstructionFact
     from .character_language_electives import NativeElectiveDecision, PendingElectiveOutcome
-    from .character_external_proficiencies import ExternalProficiencyCustody
+    from .character_external_proficiencies import ExternalProficiencyCustody, PendingExternalProficiency
     supported = (NativeAggregateWitness, NativeSpellChoiceDecision, NativeGrantCustody,
                  NativeSpellReconstructionFact, NativeElectiveDecision, PendingElectiveOutcome,
-                 ExternalProficiencyCustody)
+                 ExternalProficiencyCustody, PendingExternalProficiency)
     data = []
     remaining = 32768
     for witness in witnesses:
@@ -3130,7 +3132,7 @@ def _validated_spell_checkpoint_result(result, prior_record, candidate, state, a
     from .character_source_reads import phase_of
     if (type(result) is not NativeRequalification or type(result.spell_checkpoint) is not PendingSpellCheckpoint
             or result.candidate.to_dict() != candidate.to_dict() or state != prior_record.state_record.state
-            or result.provenance.get("schema_version") not in {5, 6, 7}):
+            or result.provenance.get("schema_version") not in {5, 6, 7, 8}):
         raise ValueError("Current spell confirmation needs its exact native issuer-bound result.")
     checkpoint = result.spell_checkpoint
     data = checkpoint.checkpoint
@@ -4094,7 +4096,7 @@ def _recognized_managed_resource_targets(definition: CharacterDefinition, featur
 
 def _qualified_current_managed_templates(
     authority: SourceAuthority, definition: CharacterDefinition, *,
-    systems_service: Any, campaign_page_records: list[Any] | None,
+    systems_service: Any, campaign_page_records: list[Any] | None, armor_selectors=None,
 ) -> dict[str, dict[str, Any] | None]:
     """Separate an audited historical owner from its qualified current capacity.
 
@@ -4120,7 +4122,8 @@ def _qualified_current_managed_templates(
     pools = _current_managed_pool_owners(
         definition, systems_service=systems_service, pages=pages,
         verified_class_rows=authority.verified_class_rows, feature_statuses=authority.statuses,
-        feature_composition=authority.feature_composition, tracker_bindings=authority.tracker_associations,
+        feature_composition=authority.feature_composition, armor_selectors=armor_selectors,
+        tracker_bindings=authority.tracker_associations,
     )
 
     def exact_entry(row: dict[str, Any], entry_types: set[str]) -> Any | None:
@@ -4224,7 +4227,8 @@ def _qualified_current_managed_templates(
             if (parent is None or not callable(collector)
                     or entry.entry_key not in {child.entry_key for child in collector(
                         definition.campaign_slug, parent, attained_level=level,
-                        selected_feature_branches=_armor_structure(definition, systems_service))}):
+                        selected_feature_branches=(_armor_structure(definition, systems_service)
+                            if armor_selectors is None else armor_selectors))}):
                 return None
         elif existing_singleton and tracker_id not in pools and current.get("subclass_name") and entry.entry_type != "feature":
             subclass_ref = dict(owner.get("subclass_ref") or {})

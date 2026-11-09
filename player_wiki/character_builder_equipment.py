@@ -342,7 +342,16 @@ def _structured_defensive_rules_from_features(
     features: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
     rules: list[dict[str, Any]] = []
-    for row in _character_mechanic_effect_rows(features, kind="defensive_rule"):
+    for feature in list(features or []):
+        if not isinstance(feature, dict) or feature.get("mechanics_suppressed"):
+            continue
+        rules.extend(_feature_defensive_rules(feature))
+    return rules
+
+
+def _feature_defensive_rules(feature: dict[str, Any]) -> list[dict[str, Any]]:
+    rules: list[dict[str, Any]] = []
+    for index, row in enumerate(_feature_mechanic_effect_rows(feature, kind="defensive_rule")):
         rule = dict(row.get("rule") or row.get("defensive_rule") or row.get("defensiveRule") or {})
         for key in ("id", "title", "active", "condition", "inactive_reason", "effects"):
             if key in row and key not in rule:
@@ -358,6 +367,8 @@ def _structured_defensive_rules_from_features(
         rules.append(
             {
                 "id": str(rule.get("id") or row.get("key") or f"feature:{slugify(str(rule.get('title') or 'rule'))}").strip(),
+                "source_feature_id": str(feature.get("id") or "").strip(),
+                "source_effect_index": index,
                 "title": str(rule.get("title") or row.get("label") or "Defensive rule").strip() or "Defensive rule",
                 "active": active_value if isinstance(active_value, bool) else True,
                 "condition": str(rule.get("condition") or "").strip(),
@@ -365,6 +376,28 @@ def _structured_defensive_rules_from_features(
                 "effects": effects,
             }
         )
+    return rules
+
+
+def _item_defensive_rules_from_entry(item_effect_entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """The generic item producer, including its established no-ID fallback."""
+    rules: list[dict[str, Any]] = []
+    for index, rule_payload in enumerate(list(item_effect_entry.get("defensive_rules") or [])):
+        rule = dict(rule_payload or {})
+        effects = [dict(effect or {}) for effect in list(rule.get("effects") or [])
+                   if isinstance(effect, dict)]
+        if not effects:
+            continue
+        rules.append({
+            "id": str(rule.get("id") or f"item:{slugify(str(item_effect_entry.get('item_name') or 'rule'))}").strip(),
+            "source_item_id": str(item_effect_entry.get("item_id") or "").strip(),
+            "source_rule_index": index,
+            "title": str(rule.get("title") or item_effect_entry.get("item_name") or "Item rule").strip() or "Item rule",
+            "active": True,
+            "condition": str(rule.get("condition") or "").strip(),
+            "inactive_reason": "",
+            "effects": effects,
+        })
     return rules
 
 
@@ -2958,25 +2991,7 @@ def _derive_defensive_state_from_character_inputs(
         equipment_catalog,
         item_catalog=item_catalog,
     ):
-        for rule_payload in list(item_effect_entry.get("defensive_rules") or []):
-            rule = dict(rule_payload or {})
-            effects = [
-                dict(effect or {})
-                for effect in list(rule.get("effects") or [])
-                if isinstance(effect, dict)
-            ]
-            if not effects:
-                continue
-            rules.append(
-                {
-                    "id": str(rule.get("id") or f"item:{slugify(str(item_effect_entry.get('item_name') or 'rule'))}").strip(),
-                    "title": str(rule.get("title") or item_effect_entry.get("item_name") or "Item rule").strip() or "Item rule",
-                    "active": True,
-                    "condition": str(rule.get("condition") or "").strip(),
-                    "inactive_reason": "",
-                    "effects": effects,
-                }
-            )
+        rules.extend(_item_defensive_rules_from_entry(item_effect_entry))
     rules.extend(_structured_defensive_rules_from_features(features))
     return {
         "armor_state": armor_state,
