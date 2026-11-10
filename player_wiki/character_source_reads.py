@@ -140,6 +140,17 @@ class SourceReadOwner:
             raise SourceReadConflict("Publication source reservation is unavailable.")
         return cls(connection, campaign_slug, character_slug, _mode=_RESERVED_READ)
 
+    @classmethod
+    def _after_state_action_reserve(cls, connection, campaign_slug, character_slug):
+        # Ordinary actions have captured their durable original after BEGIN
+        # IMMEDIATE. This capability never grants publication ownership.
+        from .character_store import source_writer_reserved
+        if not source_writer_reserved(connection):
+            raise SourceReadConflict("State action source reservation is unavailable.")
+        owner = cls(connection, campaign_slug, character_slug, _mode=_RESERVED_READ)
+        owner._state_action = True
+        return owner
+
     def require_live(self):
         if not self._open or self._failed or self._write_started:
             raise SourceReadConflict("Native source owner is no longer usable.")
@@ -231,6 +242,11 @@ class SourceReadOwner:
         self._write_started = True
         self._open = False
         self._last_guard = None
+
+    def before_state_write(self):
+        if not getattr(self, "_state_action", False):
+            raise SourceReadConflict("State action ownership is unavailable.")
+        self.before_publication_write()
 
     def checkpoint(self):
         """Fresh post-callback guard, never a reusable positive admission."""
@@ -375,7 +391,7 @@ class SourceReadPhase:
                 "state": dict(state), "pages": pages,
                 "identity": source_identity(connection, campaign, character),
                 "audit": _audit_prefix(connection, campaign, character)}
-        if self.purpose == "selected-character-read":
+        if self.purpose in {"selected-character-read", "ordinary-state-action"}:
             # Numeric witnesses query historical generations directly, outside
             # the Systems readset. Compare every column and row again freshly.
             basis["character_history"] = [dict(row) for row in connection.execute(

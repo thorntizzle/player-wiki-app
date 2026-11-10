@@ -1068,12 +1068,12 @@ Phase Systems views reuse detached normalized captured policy and its base
 cache context within that phase only. Dynamic selected-entry subset identities
 are recomputed on each call; the full fresh basis/readset guard remains.
 
-Ordinary successful activated DND Quick GET/HEAD construction shares one
+Ordinary successful activated DND Quick/Inventory GET/HEAD construction shares one
 selected-character source phase through completed HTML rendering. Selected
 Session Character GET/HEAD construction starts its phase after the independent
 roster-card phases and closes before returning template context. Both pass
 local Systems/page-store readers; no application extension or Flask global is
-rebound. Rest previews, writes, error responses, other systems, custom providers
+rebound. Rest previews, error responses, other systems, custom providers
 and ambient transactions retain their existing paths.
 
 `character_request_context.py` owns a separate phase-local common qualification
@@ -1086,6 +1086,25 @@ clears the memo and checks fresh source/state/audit/Systems facts plus every row
 and column of the selected character's committed generation history; history
 is needed because numeric witnesses read historical generations outside the
 Systems readset. No phase handle or authority enters returned Session context.
+
+Ordinary activated DND HP, notes and currency actions can use a separate
+state-action source capability only after their own successful writer reserve
+and fresh durable original-record capture. Every current-record check and full
+numeric projection still runs. Equivalent common qualification reuses detached
+facts inside that reservation; proposed state remains separately validated.
+Fresh uncached basis/history/Systems guards run on repeated consumption and
+before the first store write, with final request/actor/provider/input checks.
+Closure invalidates the capability before state-store CAS and its existing
+validation. Caller-owned nested/publication reservations, other actions,
+custom providers and offline contexts retain their prior path. No new commit,
+invalidation, retry, durable snapshot or cross-request authority is introduced.
+
+`pure_observations.py` separately pools successful stock YAML content by exact
+text and fixed parser recipe. Its finite immutable entries detach each consumer;
+aliases, cycles, unsupported values, small/oversized inputs and changed parser
+policy retain ordinary parsing. Parsing runs outside the metadata lock. Source
+rows, health, admission and access proofs remain fresh on every original call;
+this content pool grants no authorization or positive source verdict.
 
 ### Private item and spell read inputs
 
@@ -1128,7 +1147,8 @@ recipes. Complete historical witness loading/serialization and current HP source
 recipe, ownership and value checks remain unchanged.
 
 Finite original provider/copy recipes admit stock inputs before native entry;
-unknown/custom/nonphase/reserved/prospective contexts keep legacy calls. The
+unknown/custom/nonphase/prospective contexts and reservations other than the
+explicit ordinary-state action keep legacy calls. The
 private capture binds definition/state/revision, full evidence, current statuses,
 source snapshot, phase and request actor. Representation size/depth/node bounds
 limit retained validation facts; adapters return detached ordinary values. Drift

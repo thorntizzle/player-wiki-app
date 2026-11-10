@@ -451,7 +451,9 @@ class CharacterRepository:
         from .committed_source_store import _character_system_code
 
         try:
-            definition = yaml.safe_load(source["primary_bytes"].decode("utf-8"))
+            from .pure_observations import load_yaml_text
+            parse = yaml.safe_load
+            definition = load_yaml_text(source["primary_bytes"].decode("utf-8"), parse=parse)
             if (not isinstance(definition, dict)
                     or definition.get("campaign_slug") != campaign_slug
                     or definition.get("character_slug") != slug
@@ -467,7 +469,9 @@ class CharacterRepository:
         from .committed_publication import CommittedSourceConflict
 
         try:
-            imported = yaml.safe_load(source["secondary_bytes"].decode("utf-8"))
+            from .pure_observations import load_yaml_text
+            parse = yaml.safe_load
+            imported = load_yaml_text(source["secondary_bytes"].decode("utf-8"), parse=parse)
             if (not isinstance(imported, dict)
                     or imported.get("campaign_slug") != campaign_slug
                     or imported.get("character_slug") != slug):

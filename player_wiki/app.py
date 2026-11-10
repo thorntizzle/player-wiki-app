@@ -3034,7 +3034,7 @@ def create_app() -> Flask:
             use_source_phases=has_request_context() and request.method in {"GET", "HEAD"},
         )
 
-    def prospective_character_numeric_authority(campaign, definition, state, state_revision, *, source_read_phase=None):
+    def prospective_character_numeric_authority(campaign, definition, state, state_revision, *, source_read_phase=None, state_action_record=None):
         from .committed_publication import active
         from .character_mechanics_projection import (
             CharacterNumericProjectionError, _CharacterProjectionDiagnostics,
@@ -3050,34 +3050,49 @@ def create_app() -> Flask:
             failure_diagnostics = _CharacterProjectionDiagnostics()
         except BaseException:
             pass
-        projection = build_character_numeric_projection(
-            campaign=campaign,
-            definition=definition,
-            state=state,
-            state_revision=state_revision,
-            systems_service=source_read_phase.systems_view() if source_read_phase is not None else get_systems_service(),
-            campaign_page_records=source_read_phase.character_pages() if source_read_phase is not None else list_visible_character_page_records(campaign.slug, campaign),
-            _failure_diagnostics=failure_diagnostics,
-        )
-        if any(row.get("code") in {"read_time_projection_failed", "transient_mechanics_projection_failed"}
-               for row in list(projection.get("projection_warnings") or [])):
-            failure = CharacterNumericProjectionError("Character numeric authority could not be projected.")
-            try:
-                warning_mask = 0
-                for warning in list(projection.get("projection_warnings") or []):
-                    code = warning.get("code")
-                    if code == "read_time_projection_failed":
-                        warning_mask |= 1
-                    elif code == "transient_mechanics_projection_failed":
-                        warning_mask |= 2
-                failure._attach_projection_diagnostic(warning_mask, failure_diagnostics)
-            except BaseException:
-                pass
-            raise failure
-        authority = projection.get("source_authority")
-        if authority is None or authority.state_revision != state_revision:
-            raise CharacterNumericProjectionError("Character numeric authority is unavailable.")
-        return authority
+        unsupplied = object()
+        def project(phase, systems=unsupplied, page_store=unsupplied):
+            projection = build_character_numeric_projection(
+                campaign=campaign,
+                definition=definition,
+                state=state,
+                state_revision=state_revision,
+                systems_service=phase.systems_view() if phase is not None else (systems if systems is not unsupplied else get_systems_service()),
+                campaign_page_records=phase.character_pages() if phase is not None else (list_visible_character_page_records_for_store(page_store, campaign.slug, campaign, include_body=True, excluded_sections={"Sessions"}) if page_store is not unsupplied else list_visible_character_page_records(campaign.slug, campaign)),
+                _failure_diagnostics=failure_diagnostics,
+            )
+            if any(row.get("code") in {"read_time_projection_failed", "transient_mechanics_projection_failed"}
+                   for row in list(projection.get("projection_warnings") or [])):
+                failure = CharacterNumericProjectionError("Character numeric authority could not be projected.")
+                try:
+                    warning_mask = 0
+                    for warning in list(projection.get("projection_warnings") or []):
+                        code = warning.get("code")
+                        if code == "read_time_projection_failed":
+                            warning_mask |= 1
+                        elif code == "transient_mechanics_projection_failed":
+                            warning_mask |= 2
+                    failure._attach_projection_diagnostic(warning_mask, failure_diagnostics)
+                except BaseException:
+                    pass
+                raise failure
+            authority = projection.get("source_authority")
+            if authority is None or authority.state_revision != state_revision:
+                raise CharacterNumericProjectionError("Character numeric authority is unavailable.")
+            return authority
+
+        from .character_request_context import state_action_authority, has_state_action_observation
+        if state_action_record is not None and has_state_action_observation(character_state_service):
+            # Select each original supplied provider once, after the ordinary
+            # activation/diagnostic checks. A declined phase consumes those same
+            # supplied objects through the unchanged page-selection recipe.
+            systems, page_store = get_systems_service(), get_campaign_page_store()
+            return state_action_authority(
+                character_state_service, state_action_record, campaign=campaign,
+                systems_service=systems, page_store=page_store,
+                producer=lambda phase: project(phase, systems, page_store),
+            )
+        return project(source_read_phase)
 
     def current_character_numeric_authority(record):
         """Rebuild a service-write authority from current durable and source inputs."""
@@ -3096,7 +3111,7 @@ def create_app() -> Flask:
             raise ValueError("Character changed before this state action. Refresh and try again.")
         return prospective_character_numeric_authority(
             campaign, current.definition, current.state_record.state,
-            current.state_record.revision,
+            current.state_record.revision, state_action_record=current,
         )
 
     def present_assignment_read(record, *, campaign=None):
@@ -5022,7 +5037,7 @@ def create_app() -> Flask:
         with selected_character_read_context(
             record, campaign=campaign, systems_service=get_systems_service(),
             page_store=get_campaign_page_store(),
-            enabled=(scoped_dnd_read and requested_character_subpage in {"", "quick"}
+            enabled=(scoped_dnd_read and requested_character_subpage in {"", "quick", "inventory"}
                 and request.method in {"GET", "HEAD"} and status_code == 200
                 and not protected_conflict and notes_draft is None
                 and physical_description_draft is None and background_draft is None

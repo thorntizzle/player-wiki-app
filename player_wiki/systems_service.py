@@ -6744,8 +6744,9 @@ class PhaseCharacterReadSystemsService(CharacterReadSystemsService):
         result = super()._build_builder_static_revision(
             campaign_slug, library=library, entry_types=entry_types, revision=revision)
         phase = self.source_read_phase
-        if (result is None or phase.purpose != "selected-character-read"
-                or phase.owner._reserved or type(phase._service) is not SystemsService):
+        if (result is None or phase.purpose not in {"selected-character-read", "ordinary-state-action"}
+                or (phase.owner._reserved and not getattr(phase.owner, "_state_action", False))
+                or type(phase._service) is not SystemsService):
             return result
         # Plain Quick readers never included the CharacterRead subset suffix
         # in authority revision identity. Preserve that originating shape while

@@ -231,7 +231,9 @@ def _yaml_mapping_cache_charge(raw: bytes, mapping: dict) -> int | None:
 
 
 def _parse_yaml_bytes_uncached(value: bytes) -> Any:
-    return yaml.safe_load(value.decode("utf-8"))
+    from .pure_observations import load_yaml_text
+    parse = yaml.safe_load
+    return load_yaml_text(value.decode("utf-8"), parse=parse)
 
 
 def _load_committed_yaml(value: bytes) -> Any:

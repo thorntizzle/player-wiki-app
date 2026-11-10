@@ -1982,6 +1982,8 @@ class CharacterStateService:
             write_kwargs["assignment_intent"] = assignment_intent
         if not commit or activated:
             write_kwargs["commit"] = False
+        from .character_request_context import before_state_observation_write
+        before_state_observation_write(self)
         result = self.state_store.replace_state(record.definition, state, **write_kwargs)
         if assignment_intent is not None:
             import json
@@ -2301,6 +2303,8 @@ def _committed_state_action(method):
         if not active():
             return method(self, record, *args, **kwargs)
         from .committed_character_publication import load_for_write
+        from .db import get_db
+        owns_reservation = not get_db().in_transaction
         with source_write_transaction():
             current = load_for_write(
                 SimpleNamespace(state_store=self.state_store),
@@ -2314,7 +2318,12 @@ def _committed_state_action(method):
                 raise CharacterStateConflictError(
                     "Character source or state changed before the requested action."
                 )
-            return method(self, current, *args, **kwargs)
+            from .character_request_context import ordinary_state_action_observation
+            with ordinary_state_action_observation(self, current, enabled=(
+                    owns_reservation and type(self) is CharacterStateService
+                    and method.__name__ in {"update_vitals", "update_currency", "update_player_notes"}
+                    and is_dnd_5e_system(current.definition.system))):
+                return method(self, current, *args, **kwargs)
     return wrapped
 
 

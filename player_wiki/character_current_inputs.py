@@ -203,8 +203,10 @@ def current_input_compilation(*, definition, state, state_revision, statuses,
             or type(frame.get("ability_layers")) is not dict):
         return None
     phase = systems_service.source_read_phase
-    if (type(phase) is not SourceReadPhase or phase.owner._reserved or type(phase.purpose) is not str
-            or phase.purpose not in {"assignment-read", "character-shell-read", "character-section-read", "selected-character-read"}
+    if (type(phase) is not SourceReadPhase
+            or (phase.owner._reserved and not (phase.purpose == "ordinary-state-action"
+                and getattr(phase.owner, "_state_action", False))) or type(phase.purpose) is not str
+            or phase.purpose not in {"assignment-read", "character-shell-read", "character-section-read", "selected-character-read", "ordinary-state-action"}
             or not _ordinary_recipes()
             or _actor() is None):
         return None

@@ -274,7 +274,7 @@ Last updated: 2026-10-19
 - Reimports may refresh stable sheet structure, but must preserve live mutable state and safe native-managed overlays.
 - Combat JSON reads expose `selected_player_combat_sections` for the selected tracked PC. Those sections are read-only projections of presented character data; durable combat edits still use the normal combat or character-state mutation lanes.
 
-Activated DND Quick GET/HEAD and selected Session Character GET/HEAD reads use
+Activated DND Quick/Inventory GET/HEAD and selected Session Character GET/HEAD reads use
 a selected-character source phase after the existing access checks. Session
 roster cards keep their independent phases. Common source qualification may be
 reused only for complete matching request/actor/provider, definition, state and
@@ -282,8 +282,13 @@ normalized page inputs inside that phase; each display recipe still derives
 its own catalogs, transient effects and final numbers. The closing guard also
 compares the selected character's complete committed generation history.
 Detached display values leave only after the guard succeeds. Rest previews,
-custom providers, ambient transactions, error responses and mutation paths
-retain their existing behavior; no durable Character snapshot is introduced.
+custom providers, ambient transactions and error responses retain their existing
+behavior. Ordinary HP, notes and currency saves can share equivalent original-
+record qualification after their own writer reservation and durable capture.
+Every numeric producer and proposed-state validation still runs; fresh raw
+source/history/Systems guards and actor/provider checks close the observation
+before the first state-store write. Borrowed nested/publication reservations
+retain their prior path. No durable Character snapshot is introduced.
 
 ## Route And Component Ownership
 

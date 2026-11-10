@@ -11,6 +11,10 @@ from urllib.parse import quote
 import markdown
 import yaml
 
+# Capture the fixed native parser recipe during app imports, before extensions
+# can configure YAML callbacks. Each call still supplies its selected callback.
+from .pure_observations import load_yaml_text
+
 from .models import Campaign, Page, WikiLinkIndex, is_session_summary_page, page_sort_key, session_summary_sort_key
 from .rich_text import sanitize_rich_html
 from .system_policy import default_systems_library_slug, normalize_system_code
@@ -42,7 +46,8 @@ def parse_frontmatter(raw_text: str) -> tuple[dict[str, Any], str]:
     if not match:
         return {}, normalized
 
-    metadata = yaml.safe_load(match.group(1)) or {}
+    parse = yaml.safe_load
+    metadata = load_yaml_text(match.group(1), parse=parse) or {}
     body = normalized[match.end() :]
     return metadata, body
 
